@@ -1,0 +1,15 @@
+# Ghidra lock files
+*.lock
+*.lock~
+
+# ignore the game folder
+English Translated Version 1.1 (D)/
+
+# Temporary files
+*.bak
+*.tmp
+*.orig
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,4 @@
+# Ghidra project files are binary — use Git LFS
+*.gpr binary
+*.prp binary
+ghidra/Akuji_AIdecompAttempt.rep/** binary
