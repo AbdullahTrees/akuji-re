@@ -2,3 +2,4 @@
 *.gpr binary
 *.prp binary
 ghidra/Akuji_AIdecompAttempt.rep/** binary
+ghidra/Akuji_AIdecompAttempt.rep/** filter=lfs diff=lfs merge=lfs -text
