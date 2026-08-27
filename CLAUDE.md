@@ -21,10 +21,9 @@ Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 **Audio works**: 57 effects and 15 MIDI tracks, both readers cross-checked
 against independent Python implementations (section 13).
 
-**Next:** the entity system - the ~0x104-byte record, the state 60/100/140
-update path, collision, the player controller. The event scripts' *grammar* is
-solved (section 8); finding the interpreter is what would give the sub-opcodes
-their meaning, and it is likely near the state 100/140 handlers.
+**Next:** the entity system - the ~0x104-byte record, the state 60 update path,
+collision, the player controller. The event scripts are now fully decoded,
+grammar and sub-opcodes both (section 8).
 
 ## 2. The three layers — most important section
 
@@ -158,7 +157,7 @@ immediately. That busy loop is the game's frame tick. Per frame:
 | 60 | `FUN_00454790`, `FUN_00461ba8` — **normal gameplay**; a finished event script returns here |
 | 100 | `GameOver_Update` (`0x461a44`), `FUN_00461ba8` — **game over** |
 | 130 | `FUN_00461ee4` — **pause**; saves prior state to `0x46cbbc` |
-| 140 | `FUN_00454790`, `FUN_00455210`, `FUN_00461ba8` — **event-script runner**; `0x455210` is the interpreter and is NOT yet disassembled |
+| 140 | `FUN_00454790`, `EventScript_Execute` (`0x455210`), `FUN_00461ba8` — **event-script runner** |
 | 150 | `FUN_00463624` |
 | 999 | **quit** — nils `FOnIdle`, calls `FUN_00442a40` |
 
@@ -318,9 +317,10 @@ the code:
 | `EventScript_AdvanceStep` `0x45509C` | `StringReplace(step, '.', ',')` then `CommaText` |
 
 Both were read out of the binary as one-character `AnsiString` literals
-(refcount `-1`) at `0x455098`/`0x45508C` and `0x45520C`/`0x455200`. The
-sub-opcode *meanings* are still open - they live in `0x455210`, which is not
-disassembled - so those stay numbered.
+(refcount `-1`) at `0x455098`/`0x45508C` and `0x45520C`/`0x455200`.
+
+**The sub-opcodes are decoded too**, from `EventScript_Execute` `0x455210` —
+the state-140 handler, which had to be created by hand in the GUI.
 
     ParamA   <4-digit type>-<letter>[-arg...]    type 14..80, letters * A / M R J
     ParamB   step / step                         steps run in order
@@ -336,6 +336,47 @@ carries its own length. Arities: 0->5, 3->1, 4->1, 5->1, 7->0, 8->0, 9->1,
 Two sub-opcodes have outside support. **3 is dialogue** - its argument indexes
 the stage's own `tk*.dat`, and all 149 references land in range. **15 is a
 list** - arg[1] is a count and exactly that many items follow, true for all 13.
+
+#### The interpreter reads fixed positions, not dash-separated fields
+
+`EventScript_Execute` does not split on `-`. It pulls fixed character ranges:
+`Copy(alt, 6, 2)` for the sub-opcode, then arguments at 9, 14, 19, 24, 29 with
+widths that vary per sub-opcode. **That is why every number in the data is
+zero-padded** — the padding is load-bearing. It also explains `0030-M-0-0128--4`
+without needing `-` to be overloaded.
+
+`EventCommands.pas` splits on `-` anyway, because it is more legible and rejects
+malformed input rather than reading whatever sits at an offset. The two are
+verified equivalent: `--selftest-script` reads every argument both ways and
+compares — **988 arguments, 0 disagreements**.
+
+#### What the sub-opcodes do
+
+| op | args | effect |
+|---|---|---|
+| 0 | 5 | load stage; player/camera tiles from a2..a5, then state 30 |
+| 3 | 1 | **dialogue** — show line a1 of the stage's `tk` file |
+| 4 / 5 | 1 | `Progress[a1] := 1` / `:= 0` |
+| 7 | 0 | disable this event (`Opcode := -1`, x,y := `-0x20`) |
+| 8 | 0 | destroy this event's entity |
+| 9 | 1 | play sound effect a1 through `DDSD1` |
+| 10 | 0 | calls `0x456698` when `0x46CD00` is clear |
+| 12 | 3 | play music: MIDI index + two 1-char flags |
+| 13 | 0 | **save** — writes `PlayerState` over `data\save.dat`, `0x11E4` bytes |
+| 15 | var | test a list of flags, then set one |
+| 16 | 1 | sets `+0x20` on this event's entity |
+| 17 | 1 | **wait** a1 frames (6 chars), then advance |
+| 80 | 0 | plays sound `0x10` and MIDI 11 (`soulget`), then state 150 |
+| 99 | 0 | do nothing; advance |
+
+Ops 1, 6, 11 and 14 exist in the interpreter but never occur in the shipped
+data. **Every argument count above matches the arity inferred earlier from the
+data alone** — that agreement is what confirms the field split.
+
+Sub-op 15 is `<guard>-15-<flag to set>-<count>-<item>...`, where each 6-char
+item is a 1-char expected value plus a 4-char flag index, compared against `'1'`
+(`0x456000`) and `'0'` (`0x45600C`). So `14000` means "flag 4000 must be 1" and
+`04000` means "must be 0" — which is why both forms appear.
 
 #### The leading number is a guard, not a target
 
@@ -406,8 +447,7 @@ it out: index 4 is `itemget`, a jingle, yet 13 rows carry csv 15 = 4, and
 `--selftest-stages` pins all of the above, including the single row-58
 exception.
 
-Still open: what the sub-opcodes mean, what csv 5 and csv 15 select, and the
-entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
+Still open: what csv 5 and csv 15 select, and the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
 progress-flag block is no longer a mystery: an opcode-5 event sets
 `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
 inside the block, and csv 2 holds that same number - the two agree 154/154.

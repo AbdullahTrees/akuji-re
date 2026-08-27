@@ -770,6 +770,7 @@ var
   Records, Spawns, BadSpawn, Cmds, BadArity, Dialogue, BadDialogue, Lists: Integer;
   Negatives, N: Integer;
   Nones, Ids, Progs, ShapeMismatch, BadKindArity, BadGuard: Integer;
+  PosChecked, PosMismatch, AStart, ALen, PosVal: Integer;
   GuardSeen: array[0..PROGRESS_LENGTH - 1] of Boolean;
   DistinctGuards: Integer;
   Kind: TParamBKind;
@@ -785,7 +786,7 @@ begin
   Records := 0; Spawns := 0; BadSpawn := 0; Cmds := 0; BadArity := 0;
   Dialogue := 0; BadDialogue := 0; Lists := 0; Negatives := 0;
   Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0; BadKindArity := 0;
-  BadGuard := 0; DistinctGuards := 0;
+  BadGuard := 0; DistinctGuards := 0; PosChecked := 0; PosMismatch := 0;
   for I := 0 to PROGRESS_LENGTH - 1 do
     GuardSeen[I] := False;
   MinType := MaxInt; MaxType := -1;
@@ -893,6 +894,25 @@ begin
             if Cmd.SubOp = SUBOP_LIST then
               Inc(Lists);
 
+            { Read the SAME alternative the way EventScript_Execute does - fixed
+              character positions - and require it to agree with the dash split.
+              The two strategies are independent, so agreement over the whole
+              data set is what says the field boundaries are right. }
+            for N := 0 to Cmd.ArgCount - 1 do
+              if ArgPosition(Cmd.SubOp, N, AStart, ALen) then
+              begin
+                Inc(PosChecked);
+                PosVal := StrToIntDef(Trim(Copy(Cmd.Raw, AStart, ALen)), MaxInt);
+                if PosVal <> Cmd.Args[N] then
+                begin
+                  Log.Add(Format('  stage %d event %d: sub-op %d arg %d - split says %d,'
+                    + ' position %d..%d says %d: %s',
+                    [I, J, Cmd.SubOp, N, Cmd.Args[N], AStart, AStart + ALen - 1,
+                     PosVal, Cmd.Raw]));
+                  Inc(PosMismatch);
+                end;
+              end;
+
             { Sub-op 3's argument must index this stage's own dialogue file.
               This is the check that ties the grammar to a second file. }
             if Cmd.SubOp = SUBOP_DIALOGUE then
@@ -927,6 +947,8 @@ begin
   Log.Add(Format('  sub-op 15 lists:   %d  (count field matched every time)', [Lists]));
   Log.Add(Format('  guards:            %d distinct, all inside the %d-byte progress block (%d outside)',
     [DistinctGuards, PROGRESS_LENGTH, BadGuard]));
+  Log.Add(Format('  dash-split vs the interpreter''s fixed positions: %d args compared, %d disagree',
+    [PosChecked, PosMismatch]));
   Log.Add(Format('negative arguments:  %d', [Negatives]));
   Log.Add('');
   Log.Add('sub-opcode histogram:');
@@ -936,7 +958,7 @@ begin
   Log.Add('');
 
   Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch + BadKindArity
-              + BadGuard);
+              + BadGuard + PosMismatch);
 
   { Same trap as --selftest-events: an empty load must not pass. These are the
     counts in the shipped data. }
@@ -961,6 +983,12 @@ begin
   begin
     Log.Add(Format('FAILED: expected 22 negative arguments, got %d'
       + ' - ParseFields is losing or inventing minus signs', [Negatives]));
+    Inc(Result);
+  end
+  else if PosChecked <> 988 then
+  begin
+    Log.Add(Format('FAILED: expected 988 positional args compared, got %d',
+      [PosChecked]));
     Inc(Result);
   end
   else if DistinctGuards <> 23 then

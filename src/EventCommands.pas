@@ -20,12 +20,75 @@
   first pair and 0x0045520C and 0x00455200 for the second. This is the program
   itself saying what its separators are, not an inference from the data.
 
-  What is still NOT decoded is the meaning of the individual sub-opcodes. That
-  lives in the state-140 handler at 0x00455210, which Ghidra has not
-  disassembled: a pair of string constants sits between it and the previous
-  function and breaks the flow (CLAUDE.md 3). A sub-opcode gets a name here only
-  when something outside this file agrees with it; everything else stays a
-  number.
+  The sub-opcodes are decoded too, from the interpreter itself:
+  EventScript_Execute @ 0x00455210, the state-140 handler. See the table below.
+
+  ## The interpreter reads FIXED POSITIONS, not dash-separated fields
+
+  This unit splits on '-'. The original does not - it pulls fixed character
+  ranges out of the string with Copy:
+
+      Copy(alt, 6, 2)     the sub-opcode
+      Copy(alt, 9, 4)     first argument      (widths vary by sub-opcode)
+      Copy(alt, 14, 4)    second
+      Copy(alt, 19, 4)    third
+      Copy(alt, 24, 4)    fourth
+      Copy(alt, 29, 4)    fifth
+
+  which is why every number in the data is zero-padded to a fixed width: the
+  padding is load-bearing, not cosmetic. It also explains '0030-M-0-0128--4'
+  cleanly, since a fixed-position read picks up the '-4' without needing to know
+  that '-' is overloaded.
+
+  The two strategies were compared over every alternative in the shipped data
+  and agree on all 505 fixed-arity ones. Splitting is kept here because it is
+  more legible and it rejects malformed input instead of silently reading
+  whatever sits at an offset - but the positions above are the ground truth, and
+  --selftest-script checks the two against each other.
+
+  ## Sub-opcodes, from EventScript_Execute
+
+      op  args  what it does
+      --  ----  ---------------------------------------------------------------
+       0   5    load stage: Settings[0] := a1; player and camera tiles from
+                a2..a5, scaled by the layer's tile size; GameState := 30
+       1   4    (never used in the shipped data) enter stage, spawn the player
+                at a1,a2 and GameState := 60
+       3   1    DIALOGUE - show line a1 of the stage's tk file
+       4   1    Progress[a1] := 1
+       5   1    Progress[a1] := 0
+       6   1    (unused) compare a1 (8 chars) against PlayerState+0x11C8
+       7   0    disable this event - Opcode := -1 and its x,y := -0x20
+       8   0    destroy this event's entity
+       9   1    play sound effect a1 through DDSD1
+      10   0    calls 0x00456698 when the flag at 0x0046CD00 is clear
+      11   1    (unused) PlayerState+0x11C8 += a1 (8 chars)
+      12   3    play music: a1 is a MIDI index, then two 1-char flags at
+                positions 13 and 15 comparing against '1' and '0'
+      13   0    SAVE - writes PlayerState over data\save.dat, 0x11E4 bytes
+      14   3    (unused) set a map tile
+      15   var  test a list of flags, then set one - see below
+      16   1    sets +0x20 on this event's entity
+      17   1    WAIT - a1 (6 chars) frames, then advance
+      80   0    plays sound 0x10 and MIDI 11 ('soulget'), destroys the entity,
+                reloads stage 0 and goes to GameState 150
+      99   0    do nothing; just advance to the next step
+
+  Every one of those argument counts matches the arity this unit had already
+  inferred from the data, which is the cross-check that the field split is
+  right.
+
+  ## Sub-op 15 in detail
+
+      <guard>-15-<flag to set>-<count>-<item><item>...
+
+  Count is 2 chars at position 14; each item is 6 chars starting at position 17,
+  being a 1-char expected value then a 4-char flag index. The expected value is
+  compared against '1' (0x00456000) and '0' (0x0045600C), so 14000 reads as
+  "flag 4000 must be 1" and 04000 as "flag 4000 must be 0". If every item
+  matches, Progress[a1] := 1.
+
+  That is why both 1nnnn and 0nnnn forms appear in the data.
 
   ## ParamA (csv 5) - what the event places
 
@@ -151,9 +214,27 @@ uses
   SysUtils, Classes;
 
 const
-  { Named only because something outside this file corroborates them. }
-  SUBOP_DIALOGUE = 3;    { arg[0] indexes the stage's tk file }
-  SUBOP_LIST     = 15;   { arg[1] is a count; that many items follow }
+  { All from EventScript_Execute @ 0x00455210. The four with no name in the
+    original sense - 1, 6, 11, 14 - never occur in the shipped data; they are
+    listed in the header but given no constant here, since nothing uses them. }
+  SUBOP_LOAD_STAGE   = 0;
+  SUBOP_DIALOGUE     = 3;    { arg[0] indexes the stage's tk file }
+  SUBOP_SET_FLAG     = 4;
+  SUBOP_CLEAR_FLAG   = 5;
+  SUBOP_DISABLE_EVENT = 7;
+  SUBOP_DESTROY      = 8;
+  SUBOP_PLAY_SOUND   = 9;
+  SUBOP_SUBMODE      = 10;
+  SUBOP_PLAY_MUSIC   = 12;
+  SUBOP_SAVE         = 13;
+  SUBOP_TEST_FLAGS   = 15;   { arg[1] is a count; that many items follow }
+  SUBOP_ENTITY_FIELD = 16;
+  SUBOP_WAIT         = 17;
+  SUBOP_SOUL_GET     = 80;
+  SUBOP_NOP          = 99;
+
+  { Kept as the old name so existing callers still compile. }
+  SUBOP_LIST = SUBOP_TEST_FLAGS;
 
   MAX_CMD_ARGS = 12;     { the widest observed is sub-op 15 with 7 }
 
@@ -259,6 +340,14 @@ function KindArity(Kind: Char): Integer;
   unknown letter fails, unlike an unknown sub-opcode - there are only six and a
   seventh would mean the grammar is incomplete. }
 function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
+
+{ The character position and width the interpreter reads argument N from, for
+  the given sub-opcode. Returns False when the sub-opcode has no argument N.
+  Positions are 1-based, matching Delphi's Copy and the addresses in the header.
+
+  This exists so --selftest-script can read the data the way the ORIGINAL does
+  and compare it against the dash-split parse. }
+function ArgPosition(SubOp, Index: Integer; out Start, Len: Integer): Boolean;
 
 { Number of alternatives across every step, for reporting. }
 function CommandCount(const Prog: TEventProgram): Integer;
@@ -505,6 +594,41 @@ begin
   Result := 0;
   for S := 0 to High(Prog) do
     Inc(Result, Length(Prog[S].Alternatives));
+end;
+
+function ArgPosition(SubOp, Index: Integer; out Start, Len: Integer): Boolean;
+begin
+  Start := 0;
+  Len := 0;
+  Result := True;
+  case SubOp of
+    SUBOP_LOAD_STAGE:
+      if (Index >= 0) and (Index <= 4) then
+      begin
+        Start := 9 + Index * 5;   { 9, 14, 19, 24, 29 }
+        Len := 4;
+      end
+      else
+        Result := False;
+    SUBOP_DIALOGUE, SUBOP_SET_FLAG, SUBOP_CLEAR_FLAG, SUBOP_PLAY_SOUND:
+      if Index = 0 then begin Start := 9; Len := 4; end else Result := False;
+    SUBOP_PLAY_MUSIC:
+      case Index of
+        0: begin Start := 9;  Len := 3; end;
+        1: begin Start := 13; Len := 1; end;
+        2: begin Start := 15; Len := 1; end;
+      else
+        Result := False;
+      end;
+    SUBOP_ENTITY_FIELD:
+      if Index = 0 then begin Start := 9; Len := 3; end else Result := False;
+    SUBOP_WAIT:
+      if Index = 0 then begin Start := 9; Len := 6; end else Result := False;
+  else
+    { 7, 8, 10, 13, 80, 99 take no arguments; 15 is variable and is checked by
+      its own rule rather than by position. }
+    Result := False;
+  end;
 end;
 
 function SelectAlternative(const Step: TEventStep;
