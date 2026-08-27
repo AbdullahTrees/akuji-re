@@ -183,9 +183,10 @@ new notes; `SDL_port_plan.md` predates this and uses it throughout.
 `ghidra_scripts/ExportAllFunctions.java` — clear the directory first, since it only
 writes and never deletes.
 
-**Contradicts this brief:** `SDL_port_plan.md` still assumes C + SDL2 throughout
-and targets several misidentified functions. It carries a warning header. Treat
-`notes/function_map.md` and this file as authoritative.
+`SDL_port_plan.md` has been **deleted** — it assumed C + SDL2 throughout and was
+built on the misidentifications in section 4. Everything worth keeping was folded
+into sections 10–14 below. It is recoverable at commit `77f415b` if needed.
+This file and `notes/function_map.md` are authoritative.
 
 ## 9. Tooling
 
@@ -193,3 +194,101 @@ Ghidra 12.0.4 with a GhidraMCP server on `127.0.0.1:8081/sse` (`.mcp.json` lives
 `devel/source`). It binds at session start — **if it drops, the session must be
 restarted; it will not reconnect.** Ghidra scripts can be compile-checked offline
 with `javac` against the install's jars rather than guessed at.
+
+---
+
+## 10. Recovered input mapping
+
+DirectInput scancodes from `DirectInput_Init` (`0x00453bdc`). These are the game's
+actual controls — reuse them directly rather than re-deriving:
+
+| DIK codes | Keys | Function |
+|---|---|---|
+| `0x2C`–`0x2E` | Z, X, C | action buttons |
+| `0x1E`–`0x20` | A, S, D | secondary actions |
+| `0x02`–`0x0B` | 1–0 | item / weapon selection |
+| `0x39` | Space | jump |
+| `0xC8`–`0xCD` | arrow keys | movement |
+| `0x47`–`0x51` | numpad | alternate movement |
+
+In the rebuilt source these become LCL `OnKeyDown` handling in `FormKeyDown`
+(already named in the form resource) or `TDDIDEX` polling.
+
+## 11. Asset formats — still to reverse
+
+None of these are decoded yet. The loading code reveals each format; the loaders
+are already partly identified in `notes/function_map.md`.
+
+| Path | Contents | Loader |
+|---|---|---|
+| `data\stage.dat` | stage definitions — tilemaps, entity placement, triggers | `Stage_Init` (`0x0046214c`) |
+| `data\surf\` | background / surface textures | `Load_Surface_Textures` (`0x00465e9c`) |
+| `data\spr\` | sprite sheets, probably with frame metadata | `Load_Sprite_Sheets` (`0x004660b8`) |
+| `data\tk\` | tile / terrain graphics, likely palette-indexed | `Load_Tile_Data` (`0x00466340`) |
+| `data\ev\` | event scripts, possibly bytecode — may need an interpreter | `Load_Event_Scripts` (`0x00465b50`) |
+| `data\save.dat` | save data; preserve the layout for save compatibility | `Game_CheckSaveExists` (`0x00463154`) |
+| `bmp.qda` | archive of some kind, top level | unidentified |
+
+`Load_Stage_Assets` (`0x00465a1c`) orchestrates the first five.
+
+## 12. Verified Delphi RTL helpers
+
+These identifications carry real evidence and predate the naming problems in
+section 4. They are the basis of the idiom table in section 5b — trust them.
+
+| Address | Name | Evidence |
+|---|---|---|
+| `004026d8` | `Delphi_GetMem` | dispatches through the memory-manager table at `PTR_FUN_0046801c`; raises error 1 (`EOutOfMemory`) on null |
+| `004026f0` | `Delphi_FreeMem` | dispatch at `PTR_FUN_00468020`; raises error 2 (`EInvalidPointer`) |
+| `00402da4` | `Delphi_TObject_Free` | calls `(**(code **)(*Self + -4))(Self, 1)` — VMT offset −4 is `vmtDestroy`. Exact `TObject.Free` shape |
+| `00406a50` | `Delphi_FillChar` | delegates with fill byte 0; callers use it for struct zero-init |
+| `00403cf8` | `Delphi_AnsiString_Assign` | refcount at −8, length at −4, `LOCK`-prefixed. Delphi's `LStrAsg` |
+| `00403e60` | `Delphi_AnsiString_AddRef` | atomic increment of the −8 refcount; skips literals (refcount −1) |
+| `00407f64` | `Delphi_IntToStr` | thin wrapper over Delphi's `FmtStr` |
+| `00407ff8` | `Delphi_FileOpen` | wraps `CreateFileA`; mode lookup tables at `DAT_00468138` / `DAT_00468144` |
+| `0040805c` | `Delphi_FileRead` | `ReadFile` wrapper, returns `0xFFFFFFFF` on error |
+
+`DDraw_Check_HRESULT` (`00446734`) formats an HRESULT as `"(Error Code(%x))"` and
+aborts on failure. Note it calls `Delphi_Halt0` — which is what exposed
+`004038f4` as the shutdown path rather than a message loop.
+
+## 13. Runtime hazards that survive the rewrite
+
+Most of the old "porting challenges" list is obsolete (see section 14). These are
+genuine and still apply:
+
+- **8-bit palettes.** The original uses `SelectPalette` / `RealizePalette` /
+  `GetSystemPaletteEntries`. Modern display drivers have no hardware palettes and
+  GDI's emulation is unreliable — expect wrong colours if carried over verbatim.
+  **Convert indexed surfaces to 32-bit RGBA at load time.**
+- **Timer granularity.** The original's tick relies on Windows message-queue
+  timers (~10–16 ms). Use frame-delta timing instead, or the game runs at the
+  wrong speed.
+- **MIDI.** `Kbgm32.dll` drives the system MIDI mapper and sends SysEx
+  (`KBGMSendSysx`). Modern software synths may not respond identically. Options:
+  a Pascal MIDI library, FluidSynth, or pre-render the 15 tracks to OGG.
+- **Write paths.** The original writes settings beside the executable and into
+  `HKCU\Software\Borland\Delphi\RTL`. Modern Windows virtualises or blocks that.
+  Use a per-user config directory.
+- **8-bit `AnsiString` encoding.** The game is Japanese in origin; any Shift-JIS
+  text in the data files will need explicit decoding rather than assuming UTF-8.
+
+## 14. Obsolete concerns — deliberately dropped
+
+`SDL_port_plan.md` (deleted, recoverable at commit `77f415b`) listed nine
+compiler/ABI problems for a C++ rewrite: calling convention, Pascal string types,
+SEH exception frames, RTL initialisation, VCL class layout and VMTs, `set of`
+types, 1-byte enums, ref-counted dynamic arrays, and Variants.
+
+**Choosing Free Pascal eliminates eight of the nine.** Each was a problem only
+because the target was C++ — in Pascal they are language features the compiler
+already implements. That is the retrospective case for the section 2 decision,
+and the reason the old phase plan does not survive.
+
+The one that remains is calling convention, and only for reading: Ghidra shows
+`__register`, so parameter counts and types still need checking against call
+sites. It disappears once a function is rewritten in Pascal.
+
+Also dropped: the SDL2 API mapping tables (premature — LCL first, and SDL2's
+Pascal bindings differ from the C API anyway) and the six-phase plan, which was
+built on the misidentifications in section 4.
