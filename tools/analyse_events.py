@@ -39,6 +39,10 @@ ARITY = {0: 5, 2: 0, 3: 1, 4: 1, 5: 1, 7: 0, 8: 0, 9: 1, 10: 0,
 
 ENTITY_TYPE_COUNT = 81
 
+# ParamA's kind letter is an arity marker. Must match KIND_LETTERS/KIND_ARITY
+# in src/EventCommands.pas.
+KIND_ARITY = {'*': 0, 'A': 1, '/': 2, 'J': 2, 'R': 2, 'M': 3}
+
 
 def split_fields(s):
     """Split on '-', treating a '-' at a field's start as a minus sign.
@@ -75,6 +79,7 @@ def main():
     verbose = '--verbose' in sys.argv
 
     records = spawns = bad_spawn = cmds = bad_arity = shape_mismatch = 0
+    bad_kind_arity = 0
     shapes = Counter()
     dialogue = bad_dialogue = lists = negatives = 0
     types = set()
@@ -106,6 +111,12 @@ def main():
                 problems.append('stage %03d line %d: ParamA %r' % (st, ln, p[5]))
             else:
                 spawns += 1
+                if KIND_ARITY.get(fa[1]) != len(fa) - 2:
+                    bad_kind_arity += 1
+                    problems.append('stage %03d line %d: kind %r takes %s args,'
+                                    ' got %d: %r'
+                                    % (st, ln, fa[1], KIND_ARITY.get(fa[1]),
+                                       len(fa) - 2, p[5]))
                 t = int(fa[0])
                 types.add(t)
                 kinds[fa[1]] += 1
@@ -182,7 +193,8 @@ def main():
     print('ParamA spawns:       %d  (%d rejected)' % (spawns, bad_spawn))
     print('  type range:        %d..%d  of ENTITY_TYPES 0..%d'
           % (min(types), max(types), ENTITY_TYPE_COUNT - 1))
-    print('  kind letters:      %s' % ''.join(sorted(kinds)))
+    print('  kind letters:      %s  (%d with a wrong argument count)'
+          % (''.join(sorted(kinds)), bad_kind_arity))
     print('ParamB shapes:       %d none / %d bare id / %d program  (%d disagree with the opcode)'
           % (shapes['none'], shapes['id'], shapes['program'], shape_mismatch))
     print('ParamB commands:     %d  (%d with a wrong argument count)'
@@ -203,7 +215,7 @@ def main():
         for x in problems[:40]:
             print('  ' + x)
 
-    fail = bad_spawn + bad_arity + bad_dialogue + shape_mismatch
+    fail = bad_spawn + bad_arity + bad_dialogue + shape_mismatch + bad_kind_arity
     if records != 692:
         print('\nFAILED: expected 692 records, got %d' % records)
         fail += 1

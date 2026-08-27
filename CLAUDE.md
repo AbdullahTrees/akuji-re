@@ -319,7 +319,11 @@ list** - arg[1] is a count and exactly that many items follow, true for all 13.
 
 `ParamA`'s type is bounded 14..80 against `ENTITY_TYPES`' 81 entries, flush at
 the top; 0..13 are never placed by a stage, which fits them being spawned by
-code.
+code. Its **kind letter is an arity marker**, the same role the sub-opcode
+plays: `*` 0 args, `A` 1, `/` `J` `R` 2, `M` 3, with no exceptions in 692
+records. The letter belongs to the placement, not the type - six types (14, 38,
+40, 43, 62, 65) appear both ways, and every one of them mixes only `*` with
+`A`, i.e. the same entity placed with or without a parameter.
 
 **Gotcha: `-` is both separator and minus.** In `0030-M-0-0128--4` the last
 field is `-4`. A plain split loses the sign, and nothing else in the checks

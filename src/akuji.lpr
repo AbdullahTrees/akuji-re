@@ -769,7 +769,7 @@ var
   I, J, K, L: Integer;
   Records, Spawns, BadSpawn, Cmds, BadArity, Dialogue, BadDialogue, Lists: Integer;
   Negatives, N: Integer;
-  Nones, Ids, Progs, ShapeMismatch: Integer;
+  Nones, Ids, Progs, ShapeMismatch, BadKindArity: Integer;
   Kind: TParamBKind;
   MinType, MaxType: Integer;
   SubOpUse: array[0..99] of Integer;
@@ -782,7 +782,7 @@ begin
 
   Records := 0; Spawns := 0; BadSpawn := 0; Cmds := 0; BadArity := 0;
   Dialogue := 0; BadDialogue := 0; Lists := 0; Negatives := 0;
-  Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0;
+  Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0; BadKindArity := 0;
   MinType := MaxInt; MaxType := -1;
   Kinds := '';
   for I := 0 to High(SubOpUse) do
@@ -822,6 +822,14 @@ begin
           for K := 0 to Sp.ArgCount - 1 do
             if Sp.Args[K] < 0 then
               Inc(Negatives);
+
+          { The kind letter fixes the argument count: * 0, A 1, / J R 2, M 3. }
+          if not CheckSpawnArity(Sp) then
+          begin
+            Log.Add(Format('  stage %d event %d: kind %s takes %d args, got %d: %s',
+              [I, J, Sp.Kind, KindArity(Sp.Kind), Sp.ArgCount, Sp.Raw]));
+            Inc(BadKindArity);
+          end;
         end;
 
         { --- ParamB: a program, a bare id, or nothing --- }
@@ -889,7 +897,8 @@ begin
   Log.Add(Format('ParamA spawns:       %d  (%d rejected)', [Spawns, BadSpawn]));
   Log.Add(Format('  type range:        %d..%d  of ENTITY_TYPES 0..%d',
     [MinType, MaxType, ENTITY_TYPE_COUNT - 1]));
-  Log.Add(Format('  kind letters:      %s', [Kinds]));
+  Log.Add(Format('  kind letters:      %s  (%d with a wrong argument count)',
+    [Kinds, BadKindArity]));
   Log.Add(Format('ParamB shapes:       %d none / %d bare id / %d program  (%d disagree with the opcode)',
     [Nones, Ids, Progs, ShapeMismatch]));
   Log.Add(Format('ParamB commands:     %d  (%d with a wrong argument count)',
@@ -905,7 +914,7 @@ begin
       Log.Add(Format('  %2d  x%-4d arity %d', [I, SubOpUse[I], SUBOP_ARITY[I]]));
   Log.Add('');
 
-  Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch);
+  Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch + BadKindArity);
 
   { Same trap as --selftest-events: an empty load must not pass. These are the
     counts in the shipped data. }

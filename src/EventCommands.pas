@@ -34,9 +34,21 @@
   TypeId is the name. Types 0..13 never appear, which fits them being spawned
   by code (player, projectiles) rather than placed by a stage.
 
-  <kind> is a single letter. M and J and R carry SIGNED arguments and are the
-  reason ParseFields exists: in 0030-M-0-0128--4 the last field is -4, so '-'
-  is both the separator and the minus sign.
+  <kind> is a single letter, and it is an ARITY MARKER - exactly the role the
+  sub-opcode plays in ParamB. The count is fixed per letter with no exceptions:
+
+      *  0 args  379x      /  2 args   13x      R  2 args   15x
+      A  1 arg   245x      J  2 args    2x      M  3 args   38x
+
+  The letter is a property of the PLACEMENT, not of the type: six types (14,
+  38, 40, 43, 62, 65) appear both ways. Every one of those mixes only '*' with
+  'A' - the same entity placed with or without a parameter - and no type mixes
+  anything else. So '*' is the plain form and the letters select a parameter
+  shape.
+
+  M and J and R carry SIGNED arguments and are the reason ParseFields exists:
+  in 0030-M-0-0128--4 the last field is -4, so '-' is both the separator and
+  the minus sign.
 
   ## ParamB (csv 6) - three shapes, chosen by the opcode
 
@@ -108,6 +120,12 @@ const
   SUBOP_LIST     = 15;   { arg[1] is a count; that many items follow }
 
   MAX_CMD_ARGS = 12;     { the widest observed is sub-op 15 with 7 }
+
+  { The six ParamA kind letters and the argument count each one takes. Held as
+    two parallel strings/arrays rather than a case so KindArity can report an
+    unknown letter instead of silently accepting it. }
+  KIND_LETTERS: string = '*A/JRM';
+  KIND_ARITY: array[1..6] of Integer = (0, 1, 2, 2, 2, 3);
 
   { Argument count per sub-opcode, or ARITY_VARIABLE / ARITY_UNKNOWN.
     Index is the sub-opcode; the table is what the data shows, and
@@ -193,6 +211,14 @@ function ParseId(const ParamB: string): Integer;
   self-describing length. Unknown sub-opcodes pass - absence of evidence is not
   a violation. }
 function CheckArity(const Cmd: TEventCommand): Boolean;
+
+{ Arguments the kind letter takes, or -1 if the letter is not one of the six. }
+function KindArity(Kind: Char): Integer;
+
+{ True when a parsed ParamA's argument count matches its kind letter. An
+  unknown letter fails, unlike an unknown sub-opcode - there are only six and a
+  seventh would mean the grammar is incomplete. }
+function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
 
 { Number of commands across every step, for reporting. }
 function CommandCount(const Prog: TEventProgram): Integer;
@@ -380,6 +406,28 @@ begin
     Cmds.Free;
     Steps.Free;
   end;
+end;
+
+function KindArity(Kind: Char): Integer;
+var
+  I: Integer;
+begin
+  I := Pos(Kind, KIND_LETTERS);
+  if I = 0 then
+    Exit(-1);
+  Result := KIND_ARITY[I];
+end;
+
+function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
+var
+  Want: Integer;
+begin
+  if not Sp.Valid then
+    Exit(False);
+  Want := KindArity(Sp.Kind);
+  if Want < 0 then
+    Exit(False);
+  Result := Sp.ArgCount = Want;
 end;
 
 function CheckArity(const Cmd: TEventCommand): Boolean;
