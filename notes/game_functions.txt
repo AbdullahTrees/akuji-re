@@ -117,7 +117,7 @@
 00460884  FUN_00460884
 004608bc  Entity_UpdateAll
 004610c4  Entity_Spawn
-00461400  FUN_00461400
+00461400  Entity_Destroy
 004615a8  Entity_UpdateDying
 00461738  Entity_SteerToPlayer
 004617fc  Entity_MaybeDropItem

@@ -94,6 +94,16 @@ ref parse_midi_ref  "$GAME"
 ref analyse_events  "$GAME"
 
 note ""
+note "=== records agree with the database ==="
+# function_map.md is the meaning authority, game_functions.txt the address
+# authority. If they disagree, one is stale and reading cannot tell you which.
+python "$REPO/tools/check_function_map.py" > "$SCRATCH/fmap.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
+    "$(grep -E '^(OK|FAILED)' "$SCRATCH/fmap.log" | tail -1)"
+[ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
+
+note ""
 note "=== negative control: a wrong directory must FAIL ==="
 rm -f "$REPO/src/selftest.log"
 "$EXE" --selftest-script "$SCRATCH/definitely-not-here" > /dev/null 2>&1

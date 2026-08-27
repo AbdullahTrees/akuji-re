@@ -1,600 +1,216 @@
 # Function Map — Akuji the Demon
 
-> ## Read this first: `game_functions.txt` is the authoritative list
->
-> **`notes/game_functions.txt` is generated from the Ghidra database and is
-> current.** It holds all 139 game-layer functions with their real names, and
-> `tools/coverage.py` reads it. This file is older, hand-written, and only
-> partly true.
->
-> Three names in here have since been **disproved** by reading the code:
->
-> | in this file | actually |
-> |---|---|
-> | `Load_Tile_Data` `0x466340` | `Load_Map` — reads `map\*.map`, not `tk*.dat` |
-> | `SaveGame_Select_Slot` `0x45509C` | `EventScript_AdvanceStep` — nothing to do with saves |
-> | `Configure_Stage_Params` `0x4645B0` | `Terrain_Configure` — takes the terrain id |
->
-> All three came from the same early pass that guessed names from the Win32 API
-> a function calls. Treat every remaining name here as a hypothesis. The
-> narrative sections below are still useful; the name-to-address claims are not,
-> unless `game_functions.txt` agrees.
+What each recovered function does, and **why we believe it**. Rewritten from
+scratch; the previous version was written early, guessed names from the Win32
+API each function called, and got several badly wrong.
 
+## How to read this
 
-## Legend
+`notes/game_functions.txt` is the machine-generated list of every game-layer
+function and its current Ghidra name. It is the address authority and
+`tools/coverage.py` reads it. **This file is the meaning authority** — what the
+function does and what the evidence is.
 
-| Prefix | Meaning |
-|--------|---------|
-| ✅ | Confirmed by cross-references and context |
-| 🔶 | Likely (inferred from context, needs verification) |
-| ❌ | Not yet analyzed |
-| ⛔ | Borland VCL/RTL — statically linked library code, **do not port** |
+Every entry carries its evidence. The grades are about *how it was established*,
+not how confident anyone feels:
 
-> ⚠️ **The ✅ marks in this file are not yet trustworthy.** An entire section
-> ("Game Loop") was marked ✅ but turned out to be Borland's tooltip
-> implementation, not game code — see the VCL Hint section below. Those names had
-> been guessed from the Win32 API each function calls, without cross-function
-> context. Any entry named after a single Win32 import should be re-verified the
-> same way: read its callers and callees and check whether the cluster matches a
-> known `Forms.pas` / `Controls.pas` routine before trusting it.
+| | meaning |
+|---|---|
+| **read** | the decompiled body was read and the behaviour follows from it |
+| **corroborated** | as above, plus something unrelated agrees — an asset name, a data-file invariant, the game's own dialogue |
+| **inferred** | from callers, callees or data patterns; the body has not been read |
 
-## The address-range rule
+Anything not listed here is either a bare `FUN_` in the database or a
+`EntityUpdate_TypeNN` whose body has not been read yet. There is no `❌` row:
+absence is the absence mark.
 
-Delphi links its own units before the program's, so library code sits at low
-addresses and the game's own code follows it. This holds throughout the binary
-and is the fastest sanity check on any name:
+## The address-range rule still holds, with one correction
 
 | Range | Contents |
-|-------|----------|
-| `0x402xxx`–`0x408xxx` | Delphi RTL (`System.pas`) — ⛔ |
-| `0x417xxx`–`0x425xxx` | VCL (`Graphics.pas`, `Controls.pas`) — ⛔ |
-| `0x439xxx`–`0x443xxx` | VCL (`Forms.pas`) — ⛔ |
-| `0x444xxx` and above | The game's own code |
-
-**A game-sounding name below `0x444000` is wrong until proven otherwise.** Every
-misidentification found so far has been in that range; every spot-check above it
-has held up.
-
-## Entry Point Chain — ⛔ all VCL
-
-All previously-listed entries were misnamed. Corrected:
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `004060d0` | `Delphi_RTL_Init` | ✅ | Delphi runtime initialization |
-| `004428f4` | `TApplication_Initialize` | ✅ | `if InitProc <> nil then TProcedure(InitProc)` — nothing else |
-| `00442510` | `TApplication_SetTitle` | ✅ | Generic `Title` property setter (`SetWindowTextA`). Not Akuji-specific |
-| `0044290c` | `TApplication_CreateForm` | ✅ | Generic `CreateForm`; assigns `FMainForm` if the instance inherits from `TForm` |
-| `0044298c` | `TApplication_Run` | ✅ | `FRunning := True; ... repeat HandleMessage until Terminated` |
-| `004427f8` | `TApplication_HandleMessage` | ✅ | `if not ProcessMessage(Msg) then Idle(Msg)` |
-| `00442760` | `TApplication_ProcessMessage` | 🔶 | Takes a `TMsg`; the actual `PeekMessage`/`DispatchMessage` pump |
-| `00442f8c` | `TApplication_Idle` | 🔶 | Idle branch of `HandleMessage` |
-
-### Correction: `004038f4` was never a message loop
-
-Previously listed as `VCL_Message_Loop` — "Windows message pump
-(PeekMessage/DispatchMessage)". It contains **no message-pump calls at all**. It
-runs finalization handlers, emits `"Runtime error at 00000000"` on failure, and
-ends in `ExitProcess`. It is `System._Halt0` — the process *shutdown* path.
-
-Renamed here to `Delphi_Halt0`. The real pump is `TApplication_ProcessMessage`
-above, reached via `TApplication_Run`.
-
-## ✅ FOUND: the game's entry point — `entry` @ `004671ac`
-
-The standard Delphi `.dpr` program block. Everything above is Borland's; this is
-where Akuji starts:
-
-```c
-void entry(void)
-{
-  Delphi_RTL_Init(&LAB_00466ee4);
-  TApplication_Initialize();
-  TApplication_SetTitle(Application, "Akuji the Demon");
-  TApplication_CreateForm(Application, PTR_PTR_00464b54, MainForm);
-  TApplication_Run(Application);
-  Delphi_Halt0();            // confirms 004038f4 = _Halt0
-}
-```
-
-Corresponding to:
-
-```pascal
-begin
-  Application.Initialize;
-  Application.Title := 'Akuji the Demon';
-  Application.CreateForm(TMainForm, MainForm);
-  Application.Run;
-end.
-```
-
-| Symbol | Meaning |
-|--------|---------|
-| `PTR_PTR_00464b54` | the main form's **metaclass (VMT)** — the game's class |
-| `MainForm` (`0046ce38`) | the main form **instance**; ~100 read sites, all in `0x455xxx`–`0x463xxx` |
-| `PTR_DAT_0046d074` | the global `Application` pointer (indirect) |
-
-**The entire game is one `TForm` subclass.** `MainForm` is the central object; its
-fields seen so far include `+0x2D0` (a graphics/font object) and `+0x2DC` (audio).
-
-### Game code — confirmed genuine
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `004671ac` | `entry` | ✅ | Delphi program block — the real entry point |
-| `00456038` | `TitleMenu_Update` | 🔶 | Menu state machine (states 1–4); literal `"Yes       No  "` prompt, routes to `SaveGame_Select_Slot` |
-| `00451004` | `Game_DrawTextOutlined` | ✅ | `(x, y, text, outlineColor, fillColor, fontSize, target)` — draws text 4× at ±1 offsets for the outline, then once centred. Uses "MS Sans Serif" |
-
-## Game Loop
-
-Not yet identified. (The functions previously listed here were VCL tooltip code —
-see below.)
-
-## VCL Hint (Tooltip) System — ⛔ Borland RTL, not game code
-
-Methods on the global `Application: TApplication` object (`DAT_0046e7c8`),
-statically linked from Delphi's `Forms.pas`. **None of this gets ported to SDL** —
-it implements hover tooltips for VCL controls.
-
-Identified by matching the cluster against Borland's shipped source: the
-`StopHintTimer` / `HintTimerExpired` / `HideHint` / `CancelHint` bodies are
-line-for-line matches, and `TApplication_ActivateHint` sends `0xB030`, which is
-exactly `CM_HINTSHOW` (`CM_BASE`+48).
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `004412d4` | `VCL_HintTimerProc` | ✅ | `TIMERPROC` wrapping `HintTimerExpired` in a Delphi `try..except` |
-| `00443414` | `TApplication_HintTimerExpired` | ✅ | Dispatches on `FTimerMode` (+0x79): 0 = show hint, 1 = hide hint |
-| `004432b0` | `TApplication_StartHintTimer` | ✅ | `StopHintTimer`, then `SetTimer`; `CancelHint` if it fails |
-| `004432e8` | `TApplication_StopHintTimer` | ✅ | Kills the hint timer, clears `FTimerHandle` |
-| `00443308` | `TApplication_HintMouseMessage` | ✅ | Hover tracking; queries the control for its pause via `CM_HINTSHOWPAUSE` |
-| `00443664` | `TApplication_ActivateHint` | ✅ | Builds `THintInfo`, sends `CM_HINTSHOW`, fires `OnShowHint`, shows the window |
-| `00443610` | `TApplication_RecreateHintWindow` | ✅ | Recreates `FHintWindow` when `HintWindowClass` changed |
-| `00443448` | `TApplication_HideHint` | ✅ | `ShowWindow(FHintWindow.Handle, SW_HIDE)` |
-| `00443484` | `TApplication_CancelHint` | ✅ | Hides, nils `FHintControl`, clears `FHintActive`, unhooks, stops timer |
-| `004434bc` | `VCL_GetCursorHeightMargin` | ✅ | Scans the cursor's AND-mask to place the tip below the pointer |
-| `004413c8` | `VCL_InstallHintHooks` | ✅ | Installs `WH_GETMESSAGE` hook + event + watcher thread |
-| `0044143c` | `VCL_UninstallHintHooks` | ✅ | Teardown twin of the above (same three globals) |
-
-### `TApplication` field layout (partial)
-
-Set this up as a struct in Ghidra's Data Type Manager and retype `param_1` on any
-one of these — the decompiler propagates it across all of them at once.
-
-| Offset | Field | Type | Source |
-|--------|-------|------|--------|
-| `+0x24` | `FHandle` | HWND | `SetWindowTextA` target in `SetTitle` |
-| `+0x38` | `FMainForm` | TForm* | assigned in `CreateForm`, read in `Run` |
-| `+0x3C` | `FMouseControl` | TControl* | `if FShowHint and (FMouseControl = nil) then CancelHint` in `Idle` |
-| `+0x48` | `FHintActive` | Boolean | hint cluster |
-| `+0x4B` | `FShowMainForm` | Boolean | gates the show/minimize branch in `Run` |
-| `+0x4C` | `FHintColor` | TColor | hint cluster |
-| `+0x50` | `FHintControl` | TControl* | hint cluster |
-| `+0x54` | `FHintCursorRect` | TRect (16 bytes) | hint cluster |
-| `+0x64` | `FHintHidePause` | Integer | hint cluster |
-| `+0x68` | `FHintPause` | Integer | hint cluster |
-| `+0x70` | `FHintShortPause` | Integer | hint cluster |
-| `+0x74` | `FHintWindow` | THintWindow* | hint cluster |
-| `+0x78` | `FShowHint` | Boolean | hint cluster |
-| `+0x79` | `FTimerMode` | TTimerMode (0=show, 1=hide) | hint cluster |
-| `+0x7A` | `FTimerHandle` | Word | hint cluster |
-| `+0x7C` | `FTitle` | AnsiString | `SetTitle` |
-| `+0x8C` | `FTerminate` | Boolean | `repeat HandleMessage until Terminated` |
-| `+0x94` | *(unidentified)* | Boolean | branch selector in `SetTitle` |
-| `+0x95` | `FRunning` | Boolean | set 1 on entry to `Run`, 0 on exit |
-| `+0xC0` | `FOnMessage` | TMessageEvent (Self at `+0xC4`) | fired per message in `ProcessMessage` |
-| `+0xD8` | `FOnIdle` | TIdleEvent (Self at `+0xDC`) | fired in `Idle` before `WaitMessage` |
-| `+0x108` | `FOnShowHint` | TShowHintEvent (code ptr, then Self at `+0x10C`) | hint cluster |
-
-Delphi method pointers are always a **(code, Self) pair** — the `short` test at
-`+0xC2` / `+0xDA` / `+0x10A` that guards each call is Delphi's `Assigned()` check
-on the pair. Three of them now follow the same shape, which is a good pattern to
-recognise elsewhere in the binary.
-
-**`+0x95` is resolved.** It was the unknown field gating `VCL_InstallHintHooks`;
-`TApplication_Run` sets it to 1 on entry and 0 on exit, which is `FRunning`. The
-hint hooks are only installed while the app is running — which is exactly what
-that guard is for.
-
-## Rendering (GDI + DirectDraw)
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `0044ab24` | `DirectDraw_Init` | ✅ | DirectDraw 7 initialization (cooperative level, display mode) |
-| `004475f4` | `DDraw_Create_Surface` | ✅ | Creates DirectDraw surfaces (primary, backbuffer, offscreen) |
-| `00449ca4` | `Get_Display_BitDepth` | ✅ | Gets current display bit depth |
-| `00446734` | `DDraw_Check_HRESULT` | ✅ | Checks HRESULT and shows error message on failure |
-| `00417fd4` | `VCL_MaskedBlt` ⛔ | ✅ | **Not the game's blitter.** `Graphics.pas` transparent-blit helper — `MaskBlt`, then the classic SRCAND (`0x8800C6`) / SRCINVERT (`0x660046`) fallback. Address is in the VCL range |
-
-## Audio (DirectSound + KBGM)
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `0044f8a4` | `DirectSound_Init` | ✅ | DirectSound initialization |
-| `0044fbd8` | `KBGMOpen` | ✅ | KBGM audio engine — open |
-| `0044fbe0` | `KBGMClose` | ✅ | KBGM audio engine — close |
-| `0044fbe8` | `KBGMPlay` | ✅ | KBGM audio engine — play |
-| `0044fbf0` | `KBGMStop` | ✅ | KBGM audio engine — stop |
-| `0044fbf8` | `KBGMFree` | ✅ | KBGM audio engine — free |
-| `0044fc00` | `KBGMLoadFile` | ✅ | KBGM audio engine — load file |
-| `0044fc08` | `KBGMInit` | ✅ | KBGM audio engine — init |
-| `0044fc10` | `KBGMGetInfo` | ✅ | KBGM audio engine — get info |
-| `0044fc18` | `KBGMSetVolume` | ✅ | KBGM audio engine — set volume |
-| `0044fc20` | `KBGMSendSysx` | ✅ | KBGM audio engine — send sysex |
-| `0044fc28` | `KBGMFadeIn` | ✅ | KBGM audio engine — fade in |
-| `0044fc30` | `KBGMFadeOut` | ✅ | KBGM audio engine — fade out |
-| `0044fc38` | `KBGMSetRepeat` | ✅ | KBGM audio engine — set repeat |
-
-## Input (DirectInput)
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `00453bdc` | `DirectInput_Init` | ✅ | DirectInput 7 initialization |
-
-## Game State
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `004653c8` | `GameState_Reset` | ✅ | Resets all game state to defaults |
-| `0046214c` | `Stage_Init` | ✅ | Initializes a new stage/level |
-| `00462f40` | `Game_Init_PlayerState` | ✅ | Initializes player state struct (0x11E4 bytes) |
-| `0045509c` | `SaveGame_Select_Slot` | ✅ | Save slot selection UI |
-| `00463154` | `Game_CheckSaveExists` | ✅ | Checks if a save file exists |
-
-## Data Loading
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `00465a1c` | `Load_Stage_Assets` | ✅ | Orchestrates all asset loading for a stage |
-| `00465e9c` | `Load_Surface_Textures` | ✅ | Loads surface textures from `data\surf\` |
-| `004660b8` | `Load_Sprite_Sheets` | ✅ | Loads sprite sheets from `data\spr\` |
-| `00466340` | `Load_Tile_Data` | ✅ | Loads tile data from `data\tk\` |
-| `00465b50` | `Load_Event_Scripts` | ✅ | Loads event scripts from `data\ev\` |
-| `004645b0` | `Configure_Stage_Params` | ✅ | Sets stage-specific parameters (timer, boss HP) |
-
-## Entity System
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `0044e1b8` | `Entity_Create` | ✅ | Creates a new entity (VMT + 3 params + name) |
-| `0044e224` | `FUN_0044e224` | 🔶 | Entity property setter (index + value) |
-| `0044e25c` | `FUN_0044e25c` | 🔶 | Entity property setter (index + 4 values) |
-
-## Delphi RTL Helpers
-
-| Address | Name | Confidence | Description |
-|---------|------|------------|-------------|
-| `004026d8` | `Delphi_GetMem` | ✅ | Delphi memory allocation |
-| `004026f0` | `Delphi_FreeMem` | ✅ | Delphi memory deallocation |
-| `00402da4` | `Delphi_TObject_Free` | ✅ | Delphi TObject.Free |
-| `00406a50` | `Delphi_FillChar` | ✅ | Delphi FillChar |
-| `00403cf8` | `Delphi_AnsiString_Assign` | ✅ | Delphi AnsiString assignment |
-| `00403e60` | `Delphi_AnsiString_AddRef` | ✅ | Delphi AnsiString reference counting |
-| `00407f64` | `Delphi_IntToStr` | ✅ | Delphi IntToStr |
-| `00407ff8` | `Delphi_FileOpen` | ✅ | Delphi file open |
-| `0040805c` | `Delphi_FileRead` | ✅ | Delphi file read |
-| `00408088` | `Delphi_FileWrite` | ✅ | Delphi file write |
-| `004080c0` | `Delphi_FileClose` | ✅ | Delphi file close |
-
-## Audit status
-
-Every entry below `0x444000` has now been re-read. Results:
-
-**Misidentified as game code, actually Borland's (⛔):** the 12 hint functions,
-the 5 entry-chain entries, `004038f4` (shutdown, not a message loop), and
-`00417fd4` (VCL blitter, not the game's). **19 total.**
-
-**Spot-checked and confirmed genuine:** `Get_Display_BitDepth` (`00449ca4` —
-`GetDeviceCaps(BITSPIXEL)`, exact), `Load_Stage_Assets` (`00465a1c`),
-`GameState_Reset` (`004653c8`), `DirectDraw_Init` (`0044ab24`). All sit above
-`0x444000`, consistent with the range rule.
-
-**Not yet re-verified:** the remaining Rendering, Audio, Input, Game State, Data
-Loading, and Entity System entries. All are above `0x444000`, so they are far
-more likely to be sound — but they were named by the same process, so treat ✅
-there as 🔶 until read.
-
-The `KBGM*` block (`0044fbd8`–`0044fc38`) is 8-byte-spaced stubs — an import
-thunk table for a KBGM audio DLL. Those names came from real exported symbols and
-are trustworthy.
-
-## Total: 49 functions annotated
-## The three-layer structure (2026-08-03)
-
-Class names recovered from Delphi RTTI in the binary show the program is three
-distinct layers, not two. Only the innermost is Akuji's:
-
-| Layer | Classes | Functions | Fate |
-|-------|---------|-----------|------|
-| Borland RTL + VCL | `TObject`, `TCanvas`, `TForm`, `TApplication`, … | ~1597 | ⛔ skip — replaced by FPC RTL + LCL |
-| Third-party DirectX suite | `TDDDDSurface`, `TDDDDCanvas`, `TDDDDSprite`, `TDDSDWave3D`, `TDDSDChannel`, `TDDIDDebugOption`, `TKbgmPlayer`, `TD3DOptions` | ~191 | ⛔ replace wholesale — do not port |
-| **The game** | **`TFrm_main`** + its units | **~83** | ✏️ this is what you write |
-
-The component/game boundary (`0x455000`) is approximate — `Game_DrawTextOutlined`
-at `0x451004` is game code sitting below it — so treat the game figure as ~80–110.
-Either way it is **~5% of the binary**, not 1871 functions.
-
-`TFrm_main` is the main form class; its metaclass is `PTR_PTR_00464b54`, its
-instance is `MainForm` (`0046ce38`), and `entry` (`004671ac`) creates it.
-
-### ✅ RESOLVED: the D3DRM dependency is not the game's
-
-`akuji.exe` statically imports `Direct3DRMCreate`, so `d3drm.dll` must be present
-or the process will not load — but the game is purely 2D and never uses it.
-
-The import belongs to the **DirectX component suite**, which supports an optional
-Direct3D retained-mode path (`TD3DOptions`). In `DirectDraw_Init` the D3DRM calls
-sit behind `if ((param_2 == '\0') && (mode != 0))`; the shipped `system.ini` has
-`fullscreen=off`. The interface is stored at wrapper field `+0xd0`, used for
-exactly two vtable calls (`+0x44`, `+0x50`) in init, and released in `FUN_0044975c`.
-
-**Porting cost: zero.** The component layer is being replaced anyway, and the
-D3DRM dependency leaves with it. This closes the largest open risk in the port.
-
-## Frame-loop internals (2026-08-27)
-
-| Address | Name | Evidence |
-|---|---|---|
-| `00464d30` | `TFrm_main_AppIdle` | the frame loop; `Done := False`, state dispatch, present, spin-wait |
-| `00465584` | `TFrm_main_DDDD1Init` | loads settings, installs `Application.OnIdle` |
-| `00449e78` | `TDDDD_Clear` | 100-byte `DDBLTFX` + `BackColor` (+0x4C), surface vtable `+0x14` = `Blt` |
-| `00449d00` | `TDDDD_Present` | vtable `+0x2C` = `Flip` when fullscreen; else 124-byte `DDSURFACEDESC2` + `Blt` to window origin |
-| `00448918` | `TDDDD_DrawSprite` | `(surface, x, y, transparent, srcRect)` |
-| `00461ba8` | `HUD_Draw` | `"%3d/%-3d"` counter, `"%.2d:%.2d:%.2d"` timer, life-icon loops |
-| `004511ec` | `Game_DrawText` | takes x, y, colour index and a string |
-| `00451004` | `Game_DrawTextOutlined` | draws 4x at +/-1 for outline, then centred |
-
-### `p_PlayerState` @ `0x0046cff0` — the 0x11E4 struct from `Game_Init_PlayerState`
-
-| Offset | Meaning |
 |---|---|
-| `+0x11B4` | current lives/health (clamped to 0..`+0x11B8`) |
-| `+0x11B8` | maximum lives/health |
-| `+0x11BC` | elapsed seconds — HUD renders it as `h:mm:ss` |
-| `+0x11C4` | counter shown as `%3d/%-3d` |
-| `+0x11DC` | index into the table at `0x0046d2b4` |
+| `0x402000`–`0x408fff` | Delphi RTL |
+| `0x417000`–`0x425fff` | VCL (`Graphics`, `Controls`) |
+| `0x439000`–`0x443fff` | VCL (`Forms`) |
+| `0x444000`–`0x454eff` | third-party DirectX/audio components |
+| `0x454ef4`+ | **the game** |
 
-## State handlers (2026-08-27, cont.)
+`coverage.py` uses `0x455000` as the boundary, which is very slightly wrong:
+`Event_Begin` sits at `0x454EF4`, just below it, and is unambiguously game code.
+Nothing else is known to fall in the gap, so the tool's count is off by at most
+that one function.
 
-| Address | Name | Evidence |
-|---|---|---|
-| `00461ee4` | `PauseMenu_Update` | dims 320x240, 3 options; confirm branches to saved state / 10 / 999 |
-| `00462210` | `Stage_Begin` | `GameState_Reset`, `Load_Stage_Assets`, spawns player, sets state 60 |
-| `00466e4c` | `Input_ConfirmPressed` | returns 1 on confirm; same use in title and pause menus |
-| `00450fd8` | `TDDSD_PlaySound` | called as `(MainForm.DDSD1, id, 1)` — confirms `+0x2DC` |
+---
 
-Globals: `p_PauseMenuIndex` `0x46cf88` (0..2), `p_SavedGameState` `0x46cbbc`.
+## Entry and form
 
-More `p_PlayerState` fields, from `Stage_Begin`:
-`+0x11A4`/`+0x11A8` spawn tile X/Y, `+0x11AC`/`+0x11B0` scroll X/Y, `+0x11D8`
-passed to the spawned entity.
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x46716C` | `entry` | read | the `.dpr` block: `Initialize`, `Title := 'Akuji the Demon'`, `CreateForm`, `Run`. `0x4671AC` is only the `CreateForm` call inside it |
+| `0x465584` | `TFrm_main_DDDD1Init` | read | loads settings, opens audio, installs `Application.OnIdle` |
+| `0x4665C8` | `TFrm_main_FormKeyDown` | read | Escape while paused **quits**; Ctrl+R soft-resets to the title |
+| `0x466644` | `TFrm_main_FormDestroy` | read | **writes `system.dat` back** — it is the settings writer, not just teardown |
+| `0x464D30` | `TFrm_main_AppIdle` | read | the frame loop; sets `Done := False` so `TApplication` never waits |
 
-## Name audit of the Load_* / Stage_* pass (2026-08-27)
+All four handlers are reachable only through the form's RTTI, so they have no
+call xrefs and auto-analysis never created them. Two had to be made by hand.
 
-Every remaining name from the original unverified pass was checked against the
-filename its function actually builds. Method: disassemble the entry, resolve
-pushed pointers as Delphi string literals (length at -4).
+## Game state machine
 
-| Address | Old name | Verdict |
-|---|---|---|
-| `465e9c` | `Load_Surface_Textures` | ✅ builds `data\surf%.03d.dat` |
-| `4660b8` | `Load_Sprite_Sheets` | ✅ builds `data\spr%.03d.dat` |
-| `465b50` | `Load_Event_Scripts` | ✅ builds `data\ev%.03d.dat` |
-| `466340` | ~~`Load_Tile_Data`~~ | ❌ → **`Load_Map`**, builds `map\%.03d.map` |
-| `46214c` | ~~`Stage_Init`~~ | ❌ → **`Title_Init`**; resets, loads asset set 0, starts music, sets 57 channel volumes, → state 20 |
-| `462330` | `FUN_00462330` | → **`Title_MainMenu`**; owns "NEW GAME"/"CONTINUE"/" OPTION "/"  EXIT  " |
-| `463154` | ~~`Game_CheckSaveExists`~~ | ❌ → **`Opening_Update`**, the intro cutscene |
+`p_GameState` at `0x46D06C`, in steps of 10.
 
-**Caution on the method:** scanning a fixed window past the entry overruns into
-neighbouring functions and picks up their literals. That produced a false claim
-that `Title_Init` owned the menu strings; the string xref showed they belong to
-`Title_MainMenu`. Confirm ownership with an xref, not proximity.
+| Value | Handler | Grade | Meaning |
+|---|---|---|---|
+| 10 | `Title_Init` `0x46214C` | read | |
+| 20 | `Title_MainMenu` `0x462330` | read | menu, options, gallery |
+| 30 | `Stage_Begin` `0x462210` | inferred | entered by event sub-op 0 after a stage load |
+| 40 | `Game_StartOrLoad` `0x462F40` | read | reads `save.dat` straight into `p_PlayerState` |
+| 60 | — | corroborated | **normal gameplay**. A finished event script returns here |
+| 100 | `GameOver_Update` `0x461A44` | corroborated | **game over**: draws surface slot 3 (`gameover.bmp`) and plays MIDI 2 (`midi\gameover`), then waits and returns to the title |
+| 130 | `PauseMenu_Update` `0x461EE4` | read | saves the prior state to `0x46CBBC` |
+| 140 | `EventScript_Execute` `0x455210` | read | the event-script runner |
+| 150 | `FUN_00463624` | inferred | entered by event sub-op 80 (`soulget`) |
+| 999 | — | read | quit: nils `OnIdle` |
 
-### `Opening_Update` @ `0x463154` — the intro cutscene
+`Opening_Update` `0x463154` and `TitleMenu_Update` `0x456038` are dispatched
+separately on their own flags.
 
-10 slides. Per slide: load `op%.3d.bmp` from `bmp.qda` (or `bmp\op%.3d.bmp`
-when `p_UseArchive` is 0), draw at (0x28, 8) sized 240x180, then two lines of
-`Game_DrawTextOutlined` at y=200 and y=216. Slide duration is
-`p_OpeningDurations[slide] * 60` frames. Music cues at slides 1, 8 and 9.
-`Input_ConfirmPressed` skips.
+## Asset loading
 
-Globals: `p_OpeningSlide` `0x46d298`, `p_OpeningTimer` `0x46d174`,
-`p_OpeningImageIds` `0x46ce68`, `p_TextTable` `0x46cce4` (subtitle strings,
-indexed via `0x46ce88`).
+| Address | Name | Grade | Reads |
+|---|---|---|---|
+| `0x4669F8` | `Load_StageTable` | read | `data\stage.dat` |
+| `0x465A1C` | `Load_Stage_Assets` | read | drives the four below, then `Terrain_Configure` |
+| `0x465E9C` | `Load_Surface_Textures` | read | `data\surf%.03d.dat` |
+| `0x4660B8` | `Load_Sprite_Sheets` | read | `data\spr%.03d.dat` |
+| `0x466340` | `Load_Map` | corroborated | `map\%.03d.map`. Every file is exactly `24 + w*h*2` bytes |
+| `0x465B50` | `Load_Event_Scripts` | corroborated | **both** `ev%.03d.dat` and `tk%.03d.dat` |
+| `0x4645B0` | `Terrain_Configure` | read | sets the **solid-tile threshold** per terrain, and builds an animated background for terrains 1–4 |
 
-### Author
+> **Two names here were wrong in the old map.** `0x466340` was
+> `Load_Tile_Data` "reads `data\tk\`" — both halves false. `0x4645B0` was
+> `Configure_Stage_Params`, which hid that its third argument is the terrain id.
 
-`"CREATED BY E.HASHIMOTO"` at `0x462dc4`, drawn by `Title_MainMenu`.
+## Event scripts
 
-### Settings field confirmed
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x454EF4` | `Event_Begin` | read | `StringReplace(ParamB, '/', ',')` then `CommaText`; enters state 140 |
+| `0x45509C` | `EventScript_AdvanceStep` | read | `StringReplace(step, '.', ',')`; picks **one** alternative by scanning backwards for a set progress flag |
+| `0x455210` | `EventScript_Execute` | read | the interpreter — all 15 sub-opcodes |
 
-`p_Settings+0x24` (default 10) is **volume** — `Title_Init` applies it to all 57
-sound channels as `(10 - value) * -0x1C2`.
+> **`0x45509C` was `SaveGame_Select_Slot` in the old map.** It has nothing to do
+> with save slots. That name survived a long time because it was never checked.
 
-## `Title_MainMenu` @ `0x00462330` — fully decoded
+The separators are tier-1: both are one-character `AnsiString` literals read out
+of the binary at `0x455098`/`0x45508C` and `0x45520C`/`0x455200`. The
+interpreter reads **fixed character positions**, not dash-separated fields,
+which is why every number in the data is zero-padded.
 
-Three sub-modes on `p_TitleSubMode` (`0x46cef8`):
+## Entities — structure
 
-**0 — main menu.** Background `p_Surfaces[1]` full-screen. Items at x=`0xEE`,
-y=`(i*2+0x11)*8`: NEW GAME, CONTINUE, ` OPTION `, `  EXIT  `. Cursor x=`0xE6`.
-Credit string at (0, `0xD8`). Confirm: 0/1 → `GameState_Reset`, state `0x28`,
-sub-mode records which; 2 → options; 3 → state 999.
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x4608BC` | `Entity_UpdateAll` | read | the dispatcher: switches on `EF_TYPE` into 80 handlers. Walks **256** slots although the pool is 289 |
+| `0x4610C4` | `Entity_Spawn` | read | three ranges: slot 0 player, `1..$20` actors, `$21..$120` rest. Copies the type row into the entity |
+| `0x461400` | `Entity_Destroy` | corroborated | opcode-5 events set `Progress[StrToInt(Copy(ParamB,1,4))]`, matching the block at offset 10 |
+| `0x4615A8` | `Entity_UpdateDying` | corroborated | called from **30 sites**, more than anything else. Class 2's death plays sound 34 = `bom03.wav` |
+| `0x4617FC` | `Entity_MaybeDropItem` | read | `Random($100) > $B3` — a 76/256 drop, of which `> $F5` is a rarer variant |
+| `0x461874` | `Entity_SpawnDebris` | corroborated | five particles; the impact sound comes from `stage.dat` csv 15 (terrain 3 → `water01`, 4 → `water02`) |
+| `0x461738` | `Entity_SteerToPlayer` | read | homes on slot 0 read straight off the array base — this is what proved slot 0 is the player |
 
-**1 — options.** Background `p_Surfaces[2]`. Labels x=`0x28`, values x=`0xE8`,
-rows y=`0x38 + row*0x10`, cursor x=`0xE0` y=`(i*2+7)*8`. Ten rows:
+## Entities — collision and geometry
 
-| Row | Controls | Range |
-|---|---|---|
-| 0 | game level | `p_Settings+0x04`, 0..2 |
-| 1 | toggle | `0x46d268` |
-| 2-4 | **key rebinding** | `p_KeyMap[0..2]`; polls 16 buttons, swaps if already bound |
-| 5 | toggle | `0x46d2e4` |
-| 6 | **frame limiter** | `p_FrameLimitOn` `0x46ce60` |
-| 7 | volume | `p_Settings+0x24`, 0..10, reapplied to 57 channels |
-| 8 | omake select | `p_Settings+0x28`, 0..6; confirm shows `omake%.02d.bmp` if `p_Settings[0x2C+i]` |
-| 9 | exit | → menu, cursor on OPTION |
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x457150` | `Entity_TileEdgeDistX` | corroborated | how far it may move; used by the falling-item handler to land flush |
+| `0x457228` | `Entity_TileEdgeDistY` | corroborated | exact X/Y mirror — six fields at `+4`, and `LayerInfo +0/+10` vs `+4/+14` |
+| `0x457300` | `Entity_TileCollideX` | read | tile index hit moving that far, vs the terrain threshold |
+| `0x4574DC` | `Entity_TileCollideY` | read | the mirror; also the tile-lookup argument order swaps |
+| `0x457F98` | `Entity_BoxesOverlap` | read | entity-vs-entity AABB, using the `+0xA8/+0xAC` insets |
+| `0x4580BC` | `Entity_IsOffScreen` | corroborated | compares against `0x140 × 0xF0` — the DFM's 320×240 |
+| `0x457880` | `Entity_PlayerTouch` | read | builds the player's box and this entity's; starts event opcodes 0 and 1 |
+| `0x457AB4` | `Entity_TakeProjectileHits` | corroborated | scans slots `1..$20`; plays sound 17 = `hit01.wav` when the target survives. **This is what proved `+0x90` is hit points, not hit-stun** |
 
-**2 — omake viewer.** Full-screen unlocked image; confirm returns to row 8.
+**Two different inset pairs**: `+0xA0/+0xA4` for tile collision,
+`+0xA8/+0xAC` for entity-vs-entity. Conflating them would be silent and wrong.
 
-`p_MenuIndex` (`0x46cf88`) is the shared cursor for title, options and pause —
-it is not pause-specific, hence the rename from `p_PauseMenuIndex`.
+## Entities — per-type handlers
 
-## Bitmap font — solved
+`EntityUpdate_TypeNN` for 48 types, created by
+`ghidra_scripts/CreateEntityUpdateHandlers.java`. **The name asserts only that
+`Entity_UpdateAll` reaches it from the arm for type NN** — nothing about the
+body. Those whose bodies have been read carry a suffix:
 
-`Font_Define` `0x4511a0` fills a table at `0x46e8a4` (0x20 stride, multiple
-fonts possible). `Title_Init` registers font 0:
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x4585A8` | `Player_Update` | corroborated | type 1. The dash is a double tap in a 30-frame window, and `tk001.dat` says "Press the arrow key twice to perform a Dash move". Every sound matches its name |
+| `0x45A5D4` | `EntityUpdate_Type32_Emitter` | read | invisible spawner; config in block A, state in block B |
+| `0x45A698` | `EntityUpdate_Type33_Explosion` | corroborated | six particles using **both** direction tables at the same index |
+| `0x45A7BC` | `EntityUpdate_Type36_FallingItem` | read | gravity 8 capped at `$200`, then snap-to-edge on landing |
 
-```
-Font_Define(0, p_Surfaces[0], $20, $140, 8, 8, 9, 9, $5F)
-               surface  firstCh screenW adv cellH cellW lastCh
-```
+Types 0, 18 and 20 have **no** handler. 18 and 20 are two of the three type-table
+rows whose column 0 is `-1` (no sprite object); the third, type 32, updates while
+drawing nothing.
 
-`Game_DrawText` `0x4511ec` `(fontIdx, x, y, centred, variant, text)`:
+## HUD and input
 
-```
-idx = ch - FirstChar
-col = idx mod 32       srcX = col * CellW
-row = idx div 32       srcY = row * CellH + CellH * Variant * 2
-dest = (x + i * Advance, y)
-centred: x = (ScreenW - Len*Advance) div 2
-```
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x461BA8` | `HUD_Draw` | read | life icons animate on a 4-frame cycle; the counter targets are a 12-entry table |
+| `0x466E4C` | `Input_ConfirmPressed` | inferred | named from use, body not read |
+| `0x4653C8` | `GameState_Reset` | inferred | called on stage entry and game over |
 
-Verified against `font9x9-01.bmp`: 288x54 == exactly 32 cols x 6 rows of 9x9,
-i.e. 3 colour variants x 2 rows x 32 glyphs. Range `$20..$5F` is 64 glyphs,
-space through underscore — **no lowercase**, which is why every string in the
-game is upper case.
+## Verified RTL helpers
 
-Colours sampled from the sheet: black background (the colour key), a shared
-dark-brown outline `(61,35,35)`, and per-variant fill — 0 white, 1 pink
-`(255,123,123)`, 2 peach `(255,188,133)`.
+Below the game layer, but needed to read anything. These are established:
 
-Implemented as `src/GameFont.pas`. Glyphs are pre-cut into individual bitmaps
-because LCL's `Draw` honours `TBitmap.Transparent` but `CopyRect` does not.
+| Address | Name |
+|---|---|
+| `0x4026D8` | `Delphi_GetMem` |
+| `0x4026F0` | `Delphi_FreeMem` |
+| `0x402DA4` | `Delphi_TObject_Free` |
+| `0x406A50` | `Delphi_FillChar` |
+| `0x403CF8` | `Delphi_AnsiString_Assign` |
+| `0x403E60` | `Delphi_AnsiString_AddRef` |
+| `0x407F64` | `Delphi_IntToStr` |
+| `0x407FF8` | `Delphi_FileOpen` |
+| `0x40805C` | `Delphi_FileRead` |
+| `0x402AC4` | `Delphi_Random` — takes the range, returns `0..n-1` |
+| `0x451354` | rectangle intersection (component layer) |
+| `0x45114C` | sign/compare helper (component layer) |
 
-## Asset table formats — verified
+## Named globals
 
-| Address | Name | Format |
-|---|---|---|
-| `4669f8` | `Load_StageTable` | `data\stage.dat`, 66 x 16 fields -> 19-int records |
-| `465e9c` | `Load_Surface_Textures` | `data\surf%.03d.dat`, 3 fields: name, w, h |
-| `4660b8` | `Load_Sprite_Sheets` | `data\spr%.03d.dat`, 7 fields: surfIdx, frameW, frameH, cols, rows, originX, originY |
-| `466340` | `Load_Map` | `map\%.03d.map`, 6 int32 header + uint16 tiles |
-| `4511a0` | `Font_Define` | font table at `0x46e8a4` |
-| `4511ec` | `Game_DrawText` | 32-column sheet, variant offsets by `CellH*v*2` |
+| Address | Name |
+|---|---|
+| `0x46D06C` | `p_GameState` |
+| `0x46CC58` | `p_InputState` |
+| `0x46CEA8` | `p_KeyMap` |
+| `0x46D0E8` | `p_Settings` |
+| `0x46D1E0` | `p_LastFrameTime` |
+| `0x46CB68` | `p_Entities` — the 289-slot pool |
+| `0x46D364` | the 81-entry type table |
+| `0x46CC44` | **solid-tile threshold**, set per terrain |
+| `0x46CEE4` | → `0x468B14`, the direction table (X) |
+| `0x46CE34` | → `0x468C14`, the direction table (Y) |
+| `0x46CD44` | the weapon table, 16-byte records |
+| `0x46D144` | `p_LayerInfo` — `+0x10` tileW, `+0x14` tileH, `+0x18` mapW, `+0x1C` mapH |
+| `0x46D344` | `p_Surfaces`, 32 slots |
+| `0x46CDEC` | `p_TileMaps`, per layer |
 
-### stage.dat field -> record slot
+## Lessons this file exists to preserve
 
-`Load_StageTable` does not map columns one-to-one:
-
-```
-csv[0..7]  -> rec[0..7]
-csv[8..15] -> rec[11..18]
-rec[8..10]  never written from file - runtime scratch
-```
-
-That is why 16 columns fill a 19-int (0x4C) record. `Load_Stage_Assets` indexes
-the *record*, so the gap has to be preserved in any reimplementation.
-
-Established: `rec[0]` surface set, `rec[1]` sprite set, `rec[2..4]` three map
-layers (`-1` = none, and `rec[2]` matches the map filename — line 64 has 64,
-and `064.map` exists). `rec[5]` is 6 on every line but the first; meaning
-untraced. `rec[6..7]` and `rec[11..18]` untraced.
-
-Global: `p_StageTable` `0x46cfb4`.
-
-## `Game_StartOrLoad` @ `0x00462F40` (was `Game_Init_PlayerState`)
-
-Runs on state 40. Branches on `p_TitleSubMode`: 0 = NEW GAME (plays the opening
-cutscene first, returning early until `Opening_Update` reports done), 1 =
-CONTINUE (loads the save). Ends by setting state 30 (`GS_STAGE_BEGIN`).
-
-### `data\save.dat` is the player state struct, raw
-
-```c
-Delphi_FileRead(handle, p_PlayerState, 0x11E4);
-Settings.CurrentStage := p_PlayerState[0x11A0];
-```
-
-`0x11E4` = 4580 = the exact size of the shipped `save.dat`. No header, no
-checksum, no versioning — it is a memory image, so any layout change breaks
-save compatibility.
-
-Decoding the shipped save gives a coherent mid-game state, which is good
-independent evidence the offsets are right:
-
-| Offset | Field | Shipped value |
-|---|---|---|
-| `+0x11A0` | SavedStage | 13 |
-| `+0x11A4/A8` | spawn tile X/Y | 143, 121 |
-| `+0x11AC/B0` | scroll X/Y | 373, 762 |
-| `+0x11B4/B8` | lives / max | 2 / 4 |
-| `+0x11BC` | elapsed seconds | 550 (9:10) |
-| `+0x11C4` | HUD counter | 24 |
-| `+0x11D4` | music track | 1 |
-| `+0x11E0` | difficulty | 0 |
-
-MaxLives being 4 rather than the initial 3 matches the `tk001.dat` dialogue
-about Mana Stones increasing LIFE — two independent sources agreeing.
-
-New-game defaults: lives 3/3, spawn tile (0x60, 0x73), scroll (0, 0x1C0),
-`+0x11C8` = 300, `+0x11D0` = 0x68, music track 1, difficulty from settings.
-
-Offsets 10..0x119F are cleared as one 0x1195-byte block — per-world progress
-flags. Bits 0x4AB and 0x4B4 are set from settings bytes `+0x1C`/`+0x1D`.
-
-## Event scripts — `ev*.dat` decoded
-
-### `Load_Event_Scripts` @ `0x00465B50`
-
-Reads `data\ev%.03d.dat`, CommaText per line into a 0x24-byte record in
-`p_EventTable` (`0x46cce0`):
-
-| CSV field | Record | Meaning |
-|---|---|---|
-| 0 | `+0x00` | type (4 = a special case in the spawner) |
-| 1 | `+0x1C` | **required** progress flag — spawn only if `PlayerState.Progress[n]` set |
-| 2 | `+0x20` | **forbidden** progress flag — skip if set |
-| 3 | `+0x10` | tile X |
-| 4 | `+0x14` | tile Y |
-| 5 | `+0x0C` | **parameter string** (below) |
-| 6 | `+0x18` | second string |
-
-Runtime-only fields: `+0x04` spawned flag, `+0x05` alive flag, `+0x08` entity handle.
-
-It then loads a second file into `p_EventTable2` (`0x46d1c8`) as a plain string
-list — one string per line, unparsed.
-
-### `Events_SpawnNearCamera` @ `0x00454790`
-
-Runs every frame in states 60/140. Walks the table and spawns an entity when
-the record's tile is near the camera — roughly `camX-2 .. camX+12` — subject to
-the required/forbidden progress flags. Off-screen records have their spawned
-flag cleared so they can respawn.
-
-### The parameter string
-
-Field 5 is fixed-width, dash-separated: `<id:4>-<cmd:1>[-<params>]`. The spawner
-reads it with `Delphi_Copy(s, pos, len)` at positions that depend on the
-command. `Copy(s,1,4)` is always the entity/sprite id.
-
-Six command codes, from the constants at `0x454EB4..0x454EF0`:
-`*` `A` `M` `R` `J` `/`
-
-Shapes across all 692 records:
-
-| Shape | Count | Example |
-|---|---|---|
-| `NNNN-*` | 379 | `0014-*` |
-| `NNNN-A-NNNN` | 198 | `0024-A-0004` |
-| `NNNN-A-NNN` | 47 | `0038-A-001` |
-| `NNNN-M-N-NNNN-NN` | 21 | `0021-M-0-0160-04` |
-| `NNNN-M-N-NNNN--N` | 17 | `0030-M-0-0128--4` |
-| `NNNN-/-NNNN-NNN` | 13 | `0015-/-1036-002` |
-
-Per-command parameter meanings are **not** decoded — the spawner writes them
-into entity fields (`+0x18`, `+0x20`, `+0x24`, `+0x78`, `+0x7C`, `+0x88`,
-`+0x98`, `+0x9C`, `+0xE8..0xF4`) whose semantics are unknown. `A` looks like a
-movement or animation parameter, `M` takes a mode plus a distance, `*` is the
-bare no-parameter case.
-
-Also identified: `Delphi_Copy` `0x403eb4` = `Copy(s, index, count)`.
+1. **Never name a function after the Win32 API it calls.** That produced 19
+   "confirmed" names that were all Borland library code, including a whole
+   "Game Loop" section that was `TApplication`'s tooltip implementation.
+2. **Check the address range first.** A game-sounding name below `0x454EF4` is
+   wrong until proven otherwise.
+3. **Borland emits frameless functions.** No `55 8B EC`, so Ghidra's Function
+   Start Search cannot find them and re-running auto-analysis never will. 48 of
+   the entity handlers were invisible this way.
+4. **Adjacent fields get conflated.** `EF_TOUCH_KIND` and `EF_CLASS` at `+0xC8`
+   and `+0xCC`; the two inset pairs; `$24` meaning hit points on a target and
+   damage on a projectile.
+5. **A name is a claim.** `Load_Tile_Data`, `SaveGame_Select_Slot` and
+   `Configure_Stage_Params` all read plausibly and all were wrong. Each cost
+   real time before it was caught.
