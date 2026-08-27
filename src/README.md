@@ -8,7 +8,12 @@ Targets Free Pascal / Lazarus, so it builds for Windows, Linux, macOS and ARM
 from this one tree. That is a property of the language, not a porting layer.
 
     E:\lazarus\lazbuild.exe akuji.lpi
-    akuji.exe --selftest <path-to-bmp.qda> [outdir]   # verify the archive reader
+    akuji.exe --selftest <bmp.qda> [outdir]        # archive reader
+    akuji.exe --selftest-audio <gamedir> [pcmdir]  # all 57 effects
+    akuji.exe --selftest-midi <gamedir>            # all 15 tracks
+
+Each writes `selftest.log`. The `tools/*_ref.py` scripts re-derive the same
+numbers independently and diff against it.
 
 ## Layout
 
@@ -41,8 +46,8 @@ interface, which `GmMain.lfm` documents.
 |---|---|---|
 | `DDDDComponent.pas` | `TDDDD` | `Clear`/`Present`/`DrawSprite` implemented over LCL |
 | `DDIDComponent.pas` | `TDDIDEX` | stub — key state only, no rebinding |
-| `DDSDComponent.pas` | `TDDSD` | stub — no audio |
-| `KbgmPlayer.pas` | `TKbgmPlayer` | stub — no MIDI |
+| `DDSDComponent.pas` | `TDDSD` | 57 effects, mixed and played |
+| `KbgmPlayer.pas` | `TKbgmPlayer` | MIDI sequencer, 15 track playlist |
 | `AkujiReg.pas` | — | design-time registration, packaged by `akuji_components.lpk` |
 
 ## Data layer — all formats solved and cross-checked
@@ -57,6 +62,24 @@ interface, which `GmMain.lfm` documents.
 | `PlayerState.pas` | `data\save.dat` | `Game_StartOrLoad` `0x462F40` |
 | `GameFont.pas` | the 9x9 sheet | `Font_Define` `0x4511A0`, `Game_DrawText` `0x4511EC` |
 
+## Audio layer
+
+Portable except for the two device units. The original mixed in hardware via
+one DirectSound buffer per effect; here the mixing is done in software so the
+only platform-specific code is the output device.
+
+| File | Role | Portable |
+|---|---|---|
+| `SoundTable.pas` | the 57 effect names, from the array at `0x00468D50` | yes |
+| `WaveFile.pas` | RIFF reader (original used winmm `mmio*`) | yes |
+| `AudioMixer.pas` | one voice per effect slot, the original's volume curve | yes |
+| `AudioOut.pas` | output device - `waveOut` on Windows, null elsewhere | **no** |
+| `MidiFile.pas` | SMF reader, tracks merged and timed | yes |
+| `MidiOut.pas` | MIDI device - winmm on Windows, null elsewhere | **no** |
+
+Adding Linux or macOS sound means implementing `AudioOut` and `MidiOut` and
+nothing else. See `../notes/audio_map.md` for the recovered call map.
+
 ## Game layer
 
 | File | Origin |
@@ -67,7 +90,7 @@ interface, which `GmMain.lfm` documents.
 ## Not yet written
 
 Entity system, player controller, collision, scrolling, the state 60/100/140
-update path, audio, and event-script command semantics. That is the bulk of the
+update path, and event-script command semantics. That is the bulk of the
 remaining work — see `../CLAUDE.md` sections 2 and 6.
 
 ## Rules

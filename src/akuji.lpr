@@ -22,52 +22,221 @@ uses
   Interfaces,   // LCL widgetset - must come first
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
-  QdaArchive, Classes, SysUtils;
+  QdaArchive, SoundTable, WaveFile, AudioMixer, MidiFile, Classes, SysUtils;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
-{ --selftest <qda> [outdir] : verify the archive reader against real data and
-  exit. Writes selftest.log beside the executable, because this is a GUI-
-  subsystem binary with no console attached - WriteLn goes nowhere. }
-function SelfTest: Integer;
+{ ---------------------------------------------------------------------------
+  Self-tests.
+
+  These exist because "it compiles and a window appears" proves almost nothing
+  about a reconstruction. Each mode below re-reads the game's own shipped data
+  and dumps what our reader made of it, so an independent implementation (the
+  scripts in tools/) can diff the two. Agreement between two readers written
+  from the same evidence is the strongest check available without the original
+  source - see the verification note in CLAUDE.md.
+
+  Output goes to selftest.log beside the executable: this is a GUI-subsystem
+  binary with no console attached, so WriteLn goes nowhere.
+  --------------------------------------------------------------------------- }
+
+{ --selftest <qda> [outdir] : archive reader. }
+function SelfTestArchive(Log: TStrings): Integer;
 var
   A: TQdaArchive;
   I: Integer;
   Raw: TMemoryStream;
-  Log: TStringList;
   OutDir: string;
+begin
+  Result := 0;
+  OutDir := '';
+  if ParamCount >= 3 then
+    OutDir := IncludeTrailingPathDelimiter(ParamStr(3));
+
+  A := TQdaArchive.Create(ParamStr(2));
+  try
+    Log.Add(Format('archive: %s', [ParamStr(2)]));
+    Log.Add(Format('entries: %d', [A.Count]));
+    for I := 0 to A.Count - 1 do
+    begin
+      Log.Add(Format('%-18s off=%-9d size=%d',
+        [A.Entries[I].Name, A.Entries[I].Offset, A.Entries[I].Size]));
+      if OutDir <> '' then
+      begin
+        Raw := TMemoryStream.Create;
+        try
+          A.LoadRaw(I, Raw);
+          Raw.SaveToFile(OutDir + A.Entries[I].Name);
+        finally
+          Raw.Free;
+        end;
+      end;
+    end;
+    Log.Add('OK');
+  finally
+    A.Free;
+  end;
+end;
+
+{ Additive 32-bit checksum over the decoded samples. Cheap, order-sensitive,
+  and trivial to reproduce in another language - which is the whole point. }
+function SampleChecksum(const W: TWaveData): LongWord;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(W.Samples) do
+    Result := ((Result shl 1) or (Result shr 31)) xor LongWord(Word(W.Samples[I]));
+end;
+
+{ --selftest-audio <gamedir> [outdir] : the sound-effect path.
+
+  Decodes all 57 effects and reports the source format of each. If outdir is
+  given, the normalised PCM (signed 16-bit mono at MIX_RATE) is written there
+  as raw .pcm so tools/decode_wav_ref.py can compare byte for byte. }
+function SelfTestAudio(Log: TStrings): Integer;
+var
+  GameDir, OutDir, Path: string;
+  I, Ok, Missing: Integer;
+  W: TWaveData;
+  F: TFileStream;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  OutDir := '';
+  if ParamCount >= 3 then
+    OutDir := IncludeTrailingPathDelimiter(ParamStr(3));
+
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add(Format('table entries: %d   mix rate: %d Hz', [SOUND_COUNT, MIX_RATE]));
+  Log.Add('');
+  Log.Add('idx name              rate  bits ch  samples     ms  checksum');
+
+  Ok := 0;
+  Missing := 0;
+  for I := 0 to SOUND_COUNT - 1 do
+  begin
+    Path := SoundPath(GameDir, I);
+    if not LoadWave(Path, W) then
+    begin
+      Log.Add(Format('%3d %-17s MISSING OR UNDECODABLE (%s)',
+        [I, SoundNames[I], Path]));
+      Inc(Missing);
+      Continue;
+    end;
+    Inc(Ok);
+    Log.Add(Format('%3d %-17s %5d %5d %2d %8d %6d  %8.8x',
+      [I, SoundNames[I], W.SourceRate, W.SourceBits, W.SourceChannels,
+       Length(W.Samples), WaveDurationMs(W), SampleChecksum(W)]));
+
+    if (OutDir <> '') and (Length(W.Samples) > 0) then
+    begin
+      F := TFileStream.Create(Format('%s%.2d.pcm', [OutDir, I]), fmCreate);
+      try
+        F.WriteBuffer(W.Samples[0], Length(W.Samples) * SizeOf(SmallInt));
+      finally
+        F.Free;
+      end;
+    end;
+  end;
+
+  Log.Add('');
+  Log.Add(Format('decoded %d of %d, %d missing', [Ok, SOUND_COUNT, Missing]));
+
+  { The original's attenuation curve, tabulated so it can be checked against
+    the disassembly by hand: SetVolume((10 - v) * -0x1C2), hundredths of a dB. }
+  Log.Add('');
+  Log.Add('volume curve (settings +0x24 -> DirectSound mB -> linear gain):');
+  for I := 0 to VOLUME_MAX do
+    Log.Add(Format('  v=%2d  %6d mB  gain %.5f',
+      [I, (VOLUME_MAX - I) * VOLUME_STEP_MB, VolumeToGain(I) / 65536.0]));
+
+  if Missing > 0 then
+    Result := 1
+  else
+    Log.Add('OK');
+end;
+
+{ --selftest-midi <gamedir> : the music path.
+
+  Parses every track in the playlist and reports what the reader made of it.
+  The event checksum covers the MERGED stream, so it validates the k-way merge
+  and the running-status handling, not just the chunk walk - a parser that
+  merged tracks in the wrong order would still report the right event count.
+  tools/parse_midi_ref.py recomputes the same numbers independently. }
+function SelfTestMidi(Log: TStrings): Integer;
+const
+  { The playlist, from the form resource; it also sits in the executable as a
+    static array[0..14] of AnsiString at VA 0x00468D14. }
+  PLAYLIST: array[0..14] of string = (
+    'init', 'main01', 'gameover', 'boss01', 'itemget', 'open01', 'end01',
+    'main02', 'open02', 'boss02', 'end02', 'soulget', 'end03', 'end04',
+    'end05');
+var
+  GameDir, Path: string;
+  I, J, Bad: Integer;
+  M: TMidiFile;
+  Ev: TMidiEvent;
+  Sum: LongWord;
+begin
+  Result := 0;
+  GameDir := IncludeTrailingPathDelimiter(ParamStr(2));
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+  Log.Add('name        fmt trks  div   events   ms  checksum');
+
+  Bad := 0;
+  M := TMidiFile.Create;
+  try
+    for I := 0 to High(PLAYLIST) do
+    begin
+      Path := GameDir + 'midi' + PathDelim + PLAYLIST[I] + '.mid';
+      if not M.LoadFromFile(Path) then
+      begin
+        Log.Add(Format('%-11s PARSE FAILED (%s)', [PLAYLIST[I], Path]));
+        Inc(Bad);
+        Continue;
+      end;
+
+      Sum := 0;
+      for J := 0 to M.Count - 1 do
+      begin
+        Ev := M[J];
+        Sum := ((Sum shl 1) or (Sum shr 31)) xor Ev.Tick;
+        Sum := ((Sum shl 1) or (Sum shr 31)) xor Ev.Msg;
+        Sum := ((Sum shl 1) or (Sum shr 31)) xor LongWord(Ord(Ev.Kind));
+      end;
+
+      Log.Add(Format('%-11s %3d %4d %4d %8d %6d  %8.8x',
+        [PLAYLIST[I], M.Format, M.TrackCount, M.Division, M.Count,
+         M.DurationUs div 1000, Sum]));
+    end;
+  finally
+    M.Free;
+  end;
+
+  Log.Add('');
+  Log.Add(Format('parsed %d of %d', [Length(PLAYLIST) - Bad, Length(PLAYLIST)]));
+  if Bad > 0 then
+    Result := 1
+  else
+    Log.Add('OK');
+end;
+
+function RunSelfTest: Integer;
+var
+  Log: TStringList;
 begin
   Result := 0;
   Log := TStringList.Create;
   try
     try
-      OutDir := '';
-      if ParamCount >= 3 then
-        OutDir := IncludeTrailingPathDelimiter(ParamStr(3));
-
-      A := TQdaArchive.Create(ParamStr(2));
-      try
-        Log.Add(Format('archive: %s', [ParamStr(2)]));
-        Log.Add(Format('entries: %d', [A.Count]));
-        for I := 0 to A.Count - 1 do
-        begin
-          Log.Add(Format('%-18s off=%-9d size=%d',
-            [A.Entries[I].Name, A.Entries[I].Offset, A.Entries[I].Size]));
-          if OutDir <> '' then
-          begin
-            Raw := TMemoryStream.Create;
-            try
-              A.LoadRaw(I, Raw);
-              Raw.SaveToFile(OutDir + A.Entries[I].Name);
-            finally
-              Raw.Free;
-            end;
-          end;
-        end;
-        Log.Add('OK');
-      finally
-        A.Free;
-      end;
+      if ParamStr(1) = '--selftest-audio' then
+        Result := SelfTestAudio(Log)
+      else if ParamStr(1) = '--selftest-midi' then
+        Result := SelfTestMidi(Log)
+      else
+        Result := SelfTestArchive(Log);
     except
       on E: Exception do
       begin
@@ -82,9 +251,10 @@ begin
 end;
 
 begin
-  if ParamStr(1) = '--selftest' then
+  if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
+     (ParamStr(1) = '--selftest-midi') then
   begin
-    ExitCode := SelfTest;
+    ExitCode := RunSelfTest;
     Exit;
   end;
 

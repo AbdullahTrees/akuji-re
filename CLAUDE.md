@@ -12,12 +12,17 @@ Read sections 1–4 before touching anything.
 
 **The rebuilt source builds and runs.** `lazbuild akuji.lpi` in `src/` produces a
 working 320x240 window titled "Akuji the Demon". The recovered form loads and all
-four component classes resolve. No game logic yet.
+four component classes resolve, with working sound and music. The game
+loop, title menu, save loading and tilemap rendering run; entity logic does not.
 
 Toolchain: Lazarus at `E:\lazarus`, FPC 3.2.2, targets Win64.
 Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 
-**Next:** translate the state handlers (section 6) into `GmMain.pas`.
+**Audio works**: 57 effects and 15 MIDI tracks, both readers cross-checked
+against independent Python implementations (section 13).
+
+**Next:** the entity system - the ~0x104-byte record, the state 60/100/140
+update path, collision, the player controller.
 
 ## 2. The three layers — most important section
 
@@ -295,8 +300,9 @@ Still open: `ev*.dat` event-script opcodes, `stage.dat` columns 5..15, and the
 - **8-bit palettes.** Original uses `SelectPalette`/`RealizePalette`. Modern
   drivers have no hardware palettes. Convert indexed surfaces to RGBA at load.
 - **Frame timing.** See section 6 — replace the spin-wait.
-- **MIDI.** `Kbgm32.dll` drives the system MIDI mapper with SysEx. Options: a
-  Pascal MIDI library, FluidSynth, or pre-render the 15 tracks to OGG.
+- **MIDI.** Resolved - see section 13. The only SysEx is a GM Reset plus two
+  Roland GS writes, all in `init.mid`; nothing per-note. Windows plays through
+  the system mapper; other platforms need a soft synth behind `MidiOut`.
 - **Write paths.** Original writes beside the exe and to
   `HKCU\Software\Borland\Delphi\RTL`. Use a per-user config dir.
 - **Shift-JIS.** The game is Japanese in origin; data-file text is not UTF-8.
@@ -343,3 +349,68 @@ Raw disassembly without Ghidra:
 `objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`
 (msys2 at `/c/msys64/mingw64/bin`). Ghidra scripts can be compile-checked with
 `javac` against the install's jars.
+
+## 13. Audio - solved and implemented
+
+Both name tables are static `array of AnsiString` in DATA, reached through a
+global pointer. Lengths come from the unit finalisation at `0x00452543`, which
+calls `_FinalizeArray(base, AnsiString, count)` - so they are read off, not
+counted by hand:
+
+| Global ptr | Array | Count | Contents |
+|---|---|---|---|
+| `p_SoundNames` `0x0046D0EC` | `0x00468D50` | 57 (`$39`) | the effect files |
+| `p_MidiNames` `0x0046D154` | `0x00468D14` | 15 (`$0F`) | the playlist |
+
+**`ChannelCount = 57` is not polyphony.** It is one DirectSound buffer per
+effect - 57 names, 57 files in `wav/`, the two sets equal with nothing left over
+either way. Slot number and sound number are the same thing.
+
+`TDDSD_Play` (`0x00450FD8`) takes `(Self, Index, Restart)` in EAX/EDX/CL and
+rewinds when `CL = 1`. **All 104 call sites pass 1**, so effects always retrigger
+and never layer. `TKbgmPlayer`'s methods take the *name*, not an index - the play
+method refcounts an AnsiString in EDX.
+
+`Title_Init` (`0x0046214C`) is fully traced, including the volume sweep
+`for i := 0 to $38 do SetVolume(-(10 - Settings[$24]) * $1C2)` - the DirectSound
+attenuation curve, full at 10 and -45 dB at 0. Its `Font_Define` arguments match
+`GameFont.pas` exactly, which independently confirms those constants.
+
+Formats: every effect is PCM mono, 8 or 16 bit, at 11025 or 22050 Hz - so
+mixing at 22050 needs no fractional resampling. Every MIDI file is format 1 at
+48 ticks per quarter. `main01.mid` and `end05.mid` are byte-identical.
+
+Implemented as `SoundTable` / `WaveFile` / `AudioMixer` / `AudioOut` and
+`MidiFile` / `MidiOut` / `KbgmPlayer`. Only the two `*Out` units are
+platform-specific. Call map: `notes/audio_map.md`.
+
+## 14. How this is verified
+
+A byte-identical rebuild is impossible - different compiler, different RTL,
+64-bit target - so correctness is established three other ways, in descending
+order of strength:
+
+1. **Two independent readers agreeing.** Every binary format is implemented
+   twice, once in Pascal and once in Python from the same evidence, and diffed:
+   44/44 QDA entries byte-identical, 57/57 effects byte-identical after
+   decoding, 15/15 MIDI tracks matching on a checksum of the *merged* event
+   stream (which also validates the track merge, not just the chunk walk).
+   Run `--selftest`, `--selftest-audio`, `--selftest-midi`, then the matching
+   `tools/*_ref.py`.
+2. **Self-validating structure.** The QDA directory plus the sum of its entry
+   sizes equals the file length exactly; every `.map` is exactly
+   `24 + w*h*2` bytes; `save.dat` is exactly `SizeOf(TPlayerState)`, asserted at
+   startup; the sound-name array terminates cleanly right where the key-name
+   array begins.
+3. **Cross-corroboration between unrelated parts of the binary.** The form
+   resource's `ChannelCount = 57` matches the name array length and the file
+   count. `Title_Init`'s `Font_Define` arguments match constants derived
+   separately from the font sheet. The DFM's `AutoLoadMidis` matches the static
+   name array entry for entry.
+
+What this does **not** cover is game logic behaviour - entity movement,
+collision, scoring. Establishing that needs differential tracing against the
+running original, which has not been set up. A cheap way in when it matters:
+`kbgm32.dll` is an ordinary DLL with 13 named exports, so a logging proxy would
+give exact ground truth for the music layer. It needs a 32-bit toolchain, which
+this machine does not currently have.

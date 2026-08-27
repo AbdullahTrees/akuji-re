@@ -102,7 +102,7 @@ var
 begin
   { TODO: load data\system.dat (56-byte struct, CLAUDE.md section 7) }
   { TODO: read system.ini -> input device, fullscreen }
-  { TODO: init sound, input, sprite engine }
+  { TODO: init input, sprite engine }
 
   DataDir := FindGameData;
   if DataDir <> '' then
@@ -129,6 +129,16 @@ begin
       FFont := TGameFont.Create(Sheet);
 
     FTitle := FSurfaces[1];   { menu background - owned by FSurfaces }
+
+    { Audio. The original opened DirectSound in the component's own init and
+      loaded all 57 effects up front; nothing streams. Volume comes from
+      system.dat +0x24 and defaults to 10 until that struct is read.
+
+      A machine with no sound device must still play, so a failure here is
+      recorded and ignored rather than raised. }
+    DDSD1.Open(DataDir);
+    DDSD1.Volume := 10;
+    KbgmPlayer1.Open(DataDir);
   end;
 
   { Present() blits straight to the form canvas for speed, which is fine while
@@ -244,11 +254,27 @@ procedure TFrm_main.DispatchState;
 begin
   case GameStateValue of
     GS_TITLE_INIT:
-      { Placeholder. The original's Title_Init (0x0046214C) resets state, loads
-        asset set 0, starts the music and sets all 57 sound channel volumes,
-        then moves to GS_TITLE_MENU. Until that is translated, prove the asset
-        pipeline by drawing the real title screen out of bmp.qda. }
+      { Title_Init @ 0x0046214C. Now traced end to end:
+
+          Load_Stage_Assets(Self, 0)              surface + sprite set 0
+          Font_Define(0, Surfaces[0], $20, $140, 8, 8, 9, 9, $5F)
+          KbgmPlayer1.Play(p_MidiNames[0], 0)     'midi\init'
+          p_GameState := $14                      -> GS_TITLE_MENU
+          for i := 0 to $38 do                    all 57 effect buffers
+            DDSD1[i].SetVolume(-(10 - Settings[$24]) * $1C2)
+
+        The asset load and the font definition already happen in DDDD1Init, so
+        what is added here is the music and the volume sweep. The Font_Define
+        arguments match GameFont.pas exactly - 32 columns, 9x9 cells, 8 pixel
+        advance, last character $5F - which is independent confirmation of
+        constants that were originally read out of the font sheet itself. }
       begin
+        { Track 0 is init.mid: a GM Reset and two Roland GS writes, not music.
+          The original passes ECX = 0 here, believed to be the repeat flag -
+          a one-shot reset would not loop. }
+        KbgmPlayer1.Play(0, False);
+        DDSD1.Volume := Settings.Volume;
+
         if Assigned(FTitle) then
           DDDD1.Canvas.Draw(0, 0, FTitle);
         { Original Title_Init falls straight through to the menu. }
@@ -349,6 +375,10 @@ begin
   FSprites.Free;
   FSurfaces.Free;   { owns FTitle }
   FArchive.Free;
+  { Stop the audio device before the component tree is torn down - the feed
+    thread holds a pointer to the mixer. }
+  KbgmPlayer1.Close;
+  DDSD1.Close;
   { TODO: teardown - the original released the sprite engine and surfaces }
 end;
 
