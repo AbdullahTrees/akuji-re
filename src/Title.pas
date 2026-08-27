@@ -11,10 +11,12 @@
   Every string, coordinate and range below is taken from the decompilation.
   Coordinates are in the original's 320x240 space.
 
-  NOT YET FAITHFUL: the original renders through Game_DrawText (0x004511EC),
-  a bitmap font from font9x9-01.bmp in bmp.qda. This uses LCL text so the menu
-  is navigable now; swapping in the real font is a separate job and will change
-  metrics. }
+  Rendering goes through the game's own bitmap font (GameFont.pas), the same
+  font9x9-01.bmp sheet the original used, so metrics and colours match.
+
+  Still stubbed: option value editing (MoveX) and key rebinding, which needs raw
+  button polling rather than an axis. The menu backgrounds (p_Surfaces[1] and
+  [2]) are not loaded yet. }
 
 unit Title;
 
@@ -23,7 +25,7 @@ unit Title;
 interface
 
 uses
-  Classes, SysUtils, Graphics, GameState;
+  Classes, SysUtils, Graphics, GameState, GameFont;
 
 const
   { Sub-modes, p_TitleSubMode @ 0x0046CEF8 }
@@ -73,7 +75,7 @@ type
     { Returns True when the caller should leave the title screen; the new
       GameStateValue has already been set. }
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
-    procedure Draw(C: TCanvas);
+    procedure Draw(C: TCanvas; F: TGameFont);
 
     property SubMode: Integer read FSubMode;
     property Index: Integer read FIndex;
@@ -173,28 +175,28 @@ begin
   end;
 end;
 
-procedure TTitleScreen.Draw(C: TCanvas);
+procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont);
 var
   I: Integer;
 begin
-  { Placeholder rendering. The original blits p_Surfaces[1] for the menu and
-    p_Surfaces[2] for options as a full-screen 320x240 background first. }
-  C.Font.Color := clWhite;
-  C.Brush.Style := bsClear;
+  { The original blits p_Surfaces[1] for the menu and p_Surfaces[2] for options
+    as a full-screen 320x240 background before this. Colour variants below match
+    the original's param_5: 2 for items, 1 for the cursor, 0 for the credit. }
+  if F = nil then Exit;
 
   case FSubMode of
     TSM_MENU:
       begin
         for I := Low(MENU_ITEMS) to High(MENU_ITEMS) do
-          C.TextOut(MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I]);
-        C.TextOut(MENU_CURSOR_X, (FIndex * 2 + $11) * 8, '>');
-        C.TextOut(0, $D8, CREDIT_TEXT);
+          F.TextOut(C, MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I], 2);
+        F.TextOut(C, MENU_CURSOR_X, (FIndex * 2 + $11) * 8, '>', 1);
+        F.TextOut(C, 0, $D8, CREDIT_TEXT, 0);
       end;
 
     TSM_OPTIONS:
       begin
-        C.TextOut(0, $20, '- OPTION -');
-        C.TextOut(OPT_CURSOR_X, (FIndex * 2 + 7) * 8, '>');
+        F.TextOut(C, 0, $20, '- OPTION -', 2);
+        F.TextOut(C, OPT_CURSOR_X, (FIndex * 2 + 7) * 8, '>', 1);
       end;
   end;
 end;

@@ -417,3 +417,35 @@ rows y=`0x38 + row*0x10`, cursor x=`0xE0` y=`(i*2+7)*8`. Ten rows:
 
 `p_MenuIndex` (`0x46cf88`) is the shared cursor for title, options and pause —
 it is not pause-specific, hence the rename from `p_PauseMenuIndex`.
+
+## Bitmap font — solved
+
+`Font_Define` `0x4511a0` fills a table at `0x46e8a4` (0x20 stride, multiple
+fonts possible). `Title_Init` registers font 0:
+
+```
+Font_Define(0, p_Surfaces[0], $20, $140, 8, 8, 9, 9, $5F)
+               surface  firstCh screenW adv cellH cellW lastCh
+```
+
+`Game_DrawText` `0x4511ec` `(fontIdx, x, y, centred, variant, text)`:
+
+```
+idx = ch - FirstChar
+col = idx mod 32       srcX = col * CellW
+row = idx div 32       srcY = row * CellH + CellH * Variant * 2
+dest = (x + i * Advance, y)
+centred: x = (ScreenW - Len*Advance) div 2
+```
+
+Verified against `font9x9-01.bmp`: 288x54 == exactly 32 cols x 6 rows of 9x9,
+i.e. 3 colour variants x 2 rows x 32 glyphs. Range `$20..$5F` is 64 glyphs,
+space through underscore — **no lowercase**, which is why every string in the
+game is upper case.
+
+Colours sampled from the sheet: black background (the colour key), a shared
+dark-brown outline `(61,35,35)`, and per-variant fill — 0 white, 1 pink
+`(255,123,123)`, 2 peach `(255,188,133)`.
+
+Implemented as `src/GameFont.pas`. Glyphs are pre-cut into individual bitmaps
+because LCL's `Draw` honours `TBitmap.Transparent` but `CopyRect` does not.

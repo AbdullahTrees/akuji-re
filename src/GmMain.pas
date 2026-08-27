@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title;
+  QdaArchive, Title, GameFont;
 
 type
   TFrm_main = class(TForm)
@@ -39,6 +39,7 @@ type
     FArchive: TQdaArchive;
     FTitle: TBitmap;
     FTitleScreen: TTitleScreen;
+    FFont: TGameFont;
     FMoveY: Integer;
     FConfirm: Boolean;
     function FindGameData: string;
@@ -87,6 +88,7 @@ end;
 procedure TFrm_main.DDDD1Init(Sender: TObject);
 var
   DataDir: string;
+  Sheet: TBitmap;
 begin
   { TODO: load data\system.dat (56-byte struct, CLAUDE.md section 7) }
   { TODO: read system.ini -> input device, fullscreen }
@@ -97,6 +99,12 @@ begin
   begin
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
     FTitle := FArchive.LoadBitmapByName('title.bmp');   { stored as title.BMP }
+    Sheet := FArchive.LoadBitmapByName('font9x9-01.bmp');
+    try
+      FFont := TGameFont.Create(Sheet);
+    finally
+      Sheet.Free;
+    end;
   end;
 
   { Present() blits straight to the form canvas for speed, which is fine while
@@ -180,7 +188,7 @@ begin
         FConfirm := False;
         if Assigned(FTitle) then
           DDDD1.Canvas.Draw(0, 0, FTitle);
-        FTitleScreen.Draw(DDDD1.Canvas);
+        FTitleScreen.Draw(DDDD1.Canvas, FFont);
       end;
     GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
     GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
@@ -228,6 +236,7 @@ end;
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   Application.OnIdle := nil;
+  FFont.Free;
   FTitleScreen.Free;
   FTitle.Free;
   FArchive.Free;
