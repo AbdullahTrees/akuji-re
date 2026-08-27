@@ -21,7 +21,8 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
-  DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState;
+  DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
+  QdaArchive;
 
 type
   TFrm_main = class(TForm)
@@ -35,6 +36,9 @@ type
   private
     FLastFrame: QWord;     // p_LastFrameTime 0x0046D1E0
     FLimitFrames: Boolean; // flag at 0x0046CE60
+    FArchive: TQdaArchive;
+    FTitle: TBitmap;
+    function FindGameData: string;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
     procedure DispatchState;
@@ -54,11 +58,42 @@ implementation
   initialised the subsystems, then installed the idle handler. Only the last
   step is translated so far.
   --------------------------------------------------------------------------- }
+{ The original ran from the game directory, so its paths were relative. The
+  rebuild lives in src/, so look in the obvious places rather than assuming. }
+function TFrm_main.FindGameData: string;
+const
+  Candidates: array[0..2] of string = (
+    '',
+    '..' + PathDelim + 'English Translated Version 1.1 (D)' + PathDelim,
+    '..' + PathDelim + '..' + PathDelim + 'English Translated Version 1.1 (D)' + PathDelim);
+var
+  Base, P: string;
+  I: Integer;
+begin
+  Base := ExtractFilePath(ParamStr(0));
+  for I := Low(Candidates) to High(Candidates) do
+  begin
+    P := Base + Candidates[I];
+    if FileExists(P + 'bmp.qda') then
+      Exit(P);
+  end;
+  Result := '';
+end;
+
 procedure TFrm_main.DDDD1Init(Sender: TObject);
+var
+  DataDir: string;
 begin
   { TODO: load data\system.dat (56-byte struct, CLAUDE.md section 7) }
   { TODO: read system.ini -> input device, fullscreen }
-  { TODO: init sound, input, sprite engine, load assets }
+  { TODO: init sound, input, sprite engine }
+
+  DataDir := FindGameData;
+  if DataDir <> '' then
+  begin
+    FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
+    FTitle := FArchive.LoadBitmapByName('title.bmp');   { stored as title.BMP }
+  end;
 
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
@@ -114,7 +149,12 @@ end;
 procedure TFrm_main.DispatchState;
 begin
   case GameStateValue of
-    GS_STAGE_INIT:  ;  { TODO Stage_Init            0x0046214C }
+    GS_STAGE_INIT:
+      { Placeholder: the original's Stage_Init (0x0046214C) loads a stage.
+        Until that is translated, prove the asset pipeline by drawing the real
+        title screen out of bmp.qda. }
+      if Assigned(FTitle) then
+        DDDD1.Canvas.Draw(0, 0, FTitle);
     GS_STATE_20:    ;  { TODO FUN_00462330 }
     GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
     GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
@@ -151,6 +191,8 @@ end;
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   Application.OnIdle := nil;
+  FTitle.Free;
+  FArchive.Free;
   { TODO: teardown - the original released the sprite engine and surfaces }
 end;
 

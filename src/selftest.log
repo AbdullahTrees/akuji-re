@@ -1,0 +1,47 @@
+archive: C:/Users/Abdullah/devel/source/REVERSE/Akuji-the-Demon_Win_EN_by-D/English Translated Version 1.1 (D)/bmp.qda
+entries: 44
+omake02.bmp        off=12048     size=230456
+omake03.bmp        off=242504    size=230456
+omake04.bmp        off=472960    size=230456
+omake05.bmp        off=703416    size=230456
+omake06.bmp        off=933872    size=230456
+omake07.bmp        off=1164328   size=230456
+op001.bmp          off=1394784   size=129654
+op002.bmp          off=1524438   size=129654
+op003.bmp          off=1654092   size=129656
+op004.bmp          off=1783748   size=129654
+op005.bmp          off=1913402   size=129654
+op006.bmp          off=2043056   size=129654
+Option.bmp         off=2172710   size=230456
+power.bmp          off=2403166   size=230456
+sys.BMP            off=2633622   size=46136
+title.BMP          off=2679758   size=230456
+bg001.BMP          off=2910214   size=307256
+bg002.BMP          off=3217470   size=307256
+bg003.BMP          off=3524726   size=307256
+bg004.BMP          off=3831982   size=307256
+bg005-1.BMP        off=4139238   size=307256
+bg005-2.BMP        off=4446494   size=307256
+bg005-3.BMP        off=4753750   size=307256
+bg005-4.BMP        off=5061006   size=307256
+boss01.BMP         off=5368262   size=118328
+boss02.BMP         off=5486590   size=152120
+boss03.BMP         off=5638710   size=92216
+boss04.BMP         off=5730926   size=235064
+boss05.BMP         off=5965990   size=118328
+boss06-1.BMP       off=6084318   size=307256
+boss06-2.BMP       off=6391574   size=165944
+boss06-3.BMP       off=6557518   size=172088
+chr01.BMP          off=6729606   size=307256
+chr02.BMP          off=7036862   size=307256
+chr03.BMP          off=7344118   size=230456
+chr04.BMP          off=7574574   size=307256
+ed001.bmp          off=7881830   size=129654
+ed002.bmp          off=8011484   size=129654
+ed003.bmp          off=8141138   size=129654
+ed004.bmp          off=8270792   size=129654
+ed005.bmp          off=8400446   size=230456
+font9x9-01.BMP     off=8630902   size=46712
+gameover.bmp       off=8677614   size=230456
+omake01.bmp        off=8908070   size=230456
+OK

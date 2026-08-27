@@ -188,19 +188,59 @@ overwrites them.
 `system.ini` is read via an INI object at `Self+0x2E0`. `InstanceSize` is `0x2E8`,
 so `+0x2E0`/`+0x2E4` are the form's only non-component fields.
 
-## 8. Assets — not yet reversed
+## 8. Assets — mostly solved
 
-| Path | Loader |
-|---|---|
-| `data\stage.dat` | `Stage_Init` `0x46214c` |
-| `data\surf\` | `Load_Surface_Textures` `0x465e9c` |
-| `data\spr\` | `Load_Sprite_Sheets` `0x4660b8` |
-| `data\tk\` | `Load_Tile_Data` `0x466340` |
-| `data\ev\` | `Load_Event_Scripts` `0x465b50` |
-| `data\save.dat` | `Game_CheckSaveExists` `0x463154` |
-| `bmp.qda` | unidentified |
+**Most of the asset formats are plain text CSV**, not binary. The files are flat
+in `data/`, not in subdirectories (an earlier note claimed `data\spr\` etc.;
+that was wrong).
 
-`Load_Stage_Assets` `0x465a1c` orchestrates the first five.
+| File | Format | Content |
+|---|---|---|
+| `stage.dat` | CSV | `0,	0,	-1,-1,-1,	...` — per-stage integer rows |
+| `spr000..009.dat` | CSV | `0,	8,8,	1,1,	0,0` — sprite metadata |
+| `surf000..009.dat` | CSV | `title.bmp,		320,	240` — **name, width, height**, referencing entries in `bmp.qda` |
+| `ev000..065.dat` | CSV | `9,0000,1001,0019,0008,0014-*,1001` — event scripts |
+| `tk000..065.dat` | ASCII | tile maps, one char per tile (`tk000.dat` is `aaaaaaaa`) |
+| `system.dat` | binary | the 56-byte settings struct, section 7 |
+| `save.dat` | binary | 4580 bytes — **not yet decoded** |
+| `bmp.qda` | QDA0 archive | 9.1 MB, 44 uncompressed 24-bit BMPs |
+
+### QDA0 archive — solved and implemented
+
+```
+0x00   4      zero
+0x04   4      magic "QDA0"
+0x08   4      entry count (44)
+0x0C   244    zero padding to 0x100
+0x100  n*268  directory
+...           data, in directory order
+
+entry (268 bytes):
+  +0x00  4    absolute offset
+  +0x04  4    size
+  +0x08  4    size again (room for compression; unused here)
+  +0x0C  256  NUL-terminated name
+```
+
+Self-validating: directory size plus the sum of all entry sizes equals the file
+length exactly. Contents are plain uncompressed 24-bit BMPs at assorted sizes
+(320x240, 320x320, 240x180, 288x54, ...), so `TBitmap` loads them directly.
+
+**Implemented as `src/QdaArchive.pas`**, verified byte-identical against the
+reference extractor `tools/extract_qda.py` across all 44 entries
+(`akuji.exe --selftest <qda> <outdir>`, writes `selftest.log`).
+
+**Names are case-inconsistent** — the archive holds `title.BMP` and `sys.BMP`
+while the `.dat` metadata says `title.bmp`. Lookups must be case-insensitive;
+matching exactly silently fails on roughly a third of the archive.
+
+### Remaining asset work
+
+`save.dat` (4580 bytes, binary) is undecoded. The CSV formats need column
+meanings worked out — the loaders are `Stage_Init` `0x46214c`,
+`Load_Surface_Textures` `0x465e9c`, `Load_Sprite_Sheets` `0x4660b8`,
+`Load_Tile_Data` `0x466340`, `Load_Event_Scripts` `0x465b50`, orchestrated by
+`Load_Stage_Assets` `0x465a1c`.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 
