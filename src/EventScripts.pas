@@ -17,15 +17,47 @@
   the field order in the record - the loader scatters them:
 
       csv 0 -> +0x00 int      opcode
-      csv 1 -> +0x1C int
-      csv 2 -> +0x20 int
-      csv 3 -> +0x10 int
-      csv 4 -> +0x14 int
-      csv 5 -> +0x0C string
-      csv 6 -> +0x18 string
+      csv 1 -> +0x1C int      REQUIRED progress flag  (0 = no condition)
+      csv 2 -> +0x20 int      FORBIDDING progress flag (0 = no condition)
+      csv 3 -> +0x10 int      tile X
+      csv 4 -> +0x14 int      tile Y
+      csv 5 -> +0x0C string   ParamA - what to place, see EventCommands.pas
+      csv 6 -> +0x18 string   ParamB
 
-  +0x04 and +0x08 are never written by the loader, and +0x05 is a runtime byte
-  that Entity_Destroy clears - so the record is bigger than the file's content.
+  The loader never writes +0x04, +0x05 or +0x08; all three are runtime state,
+  and Events_SpawnNearCamera @ 0x00454790 shows what they are:
+
+      +0x04  byte, "inside the camera window"; cleared again when it leaves
+      +0x05  byte, "an entity for this event exists right now"
+      +0x08  int, the entity slot that entity occupies
+
+  So the record is bigger than the file's content by exactly its bookkeeping.
+
+  ## The two condition fields
+
+  Every frame, Events_SpawnNearCamera walks the whole table and spawns anything
+  inside a window of the camera - the visible 10 x 7.5 tiles plus two tiles of
+  margin on every side. Before it spawns, it applies csv 1 and csv 2:
+
+      if (csv1 = 0) or (Progress[csv1] <> 0) then      // required
+        if (csv2 = 0) or (Progress[csv2] <> 1) then    // forbidding
+          spawn it
+        else
+          disable the event PERMANENTLY - opcode := -1, tile := (-32, -32) -
+          and destroy its entity if one is out
+
+  That is the whole "this is gone for good now" mechanism, and it explains a
+  pattern that had been noticed in the data without an explanation: for all 154
+  opcode-5 records, the flag the event SETS is its own csv 2. Pick the item up,
+  the flag goes to 1, and the event disables itself the next time the camera
+  comes near. One field, read two ways, agreeing 154 times out of 154.
+
+  csv 1 is the same idea inverted, and it is how the game does DIFFICULTY.
+  Game_StartOrLoad publishes the difficulty as one of Progress[10], Progress[5]
+  and Progress[6] for levels 0, 1 and 2 - and 5, 40 and 23 records respectively
+  require exactly those flags. Nothing else in the game reads them, and no
+  event script guards on them, which is why they looked dead until this
+  function was read.
 
   Validated against the shipped data: all 692 lines across all 66 ev files have
   exactly seven fields, with no exceptions and nothing needing a fallback.
@@ -36,7 +68,11 @@
 
       0 x18    1 x249    4 x9    5 x154    6 x5    7 x26    9 x231
 
-  Two of them are decoded, both from Entity_Destroy @ 0x00461400:
+  Opcodes 2 and 3 exist in the CODE and appear nowhere in the data. Both
+  Entity_SolidCollideX and Entity_SolidCollideY, having found that the player
+  is pressing against a solid, look up that solid's event and start it if the
+  opcode is 2 (while holding the axis into it) or 3 (while pressing confirm).
+  A "push against this to trigger it" pair that shipped unused.
 
       0   TRIGGERS ON TOUCH, unconditionally. Entity_PlayerTouch @ 0x00457880
           starts the event as soon as the player's hitbox overlaps the entity
@@ -50,6 +86,20 @@
           PlayerState.Progress[that]. This is how the 0x1195-byte progress
           block is populated - see ProgressIndexOf below.
       7   calls Event_Begin(eventIndex, 4).
+      4   ALWAYS ACTIVE. Events_SpawnNearCamera spawns it regardless of where
+          the camera is - the window test is bypassed for opcode 4 - and then
+          calls Event_Begin on it immediately, every frame, until something
+          stops it.
+
+          All nine in the shipped data are the same construction: placed at
+          tile (1,1) as entity type 20, csv 1 clear, csv 2 set, and carrying a
+          program that tests a list of flags with sub-op 15, and on success
+          sets a flag, waits 10 frames, plays sound 32 and disables itself with
+          sub-op 7. The flag it sets is its own csv 2 - so a solved puzzle
+          disables its own checker. Nine of nine, no exceptions.
+
+          Type 20 is also the one type Events_SpawnNearCamera special-cases,
+          forcing its box to 32x32.
 
   Opcodes 0, 1 and 7 all reach the same place - Event_Begin @ 0x00454EF4 - so
   they are three ways of STARTING a script rather than three different actions.
@@ -68,7 +118,9 @@
   what triggers them: 0 on touch, 1 on touch plus a button, 6 on being shot,
   7 from Entity_Destroy.
 
-  Opcodes 4 and 9 are still not decoded and are deliberately left unnamed. }
+  Opcode 9 is still not decoded and is deliberately left unnamed. It is the
+  second most common - 231 records - and its ParamB is a bare id or '*', the
+  same shape opcode 5 has, so whatever reads it reads a single number. }
 
 unit EventScripts;
 
@@ -89,17 +141,29 @@ const
   EVOP_SET_PROGRESS = 5;
   EVOP_ON_HIT       = 6;   { starts when a projectile hits the entity }
   EVOP_CALL_454EF4  = 7;   { starts unconditionally from Entity_Destroy }
+  EVOP_ALWAYS       = 4;   { spawned and run every frame, ignoring the camera }
+  EVOP_PUSH_AXIS    = 2;   { unused: push into the solid holding a direction }
+  EVOP_PUSH_CONFIRM = 3;   { unused: push into the solid and press confirm }
+
+  { What Events_SpawnNearCamera writes into a disabled event. }
+  EVOP_DISABLED     = -1;
+  EVENT_DISABLED_TILE = -32;
+
+  { The spawn window, in tiles around the camera's top-left tile. The screen
+    is 10 x 7.5 tiles and the margin is 2 on every side; the vertical bound is
+    a float in the original for the same reason it is in Camera.pas. }
+  SPAWN_MARGIN_TILES = 2;
 
 type
   TEventRecord = record
     Opcode:  Integer;   { csv 0 -> +0x00 }
     Active:  Boolean;   { +0x05, runtime only; Entity_Destroy clears it }
     ParamA:  string;    { csv 5 -> +0x0C }
-    Field10: Integer;   { csv 3 -> +0x10 }
-    Field14: Integer;   { csv 4 -> +0x14 }
+    TileX:   Integer;   { csv 3 -> +0x10 }
+    TileY:   Integer;   { csv 4 -> +0x14 }
     ParamB:  string;    { csv 6 -> +0x18 }
-    Field1C: Integer;   { csv 1 -> +0x1C }
-    Field20: Integer;   { csv 2 -> +0x20 }
+    NeedsFlag: Integer; { csv 1 -> +0x1C, spawn only if this flag is set }
+    BlockedBy: Integer; { csv 2 -> +0x20, dead for good once this flag is set }
   end;
 
   TEventScript = class
@@ -164,11 +228,11 @@ begin
     Result.Opcode := -1;
     Result.Active := False;
     Result.ParamA := '';
-    Result.Field10 := 0;
-    Result.Field14 := 0;
+    Result.TileX := 0;
+    Result.TileY := 0;
     Result.ParamB := '';
-    Result.Field1C := 0;
-    Result.Field20 := 0;
+    Result.NeedsFlag := 0;
+    Result.BlockedBy := 0;
     Exit;
   end;
   Result := FEvents[Index];
@@ -221,10 +285,10 @@ begin
           Continue;
 
         FEvents[N].Opcode  := StrToIntDef(Trim(Fields[0]), 0);
-        FEvents[N].Field1C := StrToIntDef(Trim(Fields[1]), 0);
-        FEvents[N].Field20 := StrToIntDef(Trim(Fields[2]), 0);
-        FEvents[N].Field10 := StrToIntDef(Trim(Fields[3]), 0);
-        FEvents[N].Field14 := StrToIntDef(Trim(Fields[4]), 0);
+        FEvents[N].NeedsFlag := StrToIntDef(Trim(Fields[1]), 0);
+        FEvents[N].BlockedBy := StrToIntDef(Trim(Fields[2]), 0);
+        FEvents[N].TileX := StrToIntDef(Trim(Fields[3]), 0);
+        FEvents[N].TileY := StrToIntDef(Trim(Fields[4]), 0);
         FEvents[N].ParamA  := Fields[5];
         FEvents[N].ParamB  := Fields[6];
         FEvents[N].Active  := False;

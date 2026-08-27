@@ -122,7 +122,12 @@ const
                             field, two roles by role - see the note below. }
   EF_TYPEF_04    = EF_HP; { the old provenance name, kept for the spawn code }
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
-  EF_MINUS1_B8   = $2E;   { set to -1 on spawn }
+  EF_EVENT_ID    = $2E;   { +0xB8. The event record this entity came from, or
+                            -1 when it came from nowhere. Entity_SolidCollideX
+                            and ...Y index p_EventTable by it (stride 0x24) to
+                            fire push-against triggers, and event sub-ops 8 and
+                            16 go the other way, from the event to the entity
+                            it spawned. -1 on spawn is what named this. }
   EF_TYPEF_0C    = $32;   { <- type table +0x0C .. +0x18 land at $32..$35 }
   EF_TYPEF_20    = $37;
 
@@ -144,6 +149,49 @@ const
   EF_BOX_OFS_Y   = $29;   { +0xA4 }
   EF_TILE_OFS_X  = $3F;   { +0xFC }
   EF_TILE_OFS_Y  = $40;   { +0x100 - the LAST int in the record }
+
+  { --- Entity-versus-entity collision, from Entity_SolidCollideX / ...Y
+        @ 0x00456B4C / 0x00456E0C -------------------------------------------
+
+    A SECOND box, not the tile one above. Both functions build
+
+        L := PixelX - EF_EXTENT_X div 2 + EF_HITBOX_INSET_X
+        R := L + EF_EXTENT_X - 2 * EF_HITBOX_INSET_X
+
+    so the inset shrinks the extent symmetrically on both sides. EF_EXTENT_* is
+    shared with the tile box; the OFFSETS are not - $28/$29 belong to the tile
+    path and $2A/$2B to this one. Two separate pairs, easily conflated.
+
+    EF_SOLID is what makes an entity block at all, and it is a KIND, not a
+    flag. Both functions take a "this is the player" argument, and when it is
+    set the X one skips kind 1 and the Y one skips kind 2:
+
+        0   not solid, skipped entirely
+        1   blocks the player in Y only - a floor you can walk through sideways
+        2   blocks the player in X only - a wall you can pass vertically
+        3+  blocks both
+
+    Anything that is not the player is blocked by every kind. }
+  EF_HITBOX_INSET_X = $2A;  { +0xA8 }
+  EF_HITBOX_INSET_Y = $2B;  { +0xAC }
+  EF_SOLID          = $3E;  { +0xF8, the kind above }
+  EF_RIDDEN         = $0A;  { +0x28, block A[2]. Entity_SolidCollideY sets it
+                              on the SOLID when something lands on top of it. }
+
+  { The three globals the solid collision answers through. It returns only
+    "something was hit"; how far to push out comes back here. }
+  SOLID_PUSH_X_ADDR   = $00484FAC;
+  SOLID_PUSH_Y_ADDR   = $00484FB0;
+  SOLID_ON_TOP_ADDR   = $00484FB4;
+
+  { Landing counts as "on top" only if the overlap is under this many pixels,
+    which is what stops a deep overlap being read as a landing. }
+  SOLID_TOP_TOLERANCE = 8;
+
+  { Entities 1..32 are never scanned as solids: both functions sweep 33..255,
+    or slot 0 alone when asked to collide against the player only. }
+  SOLID_SCAN_FIRST = $21;
+  SOLID_SCAN_LAST  = $FF;
 
   { --- The death sequence, from Entity_UpdateDying @ 0x004615A8 -------------
 
@@ -419,6 +467,10 @@ const
   ENTITY_TYPE_FIELDS = 18;
 
 type
+  { A collision box in screen pixels, in the order the original stores it: four
+    consecutive ints passed by pointer to Rect_Overlap. }
+  TBox = record L, T, R, B: Integer; end;
+
   { Kept as a raw int array for the same reason TStageRecord is: the layout is
     known exactly but most field meanings are not, and inventing names for them
     would make guesses look like decodes. }
@@ -566,8 +618,43 @@ function EntityPixelY(const E: TEntity): Integer;
   extent, so a bigger sprite gets a proportionally bigger margin. }
 function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
 
+{ 0x0045117C. Move V toward zero by Step without ever crossing it. Used for
+  friction - the air dash bleeds off through this - and called from several
+  places rather than inlined. }
+procedure ApproachZero(var V: Integer; Step: Integer);
+
+{ 0x00451354. Axis-aligned overlap of two boxes given as (L, T, R, B), with a
+  per-axis margin that shrinks the test. The original writes it as
+  separation-versus-width rather than the usual four edge comparisons; this is
+  the same predicate, kept in the original's form. }
+function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
+
 implementation
 
+
+procedure ApproachZero(var V: Integer; Step: Integer);
+begin
+  if V < 0 then
+  begin
+    V := V + Step;
+    if V > 0 then
+      V := 0;
+  end
+  else if V > 0 then
+  begin
+    V := V - Step;
+    if V < 0 then
+      V := 0;
+  end;
+end;
+
+function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
+begin
+  Result := (A.L - B.L < (B.R - B.L) - ShrinkX) and
+            (B.L - A.L < (A.R - A.L) - ShrinkX) and
+            (A.T - B.T < (B.B - B.T) - ShrinkY) and
+            (B.T - A.T < (A.B - A.T) - ShrinkY);
+end;
 
 function EntityType(Id: Integer): TEntityType;
 var
@@ -717,7 +804,7 @@ begin
   E^.Raw[6] := 0;
   E^.Raw[7] := 0;
   E^.Raw[EF_SPRITE]    := -1;
-  E^.Raw[EF_MINUS1_B8] := -1;
+  E^.Raw[EF_EVENT_ID]  := -1;
   E^.Raw[EF_POS_X]     := X + POSITION_BIAS;
   E^.Raw[EF_POS_Y]     := Y + POSITION_BIAS;
   E^.Raw[EF_VEL_X]     := 0;

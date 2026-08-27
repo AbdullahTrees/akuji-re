@@ -32,12 +32,20 @@ absence is the absence mark.
 | `0x417000`–`0x425fff` | VCL (`Graphics`, `Controls`) |
 | `0x439000`–`0x443fff` | VCL (`Forms`) |
 | `0x444000`–`0x454eff` | third-party DirectX/audio components |
-| `0x454ef4`+ | **the game** |
+| `0x454790`+ | **the game** |
 
-`coverage.py` uses `0x455000` as the boundary, which is very slightly wrong:
-`Event_Begin` sits at `0x454EF4`, just below it, and is unambiguously game code.
-Nothing else is known to fall in the gap, so the tool's count is off by at most
-that one function.
+The boundary has now moved twice. It was `0x455000`; then `Event_Begin`
+(`0x454EF4`) turned up below it; then `Events_SpawnNearCamera` (`0x454790`)
+turned up below *that*. `coverage.py` and `game_functions.txt` now both use
+`0x454790`, which is the lowest address **proved** to be game code by reading
+it — not a proof that nothing below is. The nine functions in
+`0x454050`–`0x4546E8` have not been read either way and are excluded rather
+than guessed at. If one of them turns out to be the game's, move the bound
+down and say so in the header of `game_functions.txt`.
+
+The earlier claim here — "nothing else is known to fall in the gap" — was
+wrong within a day of being written. Treat a boundary as the current floor,
+not a fact.
 
 ---
 
@@ -97,6 +105,7 @@ separately on their own flags.
 | `0x454EF4` | `Event_Begin` | read | `StringReplace(ParamB, '/', ',')` then `CommaText`; enters state 140 |
 | `0x45509C` | `EventScript_AdvanceStep` | read | `StringReplace(step, '.', ',')`; picks **one** alternative by scanning backwards for a set progress flag |
 | `0x455210` | `EventScript_Execute` | read | the interpreter — all 15 sub-opcodes |
+| `0x454790` | `Events_SpawnNearCamera` | read | the **placement** half: walks the whole event table every frame, spawns what is inside the camera window, and applies csv 1 / csv 2 as progress-flag conditions. Also the ParamA interpreter — the six kind letters are one-character `AnsiString` literals at `0x454EB4`–`0x454EF0` |
 
 > **`0x45509C` was `SaveGame_Select_Slot` in the old map.** It has nothing to do
 > with save slots. That name survived a long time because it was never checked.
@@ -127,6 +136,9 @@ which is why every number in the data is zero-padded.
 | `0x457300` | `Entity_TileCollideX` | read | tile index hit moving that far, vs the terrain threshold |
 | `0x4574DC` | `Entity_TileCollideY` | read | the mirror; also the tile-lookup argument order swaps |
 | `0x457F98` | `Entity_BoxesOverlap` | read | entity-vs-entity AABB, using the `+0xA8/+0xAC` insets |
+| `0x456B4C` | `Entity_SolidCollideX` | read | blocking entities, not tiles. Scans slots `$21..$FF`, or slot 0 alone. `EF_SOLID` is a **kind**: 1 blocks the player in Y only, 2 in X only. Answers through the globals `0x484FAC` / `0x484FB0`, and fires event opcodes 2 and 3 |
+| `0x456E0C` | `Entity_SolidCollideY` | read | the mirror, plus the **riding** path: landing within 8 px of a solid's top sets `0x484FB4` and the solid's `EF_RIDDEN`, and publishes the platform's X so the player can be carried |
+| `0x451354` | `Rect_Overlap` | read | four ints `(L,T,R,B)` per box with a per-axis shrink, written as separation-versus-width |
 | `0x4580BC` | `Entity_IsOffScreen` | corroborated | compares against `0x140 × 0xF0` — the DFM's 320×240 |
 | `0x457880` | `Entity_PlayerTouch` | read | builds the player's box and this entity's; starts event opcodes 0 and 1 |
 | `0x457AB4` | `Entity_TakeProjectileHits` | corroborated | scans slots `1..$20`; plays sound 17 = `hit01.wav` when the target survives. **This is what proved `+0x90` is hit points, not hit-stun** |
@@ -147,6 +159,34 @@ body. Those whose bodies have been read carry a suffix:
 | `0x45A5D4` | `EntityUpdate_Type32_Emitter` | read | invisible spawner; config in block A, state in block B |
 | `0x45A698` | `EntityUpdate_Type33_Explosion` | corroborated | six particles using **both** direction tables at the same index |
 | `0x45A7BC` | `EntityUpdate_Type36_FallingItem` | read | gravity 8 capped at `$200`, then snap-to-edge on landing |
+| `0x4593B0` | `Player_UpdateGlide` | read | state 6. Gravity 2, `-0x20` of lift while jump is held, steering capped at `±0x40`, four-frame flap. Gated on ability byte `Head[7]` |
+| `0x459624` | `Player_UpdateAirDash` | read | state 7. **No gravity term at all**; launched at `dir shl 3` and bled off by `ApproachZero`. Phases through solids whose `EF_VULN_KIND` is `0x5C`. Gated on `Head[6]` |
+| `0x459828` | `Player_UpdateKnockback` | read | state 8. Reads no input. On landing → state 3; if `Lives` is 0 it spawns three souls at headings 0/`0x14`/`0x28` and enters state 9 |
+
+There is a real bug in `Player_UpdateGlide` worth knowing about before
+"correcting" it: the vertical clamp writes the **horizontal** velocity —
+`if vy > 0x200 then vx := 0x200`, twice. It is in the shipped binary and is
+reproduced, not fixed.
+
+## Camera and scrolling
+
+There is no follow-the-player code. Every movement step asks whether the entity
+is outside a dead zone and heading further out, and if so applies the move to
+the layer instead. Translated in `src/Camera.pas`.
+
+| Address | Name | Grade | Notes |
+|---|---|---|---|
+| `0x459C1C` | `Camera_ShouldScrollX` | read | dead zone `< 144` / `>= 177` on a 320-wide screen, then a bounds check |
+| `0x459CD8` | `Camera_ShouldScrollY` | read | `< 104` / `>= 137` on 240. Its clamp is `(mapTilesY - 7.5) * tileH`, and that **7.5 is a 4-byte float at `0x459D98`** — the only FPU code in the game layer, there because 240 is not a whole number of 32-px tiles |
+| `0x459D9C` | `Camera_ApplyMoveX` | read | commits the move to the entity or to the layer, and records the frame's scroll delta at `LayerInfo +0x08` |
+| `0x459E08` | `Camera_ApplyMoveY` | read | the mirror, `+0x0C` |
+| `0x45117C` | `ApproachZero` | read | move toward zero by N without crossing it — the friction primitive |
+
+Both clamps check out against the shipped maps: `(mapTiles - 10) * tileW` and
+`(mapTiles - 7.5) * tileH` equal `mapPixels - screenSize` **exactly** on all 65,
+with no slack. `Events_SpawnNearCamera` corroborates the same two numbers from a
+completely different direction — its spawn window is the camera tile plus 10 and
+plus 7.5, with two tiles of margin.
 
 Types 0, 18 and 20 have **no** handler. 18 and 20 are two of the three type-table
 rows whose column 0 is `-1` (no sprite object); the third, type 32, updates while
@@ -176,8 +216,13 @@ Below the game layer, but needed to read anything. These are established:
 | `0x407FF8` | `Delphi_FileOpen` |
 | `0x40805C` | `Delphi_FileRead` |
 | `0x402AC4` | `Delphi_Random` — takes the range, returns `0..n-1` |
-| `0x451354` | rectangle intersection (component layer) |
+| `0x403DBC` | `Delphi_CompareStr` |
+| `0x404B98` | `Delphi_DynArrayHigh` |
 | `0x45114C` | sign/compare helper (component layer) |
+
+`0x451354` was listed here as "rectangle intersection (component layer)". It has
+since been read and is `Rect_Overlap`, above — the game's own collision
+primitive, not a component's.
 
 ## Named globals
 
@@ -193,7 +238,11 @@ Below the game layer, but needed to read anything. These are established:
 | `0x46CC44` | **solid-tile threshold**, set per terrain |
 | `0x46CEE4` | → `0x468B14`, the direction table (X) |
 | `0x46CE34` | → `0x468C14`, the direction table (Y) |
-| `0x46CD44` | the weapon table, 16-byte records |
+| `0x46CD44` | → `0x468E84`, the weapon table, 16-byte records |
+| `0x484FAC` | X push-out from `Entity_SolidCollideX`, and the ridden platform's X |
+| `0x484FB0` | Y push-out |
+| `0x484FB4` | "standing on top of a solid" |
+| `0x46BB9C` | the player's six sprite tables, contiguous to `0x46BC2C` |
 | `0x46D144` | `p_LayerInfo` — `+0x10` tileW, `+0x14` tileH, `+0x18` mapW, `+0x1C` mapH |
 | `0x46D344` | `p_Surfaces`, 32 slots |
 | `0x46CDEC` | `p_TileMaps`, per layer |

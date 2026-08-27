@@ -29,3 +29,8 @@ backup/
 src/akuji_components.pas
 selftest.log
 mixdump.wav
+__pycache__/
+qda_out/
+src/lib/
+src/selftest.log
+src/akuji.exe

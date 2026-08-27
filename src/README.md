@@ -24,6 +24,7 @@ The individual modes, if you want one:
     akuji.exe --selftest-events <gamedir>           # ev*.dat / tk*.dat
     akuji.exe --selftest-script <gamedir>           # the event mini-language
     akuji.exe --selftest-stages <gamedir>           # stage.dat relationships
+    akuji.exe --selftest-player <gamedir>           # camera, helpers, player
     akuji.exe --selftest-settings <gamedir> <scratch>
 
 `akuji.exe` is a GUI-subsystem binary, so these print nothing to stdout — each
@@ -108,6 +109,7 @@ nothing else. See `../notes/audio_map.md` for the recovered call map.
 | `Entities.pas` | the pool, the 81-entry type table, the record layout |
 | `Directions.pas` | the 64-step angle system, both tables confirmed |
 | `PlayerState.pas` | `save.dat`, and the player controller's state machine |
+| `Camera.pas` | the scrolling dead zone and the map-edge clamp |
 
 `Entities.pas` and `PlayerState.pas` carry long header comments recording what
 each field means and what the evidence for it was. That is deliberate: the

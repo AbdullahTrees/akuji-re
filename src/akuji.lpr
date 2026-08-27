@@ -33,7 +33,7 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
-  Stages,
+  Stages, Camera, TileMaps,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -659,8 +659,10 @@ var
   GameDir: string;
   S: TEventScript;
   I, J, Total, Lines, Empty, Flags, Idx: Integer;
+  SelfBlock, AlwaysOK, Always, BadCond, MaxTileX, MaxTileY: Integer;
   Ev: TEventRecord;
   ByOpcode: array[0..15] of Integer;
+  ByDifficulty: array[0..2] of Integer;
 begin
   Result := 0;
   GameDir := ParamStr(2);
@@ -671,6 +673,9 @@ begin
   for I := 0 to High(ByOpcode) do
     ByOpcode[I] := 0;
   Total := 0; Lines := 0; Empty := 0; Flags := 0;
+  SelfBlock := 0; AlwaysOK := 0; Always := 0; BadCond := 0;
+  MaxTileX := 0; MaxTileY := 0;
+  for I := 0 to 2 do ByDifficulty[I] := 0;
 
   S := TEventScript.Create;
   try
@@ -697,8 +702,41 @@ begin
             Inc(Result);
           end
           else
+          begin
             Inc(Flags);
+            { The flag an opcode-5 event sets is its own BlockedBy, so picking
+              the thing up is what stops it ever coming back. If this ever
+              stops holding, either the field scatter or the reading of
+              csv 1/csv 2 as spawn conditions is wrong. }
+            if Idx = Ev.BlockedBy then
+              Inc(SelfBlock);
+          end;
         end;
+
+        { Opcode 4 is spawned regardless of the camera and started at once.
+          All nine are the same construction - see EventScripts.pas. }
+        if Ev.Opcode = EVOP_ALWAYS then
+        begin
+          Inc(Always);
+          if (Ev.NeedsFlag = 0) and (Ev.BlockedBy <> 0) and
+             (Ev.TileX = 1) and (Ev.TileY = 1) then
+            Inc(AlwaysOK);
+        end;
+
+        { Both conditions index the progress block, or are 0 for "no
+          condition". Anything else would be writing outside the save. }
+        if (Ev.NeedsFlag < 0) or (Ev.NeedsFlag >= PROGRESS_LENGTH) or
+           (Ev.BlockedBy < 0) or (Ev.BlockedBy >= PROGRESS_LENGTH) then
+          Inc(BadCond);
+
+        { Difficulty is published as Progress[10] / [5] / [6] for levels
+          0 / 1 / 2 by Game_StartOrLoad. }
+        if Ev.NeedsFlag = 10 then Inc(ByDifficulty[0]);
+        if Ev.NeedsFlag = 5  then Inc(ByDifficulty[1]);
+        if Ev.NeedsFlag = 6  then Inc(ByDifficulty[2]);
+
+        if Ev.TileX > MaxTileX then MaxTileX := Ev.TileX;
+        if Ev.TileY > MaxTileY then MaxTileY := Ev.TileY;
       end;
     end;
   finally
@@ -715,8 +753,15 @@ begin
       Log.Add(Format('  %2d  x%d', [I, ByOpcode[I]]));
   Log.Add('');
   Log.Add(Format('opcode 5 events resolving to a valid progress flag: %d', [Flags]));
+  Log.Add(Format('  ... whose flag is also their own BlockedBy:        %d', [SelfBlock]));
+  Log.Add(Format('opcode 4 events: %d, of the documented shape: %d', [Always, AlwaysOK]));
+  Log.Add(Format('spawn conditions outside the progress block:       %d', [BadCond]));
+  Log.Add(Format('records gated on difficulty 0 / 1 / 2:  %d / %d / %d',
+    [ByDifficulty[0], ByDifficulty[1], ByDifficulty[2]]));
+  Log.Add(Format('largest event tile: %d, %d', [MaxTileX, MaxTileY]));
   Log.Add(Format('progress block: %d bytes from offset %d',
     [PROGRESS_LENGTH, PROGRESS_START]));
+  Inc(Result, BadCond);
 
   { A test that passes when it loaded nothing is worse than no test: point it
     at the wrong directory and it would report OK having checked zero events.
@@ -731,6 +776,30 @@ begin
   begin
     Log.Add(Format('FAILED: expected 692 events and 203 dialogue lines, got %d and %d',
       [Total, Lines]));
+    Inc(Result);
+  end;
+
+  { These three are what make csv 1 and csv 2 a decode rather than a guess.
+    Each is an ALL-or-nothing pattern over the shipped data: 154 of 154, and
+    9 of 9. A wrong field scatter, or the two conditions swapped, breaks them
+    immediately. }
+  if SelfBlock <> Flags then
+  begin
+    Log.Add(Format('FAILED: %d of %d opcode-5 events set a flag other than their'
+      + ' own BlockedBy', [Flags - SelfBlock, Flags]));
+    Inc(Result);
+  end;
+  if (Always <> 9) or (AlwaysOK <> Always) then
+  begin
+    Log.Add(Format('FAILED: expected 9 opcode-4 events all of the documented'
+      + ' shape, got %d of which %d match', [Always, AlwaysOK]));
+    Inc(Result);
+  end;
+  if (ByDifficulty[0] <> 5) or (ByDifficulty[1] <> 23) or (ByDifficulty[2] <> 40) then
+  begin
+    Log.Add(Format('FAILED: expected 5 / 23 / 40 difficulty-gated records, got'
+      + ' %d / %d / %d',
+      [ByDifficulty[0], ByDifficulty[1], ByDifficulty[2]]));
     Inc(Result);
   end;
 
@@ -858,6 +927,7 @@ var
   Negatives, N: Integer;
   Nones, Ids, Progs, ShapeMismatch, BadKindArity, BadGuard: Integer;
   PosChecked, PosMismatch, AStart, ALen, PosVal: Integer;
+  SpawnPosChecked, SpawnPosMismatch: Integer;
   GuardSeen: array[0..PROGRESS_LENGTH - 1] of Boolean;
   DistinctGuards: Integer;
   Kind: TParamBKind;
@@ -874,6 +944,7 @@ begin
   Dialogue := 0; BadDialogue := 0; Lists := 0; Negatives := 0;
   Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0; BadKindArity := 0;
   BadGuard := 0; DistinctGuards := 0; PosChecked := 0; PosMismatch := 0;
+  SpawnPosChecked := 0; SpawnPosMismatch := 0;
   for I := 0 to PROGRESS_LENGTH - 1 do
     GuardSeen[I] := False;
   MinType := MaxInt; MaxType := -1;
@@ -923,6 +994,26 @@ begin
               [I, J, Sp.Kind, KindArity(Sp.Kind), Sp.ArgCount, Sp.Raw]));
             Inc(BadKindArity);
           end;
+
+          { The same trick as for ParamB below: read each argument a SECOND
+            way, at the fixed character positions Events_SpawnNearCamera copies
+            from, and require the two to agree. The positions differ per letter
+            - 8/13 for '/', 8/10/15 for M, 8/11 for R - so a mis-split grammar
+            could not agree across all six. }
+          for K := 0 to Sp.ArgCount - 1 do
+            if SpawnArgPosition(Sp.Kind, K, AStart, ALen) then
+            begin
+              Inc(SpawnPosChecked);
+              PosVal := StrToIntDef(Trim(Copy(Sp.Raw, AStart, ALen)), MaxInt);
+              if PosVal <> Sp.Args[K] then
+              begin
+                Log.Add(Format('  stage %d event %d: ParamA kind %s arg %d -'
+                  + ' split says %d, position %d..%d says %d: %s',
+                  [I, J, Sp.Kind, K, Sp.Args[K], AStart, AStart + ALen - 1,
+                   PosVal, Sp.Raw]));
+                Inc(SpawnPosMismatch);
+              end;
+            end;
         end;
 
         { --- ParamB: a program, a bare id, or nothing --- }
@@ -1036,6 +1127,8 @@ begin
     [DistinctGuards, PROGRESS_LENGTH, BadGuard]));
   Log.Add(Format('  dash-split vs the interpreter''s fixed positions: %d args compared, %d disagree',
     [PosChecked, PosMismatch]));
+  Log.Add(Format('ParamA the same way, against Events_SpawnNearCamera: %d args compared, %d disagree',
+    [SpawnPosChecked, SpawnPosMismatch]));
   Log.Add(Format('negative arguments:  %d', [Negatives]));
   Log.Add('');
   Log.Add('sub-opcode histogram:');
@@ -1045,7 +1138,7 @@ begin
   Log.Add('');
 
   Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch + BadKindArity
-              + BadGuard + PosMismatch);
+              + BadGuard + PosMismatch + SpawnPosMismatch);
 
   { Same trap as --selftest-events: an empty load must not pass. These are the
     counts in the shipped data. }
@@ -1053,6 +1146,15 @@ begin
   begin
     Log.Add(Format('FAILED: expected 692 records, got %d - wrong game directory?',
       [Records]));
+    Inc(Result);
+  end
+  else if SpawnPosChecked <> 419 then
+  begin
+    { 13 '/' x2 + 245 'A' x1 + 38 'M' x3 + 15 'R' x2 + 2 'J' x2 = 419. Pinned
+      so that a SpawnArgPosition which quietly returned False for everything
+      could not make the comparison vacuous. }
+    Log.Add(Format('FAILED: expected 419 ParamA positional args compared, got %d',
+      [SpawnPosChecked]));
     Inc(Result);
   end
   else if (Spawns <> 692) or (Cmds = 0) or (Dialogue <> 149) or (Lists <> 13) then
@@ -1259,6 +1361,314 @@ begin
     Log.Add('FAILED - Stages.pas describes the data wrongly');
 end;
 
+{ ---------------------------------------------------------------------------
+  --selftest-player <gamedir> : the camera, the player's tables, and the two
+  small helpers the whole movement path shares.
+
+  Four independent things, none checkable by "does it load":
+
+  1. THE SCROLL CLAMP against the real maps. Camera.pas claims the layer stops
+     at (MapTiles - 10) * TileW horizontally and (MapTiles - 7.5) * TileH
+     vertically. If that is right it equals MapPixels - ScreenSize EXACTLY on
+     every map, with no slack. All 65 shipped maps are checked. Rounding 7.5 to
+     7 or 8, or swapping the tile width for the height, fails at once.
+
+  2. THE DEAD ZONE, swept over every pixel of the screen and both signs of
+     velocity against a plain restatement of the rule, plus a clamp check so
+     that a version which had lost the bounds test entirely cannot pass.
+
+     The four boundary numbers below are written out as LITERALS on purpose.
+     They were Camera.DEADZONE_* at first, and that version passed happily with
+     DEADZONE_RIGHT moved from 177 to 176 - the comparison was against the same
+     constant it was meant to be checking, so it could only ever catch a change
+     in the logic, never in the numbers. Do not tidy these back into the
+     constants.
+
+  3. ApproachZero and RectOverlap. ApproachZero is swept for the property that
+     matters - never cross zero, never grow, always move - and RectOverlap
+     against brute force over a grid of boxes, with a control so that a
+     predicate which is simply always true cannot pass.
+
+  4. THE SPRITE TABLES: six of them, contiguous, and in the base set the
+     right-facing sprite is the left-facing one plus ten.
+  --------------------------------------------------------------------------- }
+
+function SelfTestPlayer(Log: TStrings): Integer;
+var
+  GameDir: string;
+  M: TTileMap;
+  L: Camera.TLayerInfo;
+  P: TPlayerState;
+  I, J, K, V, Step, Before, Bad, Checked: Integer;
+  Want, Got, Overlaps: Integer;
+  Exe: TMemoryStream;
+  ExeName: string;
+  Table: array of Integer;
+  A, B: Entities.TBox;
+  RefOverlap, GotOverlap, Scroll, RefScroll: Boolean;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+
+  { --- 1. the scroll clamp, against every shipped map --------------------- }
+  Bad := 0; Checked := 0;
+  M := TTileMap.Create;
+  try
+    for I := 1 to 65 do
+    begin
+      if not M.Load(GameDir, I) then
+        Continue;
+      Inc(Checked);
+      FillChar(L, SizeOf(L), 0);
+      L.TileW := M.TileWidth;    L.TileH := M.TileHeight;
+      L.MapTilesX := M.MapWidth; L.MapTilesY := M.MapHeight;
+
+      Want := M.MapWidth * M.TileWidth - SCREEN_W;
+      Got := Camera.MaxScrollX(L);
+      if Got <> Want then
+      begin
+        Inc(Bad);
+        if Bad <= 5 then
+          Log.Add(Format('  map %.3d: max scroll X %d, expected %d',
+            [I, Got, Want]));
+      end;
+      Want := M.MapHeight * M.TileHeight - SCREEN_H;
+      Got := Camera.MaxScrollY(L);
+      if Got <> Want then
+      begin
+        Inc(Bad);
+        if Bad <= 5 then
+          Log.Add(Format('  map %.3d: max scroll Y %d, expected %d',
+            [I, Got, Want]));
+      end;
+    end;
+  finally
+    M.Free;
+  end;
+  Log.Add(Format('scroll clamp = map size - screen size:   %d maps, %d mismatches',
+    [Checked, Bad]));
+  Inc(Result, Bad);
+  if Checked <> 65 then
+  begin
+    Log.Add(Format('FAILED: expected 65 maps, read %d - wrong game directory?',
+      [Checked]));
+    Inc(Result);
+  end;
+
+  { --- 2. the dead zone ---------------------------------------------------
+    A map big enough that the bounds check never fires, so this isolates the
+    zone itself. }
+  FillChar(L, SizeOf(L), 0);
+  L.TileW := 32; L.TileH := 32; L.MapTilesX := 1000; L.MapTilesY := 1000;
+  L.OriginX := 200 * 32; L.OriginY := 200 * 32;
+  Bad := 0;
+  for I := 0 to SCREEN_W - 1 do
+    for J := 0 to 1 do
+    begin
+      V := 32 - 64 * J;
+      Scroll := Camera.ShouldScrollX(L, I, V);
+      RefScroll := ((I < 144) and (V < 0)) or ((I >= 177) and (V > 0));
+      if Scroll <> RefScroll then Inc(Bad);
+    end;
+  for I := 0 to SCREEN_H - 1 do
+    for J := 0 to 1 do
+    begin
+      V := 32 - 64 * J;
+      Scroll := Camera.ShouldScrollY(L, I, V);
+      RefScroll := ((I < 104) and (V < 0)) or ((I >= 137) and (V > 0));
+      if Scroll <> RefScroll then Inc(Bad);
+    end;
+  Log.Add(Format('dead zone over every screen pixel:      %d disagreements',
+    [Bad]));
+  Inc(Result, Bad);
+
+  Bad := 0;
+  for I := 0 to SCREEN_W - 1 do
+    if Camera.ShouldScrollX(L, I, 0) then Inc(Bad);
+  for I := 0 to SCREEN_H - 1 do
+    if Camera.ShouldScrollY(L, I, 0) then Inc(Bad);
+  Log.Add(Format('a still entity never scrolls:           %d violations', [Bad]));
+  Inc(Result, Bad);
+
+  L.OriginX := Camera.MaxScrollX(L) shl POSITION_SHIFT;
+  L.OriginY := Camera.MaxScrollY(L) shl POSITION_SHIFT;
+  if Camera.ShouldScrollX(L, SCREEN_W - 1, 32) or
+     Camera.ShouldScrollY(L, SCREEN_H - 1, 32) then
+  begin
+    Log.Add('FAILED: the layer scrolls past the edge of the map');
+    Inc(Result);
+  end
+  else
+    Log.Add('the clamp stops the layer at the map edge: yes');
+
+  { --- 3a. ApproachZero --------------------------------------------------- }
+  Bad := 0; Checked := 0;
+  for V := -600 to 600 do
+    for Step := 1 to 16 do
+    begin
+      Before := V;
+      I := V;
+      Entities.ApproachZero(I, Step);
+      Inc(Checked);
+      if (Before > 0) and ((I < 0) or (I > Before)) then Inc(Bad);
+      if (Before < 0) and ((I > 0) or (I < Before)) then Inc(Bad);
+      if (Before = 0) and (I <> 0) then Inc(Bad);
+      if Abs(I) > Abs(Before) then Inc(Bad);
+      if (Before <> 0) and (I = Before) then Inc(Bad);
+    end;
+  Log.Add(Format('ApproachZero over %d cases:          %d violations',
+    [Checked, Bad]));
+  Inc(Result, Bad);
+
+  { --- 3b. RectOverlap against brute force -------------------------------- }
+  Bad := 0; Checked := 0; Overlaps := 0;
+  for I := 0 to 19 do
+    for J := 0 to 19 do
+      for K := 0 to 3 do
+      begin
+        A.L := 0;  A.T := 0;  A.R := 10 + K;  A.B := 10 + K;
+        B.L := I - 10; B.T := J - 10; B.R := B.L + 8; B.B := B.T + 8;
+        RefOverlap := (A.L < B.R) and (B.L < A.R) and
+                      (A.T < B.B) and (B.T < A.B);
+        GotOverlap := Entities.RectOverlap(A, B, 0, 0);
+        Inc(Checked);
+        if GotOverlap <> RefOverlap then Inc(Bad);
+        if RefOverlap then Inc(Overlaps);
+      end;
+  Log.Add(Format('RectOverlap over %d box pairs:       %d disagreements, %d overlapping',
+    [Checked, Bad, Overlaps]));
+  Inc(Result, Bad);
+  if (Overlaps = 0) or (Overlaps = Checked) then
+  begin
+    Log.Add('FAILED: the box grid is degenerate - the comparison proves nothing');
+    Inc(Result);
+  end;
+
+  { --- 4. the sprite tables, read back out of akuji.exe --------------------
+    Writing the addresses out and checking they tile end to end proves nothing:
+    the compiler folds constant arithmetic, and an earlier version of this
+    check emitted "unreachable code" warnings for every branch because it had
+    already decided the answer. The claim is about the BINARY, so the binary is
+    what has to be read.
+
+    One contiguous run of 20 dwords at 0x0046BB9C covers all six tables. If any
+    address, stride, or the right-then-left order were wrong, the values would
+    not line up. }
+  Bad := 0;
+  Exe := TMemoryStream.Create;
+  try
+    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    if not FileExists(ExeName) then
+    begin
+      Log.Add('FAILED: akuji.exe is not in the game directory');
+      Inc(Result);
+    end
+    else
+    begin
+      Exe.LoadFromFile(ExeName);
+      SetLength(Table, 20);
+      Exe.Position := PLAYER_SPRITE_BASE - DATA_VA_BIAS;
+      Exe.ReadBuffer(Table[0], 20 * SizeOf(Integer));
+
+      for I := 0 to 4 do
+      begin
+        if Table[I]      <> SPR_GROUND[0][I] then Inc(Bad);
+        if Table[5 + I]  <> SPR_GROUND[1][I] then Inc(Bad);
+        if Table[10 + I] <> SPR_AIR[0][I]    then Inc(Bad);
+        if Table[15 + I] <> SPR_AIR[1][I]    then Inc(Bad);
+      end;
+      Log.Add(Format('sprite tables match akuji.exe at 0x%.6X:   %d of 20 wrong',
+        [PLAYER_SPRITE_BASE, Bad]));
+      Inc(Result, Bad);
+
+      { And the three later tables, at the addresses this file claims. }
+      Bad := 0;
+      SetLength(Table, 8);
+      Exe.Position := $0046BBEC - DATA_VA_BIAS;
+      Exe.ReadBuffer(Table[0], 8 * SizeOf(Integer));
+      for I := 0 to 3 do
+      begin
+        if Table[I]     <> SPR_GLIDE[0][I] then Inc(Bad);
+        if Table[4 + I] <> SPR_GLIDE[1][I] then Inc(Bad);
+      end;
+      SetLength(Table, 6);
+      Exe.Position := $0046BC0C - DATA_VA_BIAS;
+      Exe.ReadBuffer(Table[0], 6 * SizeOf(Integer));
+      if (Table[0] <> SPR_AIRDASH[0][0]) or (Table[1] <> SPR_AIRDASH[0][1]) or
+         (Table[2] <> SPR_AIRDASH[1][0]) or (Table[3] <> SPR_AIRDASH[1][1]) or
+         (Table[4] <> SPR_KNOCKBACK[0])  or (Table[5] <> SPR_KNOCKBACK[1]) then
+        Inc(Bad);
+      Log.Add(Format('glide, air dash and knockback tables:      %d wrong', [Bad]));
+      Inc(Result, Bad);
+    end;
+  finally
+    Exe.Free;
+  end;
+
+  { The +10 relation between the two facings of the base character set. It is
+    what fixes the index order as right-then-left rather than the reverse. }
+  Bad := 0;
+  for I := 0 to 2 do
+    if SPR_GROUND[0][I] - SPR_GROUND[1][I] <> SPRITE_FACING_STRIDE then Inc(Bad);
+  for I := 0 to 4 do
+    if SPR_AIR[0][I] - SPR_AIR[1][I] <> SPRITE_FACING_STRIDE then Inc(Bad);
+  if SPR_KNOCKBACK[0] - SPR_KNOCKBACK[1] <> SPRITE_FACING_STRIDE then Inc(Bad);
+  if SPR_DEATH[0] - SPR_DEATH[1] <> SPRITE_FACING_STRIDE then Inc(Bad);
+  Log.Add(Format('right sprite = left + 10 in the base set: %d violations', [Bad]));
+  Inc(Result, Bad);
+
+  { --- 5. the shipped save ------------------------------------------------ }
+  if LoadSave(P, IncludeTrailingPathDelimiter(GameDir) + 'data' + PathDelim +
+              'save.dat') then
+  begin
+    Log.Add('');
+    Log.Add(Format('save.dat: stage %d, lives %d/%d, %ds, weapon %d, jump %d',
+      [P.SavedStage, P.Lives, P.MaxLives, P.ElapsedSec, P.Weapon,
+       P.JumpStrength]));
+    Log.Add(Format('  abilities: dash %d, wall kick %d, air dash %d, glide %d',
+      [P.Head[ABILITY_DASH], P.Head[ABILITY_WALLKICK],
+       P.Head[ABILITY_AIRDASH], P.Head[ABILITY_GLIDE]]));
+    { Pinned exactly. The claim is that these four bytes are the abilities and
+      that the shipped save is early enough to have only the first. If the file
+      is ever replaced these numbers change and the reading has to be redone
+      rather than quietly adjusted. }
+    if (P.Head[ABILITY_DASH] <> 1) or (P.Head[ABILITY_WALLKICK] <> 0) or
+       (P.Head[ABILITY_AIRDASH] <> 0) or (P.Head[ABILITY_GLIDE] <> 0) then
+    begin
+      Log.Add('FAILED: the shipped save no longer has exactly the dash unlocked');
+      Inc(Result);
+    end;
+    if P.Progress[0] <> 1 then
+    begin
+      Log.Add('FAILED: progress flag 0 is not set - guard 0000 is not always true');
+      Inc(Result);
+    end;
+    if P.Lives > P.MaxLives then
+    begin
+      Log.Add('FAILED: lives exceed the maximum');
+      Inc(Result);
+    end;
+    if P.JumpStrength < DEFAULT_FIELD11D0 then
+    begin
+      Log.Add('FAILED: jump strength is below the starting value');
+      Inc(Result);
+    end;
+  end
+  else
+  begin
+    Log.Add('FAILED: could not read the shipped save');
+    Inc(Result);
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - the camera, the helpers and the player tables all hold')
+  else
+    Log.Add('FAILED');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -1285,6 +1695,8 @@ begin
         Result := SelfTestScript(Log)
       else if ParamStr(1) = '--selftest-stages' then
         Result := SelfTestStages(Log)
+      else if ParamStr(1) = '--selftest-player' then
+        Result := SelfTestPlayer(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -1307,7 +1719,8 @@ begin
      (ParamStr(1) = '--selftest-events') or
      (ParamStr(1) = '--selftest-settings') or
      (ParamStr(1) = '--selftest-script') or
-     (ParamStr(1) = '--selftest-stages') then
+     (ParamStr(1) = '--selftest-stages') or
+     (ParamStr(1) = '--selftest-player') then
   begin
     ExitCode := RunSelfTest;
     Exit;

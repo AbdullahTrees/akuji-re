@@ -6,11 +6,11 @@ it, the same technique used for QdaArchive/extract_qda.py and WaveFile/
 decode_wav_ref.py: both splitters were written from the file text, and the point
 is that they agree on every count.
 
-That matters more here than elsewhere, because the grammar was recovered from
-the DATA rather than from the interpreter - the code that executes these
-programs has not been found yet. So there is no disassembly to check against,
-and agreement between two readers plus the structural invariants is the whole
-of the evidence.
+The grammar was originally recovered from the DATA rather than from the
+interpreter, and this file was written while that was still the only evidence.
+Both interpreters have since been found - EventScript_Execute for ParamB and
+Events_SpawnNearCamera for ParamA - and both agree with everything below, so
+this is now a third opinion rather than half of the only two.
 
 The invariants, all of which hold over the shipped data with no exceptions:
 

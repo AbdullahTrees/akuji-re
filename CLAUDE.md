@@ -25,18 +25,24 @@ against independent Python implementations (section 13).
 collision path, the death and damage rules, and the player controller. See
 section 15.
 
-**Coverage** (`python tools/coverage.py`): 38 of 139 game-layer functions have
-a Pascal counterpart, and 90 of the 139 carry real names. The denominator jumped
-from 91 when 48 hidden handlers were created (section 12) - the work did not
-grow, it stopped being invisible.
+**The event system is now decoded end to end** - both halves of the mini-language
+AND the placement machinery around it: what makes an event spawn, what makes it
+stop existing for good, and how difficulty selects placements. Section 8b.
 
-**Before committing, run `tools/check.sh`.** One command: build, eight
-self-tests, three reference implementations, and a negative control. It exits
-non-zero on any failure, so use it as `tools/check.sh && git commit`.
+**Coverage** (`python tools/coverage.py`): 42 of 149 game-layer functions have
+a Pascal counterpart, and 102 of the 149 carry real names. The denominator has
+moved twice - 48 hidden handlers created (section 12), then the game-layer floor
+corrected from `0x455000` to `0x454790`. The work did not grow either time.
 
-**Next:** the three special-move routines `Player_Update` delegates to
-(`0x4593B0`, `0x459624`, `0x459828`), then the remaining ~100 entity-type
-handlers, which are now individually addressable.
+**Before committing, run `tools/check.sh`.** One command: build, nine
+self-tests, three reference implementations, a records check and a negative
+control. It exits non-zero on any failure, so use it as
+`tools/check.sh && git commit`.
+
+**Next:** the ~105 entity-type handlers, which are now individually
+addressable. Also open: event opcode 9 (231 records, the second most common),
+and `0x4576B4`, which every movement step calls to refresh an entity's tile
+indices.
 
 ## 2. The three layers — most important section
 
@@ -57,8 +63,13 @@ Delphi links its own units first, so library code sits low:
 | `0x402000`–`0x408fff` | Delphi RTL (`System.pas`) |
 | `0x417000`–`0x425fff` | VCL (`Graphics.pas`, `Controls.pas`) |
 | `0x439000`–`0x443fff` | VCL (`Forms.pas`) |
-| `0x444000`–`0x455000` | Third-party DirectX components |
-| `0x455000`+ | **The game** |
+| `0x444000`–`0x45478f` | Third-party DirectX components |
+| `0x454790`+ | **The game** |
+
+The floor has moved twice, both times because a function was read and turned out
+to be the game's: `0x455000` -> `0x454EF4` (`Event_Begin`) -> `0x454790`
+(`Events_SpawnNearCamera`). It is the lowest address **proved** to be game code,
+not a proof about anything below it.
 
 **A game-sounding name below `0x444000` is wrong until proven otherwise.**
 
@@ -287,24 +298,17 @@ Globals: `p_TileMaps` `0x46cdec` (per-layer tilemap objects), `p_LayerInfo`
 `+0x1C` mapH), `p_Surfaces` `0x46d344` (32 slots), `p_UseArchive` `0x46ccb4`
 (set to 1 by `DDDD1Init`, selects `bmp.qda` over loose files).
 
-### CAUTION: `SaveGame_Select_Slot` was a bad name
+### CAUTION: three names from the original pass were wrong
 
-`0x45509C` was called `SaveGame_Select_Slot`. It has nothing to do with save
-slots: it advances an event script to its next step and picks which alternative
-runs from the progress flags. Renamed `EventScript_AdvanceStep`. Like
-`Load_Tile_Data` below it came from the original unverified pass, so treat every
-remaining name from that pass as a hypothesis rather than a fact.
+`SaveGame_Select_Slot` (`0x45509C`) has nothing to do with saves — it advances an
+event script. `Load_Tile_Data` (`0x466340`) does not read `data\tk\` — it reads
+`map\*.map`, and `tk*.dat` is dialogue. `Configure_Stage_Params` hid the terrain
+id. All three read plausibly, all three were believed on sight, and each cost
+real time. `notes/function_map.md` records what they actually are.
 
-### CAUTION: `Load_Tile_Data` was a bad name
-
-`0x466340` was listed as `Load_Tile_Data` reading `data	k\`. Both halves were
-wrong: it reads `map\*.map`, and `tk*.dat` is dialogue text. The name came from
-the original unverified pass and was believed on sight during this session,
-costing a wrong hypothesis and a failed validation run.
-
-The `Load_*` names in section 8's table are from that same pass. **Verify the
-filename each one actually builds before trusting it** — the string literals sit
-right next to the `%.03d` format in the disassembly.
+**Every remaining name from that pass is a hypothesis.** For the `Load_*` names
+in section 8, verify the filename each one actually builds — the string literals
+sit right next to the `%.03d` format in the disassembly.
 
 ### Remaining asset work
 
@@ -451,11 +455,56 @@ if the target survives.
 ### The player — `Player_Update` `0x4585A8`
 
 State machine in `EF_STATE`: ground, dash, airborne, landing, wall kick, attack,
-three special moves, two death states (both ending at GameState 100). The dash
-is a **double tap** inside a 30-frame window — `tk001.dat` says so in as many
-words. Every sound it plays matches its name. Weapons come from a 16-byte-record
-table at `0x46CD44` indexed by `PlayerState +0x11CC`. Full detail in
-`src/PlayerState.pas`.
+glide, air dash, knockback, and two death states (both ending at GameState 100).
+The dash is a **double tap** inside a 30-frame window — `tk001.dat` says so in as
+many words. Every sound it plays matches its name. Weapons come from a
+16-byte-record table at `0x468E84` (via the pointer `0x46CD44`) indexed by
+`PlayerState +0x11CC`. Full detail in `src/PlayerState.pas`.
+
+Four moves are gated on **ability bytes** in the save's first ten bytes —
+`Head[4..7]` are dash, wall kick, air dash and glide. `Game_StartOrLoad` writes
+all four to zero on a new game, which is what identified them; the shipped
+mid-game save has only `Head[4]` set, and `tk001.dat` teaches exactly the dash.
+
+### Scrolling — there is no camera-follow code
+
+Every movement step asks whether the entity is outside a dead zone in the middle
+of the screen and heading further out; if so the move is applied to the LAYER and
+the entity is put back. So the player's stored position simply stops changing
+while the world scrolls, and anything assuming "position changed" means "the
+player moved" is wrong. `src/Camera.pas`, checked against all 65 maps.
+
+## 8b. Events: placement, conditions, and difficulty
+
+`EventScript_Execute` runs the scripts; `Events_SpawnNearCamera` `0x454790`
+decides what exists at all, and it turned four unknown CSV columns into a
+complete system. Detail in `src/EventScripts.pas`; the shape is:
+
+| csv | meaning |
+|---|---|
+| 1 | **required** progress flag — do not spawn unless it is set |
+| 2 | **forbidding** progress flag — once set, disable this event forever |
+| 3, 4 | tile X and Y |
+
+"Disable forever" is literal: opcode := -1 and the tile moved to (-32, -32).
+
+Two patterns make this a decode rather than a guess, and both are all-or-nothing
+over the shipped data:
+
+* all **154 of 154** opcode-5 events set a flag that is *their own csv 2* — pick
+  the item up and the event switches itself off
+* all **9 of 9** opcode-4 events are the same construction: always active,
+  placed at tile (1,1) as type 20, running a sub-op 15 flag test that on success
+  sets its own csv 2 and disables itself. Puzzle checkers.
+
+**Difficulty** rides the same mechanism. `Game_StartOrLoad` publishes the level
+as `Progress[10]` / `Progress[5]` / `Progress[6]` for 0 / 1 / 2, and 5 / 23 / 40
+records require exactly those. No script ever guards on them, which is why they
+looked dead until this function was read.
+
+Opcodes **2 and 3** exist in the code — push against a solid holding a direction,
+or pressing confirm — and appear in **no** shipped record. Opcode 9, 231 records,
+is still undecoded.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 
@@ -608,8 +657,9 @@ order of strength:
    claims about the data cannot quietly rot.
 2. **Self-validating structure.** The QDA directory plus the sum of its entry
    sizes equals the file length exactly; every `.map` is exactly
-   `24 + w*h*2` bytes; `save.dat` is exactly `SizeOf(TPlayerState)`, asserted at
-   startup; the sound-name array terminates cleanly right where the key-name
+   `24 + w*h*2` bytes; `save.dat` is exactly `SizeOf(TPlayerState)`, checked at
+   startup; the player's six sprite tables tile end to end from `0x46BB9C` to
+   `0x46BC2C`, each width equal to the frame count its handler cycles; the sound-name array terminates cleanly right where the key-name
    array begins; every event sub-opcode has a fixed argument count and sub-op 15
    carries its own length, over 518 commands with no exceptions.
 3. **Cross-corroboration between unrelated parts of the binary.** The form
@@ -633,7 +683,24 @@ directory has spaces, and unquoted expansion has caused both false passes and
 false failures here.
 
 Mutation-test anything that claims to check something. A test that cannot fail
-is worse than none: `--selftest-events` once passed having loaded zero events.
+is worse than none. Four ways it has happened here, all found by mutation:
+
+* `--selftest-events` once passed having loaded **zero** events.
+* `Assert(SizeOf(TPlayerState) = $11E4)` in an `initialization` section never
+  ran at all — **FPC compiles assertions out unless `-Sa` is passed**. The
+  record sat a byte short for several commits, and every integer in `save.dat`
+  read a byte early. Write checks as plain code, not as `Assert`.
+* A dead-zone sweep compared `ShouldScrollX` against a reference built from
+  `Camera.DEADZONE_RIGHT` — the same constant it was meant to be checking. It
+  passed happily with that constant changed. **Reference values must be
+  literals.**
+* A sprite-table check compared constants against constants; the compiler folded
+  it and warned "unreachable code" on every branch. It now reads the tables out
+  of `akuji.exe`.
+
+**Force a full rebuild (`lazbuild -B`) when mutation testing.** An incremental
+build can leave you running the old binary, which makes a live mutation look
+survived — or a restored file look still broken.
 
 What this does **not** cover is game logic behaviour - entity movement,
 collision, scoring. Establishing that needs differential tracing against the

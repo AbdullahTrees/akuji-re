@@ -123,6 +123,51 @@
   in 0030-M-0-0128--4 the last field is -4, so '-' is both the separator and
   the minus sign.
 
+  ## ParamA is READ now, not inferred
+
+  All of the above was worked out from the data before the code that consumes
+  it was found. Events_SpawnNearCamera @ 0x00454790 is that code, and it agrees
+  with every part of it.
+
+  The six letters are one-character AnsiString literals sitting in a row at
+  0x00454EB4..0x00454EF0, tested in this order, each with the usual Delphi
+  refcount of -1 and length 1:
+
+      /   A   M   R   J   *
+
+  Exactly the six the data showed, from a completely independent direction.
+
+  Like the interpreter in ParamB, this one reads FIXED POSITIONS rather than
+  splitting on '-'. The type is Copy(ParamA, 1, 4), and then, per letter:
+
+      letter  arguments                        what each becomes
+      ------  -------------------------------  ---------------------------
+      *       none                             -
+      A       (8,4)                            entity int 6
+      /       (8,4) (13,3)                     IF Progress[a1]=1 THEN
+                                               EF_STATE := a2
+      M       (8,1) (10,4) (15,2)              EF_STATE, EF_HP,
+                                               int 0x22 := a3 shl 3
+      R       (8,2) (11,3)                     int 0x22 := a1, EF_HP := a2
+      J       (8,4) (13,4)                     nudges the spawn position by
+                                               a1, a2 PIXELS
+
+  Every argument in all 692 records sits at exactly the position its letter's
+  entry above copies from - checked by --selftest-script. The positions differ
+  per letter (8/13, 8, 8/10/15, 8/11, 8/13), so this is not a coincidence that
+  a wrong split could survive.
+
+  A seventh form exists in the code for the case where the letter matches none
+  of the six: seven 4-character fields at positions 6, 11, 16, 21, 26, 31 and
+  36, filling int 6, EF_EXTENT_X, EF_EXTENT_Y and ints 0x3A..0x3D. No shipped
+  record takes it.
+
+  ONE CAUTION. int 0x22 is EF_FACING for the player and for effects the code
+  spawns, where it is a heading 0..63. The values M and R put there are -4..4
+  and -32..32 - signed and far too small to be headings - so 0x22 is another
+  slot with more than one role, like EF_HP. Do not assume a placed enemy's
+  0x22 is an angle.
+
   ## The leading number is a GUARD, not a target
 
   Each alternative begins with four digits. That number indexes the player's
@@ -199,7 +244,7 @@
      count, so it can only be a length.
 
   Opcode 5 gives a third, separate cross-check that the record layout is right:
-  csv2 (Field20) equals csv6 (ParamB) as a number in all 154 cases, and
+  csv2 (BlockedBy) equals csv6 (ParamB) as a number in all 154 cases, and
   Entity_Destroy @ 0x00461400 parses ParamB's first four characters to get the
   progress-flag index. Two independently-loaded fields agreeing 154/154 means
   the scatter in EventScripts.pas put both in the right place. }
@@ -348,6 +393,12 @@ function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
   This exists so --selftest-script can read the data the way the ORIGINAL does
   and compare it against the dash-split parse. }
 function ArgPosition(SubOp, Index: Integer; out Start, Len: Integer): Boolean;
+
+{ The same thing for ParamA: where Events_SpawnNearCamera copies argument
+  Index for a placement of kind Kind. False when that kind has no argument
+  there. Positions and widths are read out of the function; see the header. }
+function SpawnArgPosition(Kind: Char; Index: Integer;
+  out Start, Len: Integer): Boolean;
 
 { Number of alternatives across every step, for reporting. }
 function CommandCount(const Prog: TEventProgram): Integer;
@@ -628,6 +679,40 @@ begin
     { 7, 8, 10, 13, 80, 99 take no arguments; 15 is variable and is checked by
       its own rule rather than by position. }
     Result := False;
+  end;
+end;
+
+function SpawnArgPosition(Kind: Char; Index: Integer;
+  out Start, Len: Integer): Boolean;
+begin
+  Start := 0;
+  Len := 0;
+  Result := True;
+  case Kind of
+    'A': if Index = 0 then begin Start := 8; Len := 4; end else Result := False;
+    '/': case Index of
+           0: begin Start := 8;  Len := 4; end;
+           1: begin Start := 13; Len := 3; end;
+         else Result := False;
+         end;
+    'M': case Index of
+           0: begin Start := 8;  Len := 1; end;
+           1: begin Start := 10; Len := 4; end;
+           2: begin Start := 15; Len := 2; end;
+         else Result := False;
+         end;
+    'R': case Index of
+           0: begin Start := 8;  Len := 2; end;
+           1: begin Start := 11; Len := 3; end;
+         else Result := False;
+         end;
+    'J': case Index of
+           0: begin Start := 8;  Len := 4; end;
+           1: begin Start := 13; Len := 4; end;
+         else Result := False;
+         end;
+  else
+    Result := False;      { '*' takes none, and so does an unknown letter }
   end;
 end;
 

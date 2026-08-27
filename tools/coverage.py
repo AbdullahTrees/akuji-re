@@ -27,7 +27,7 @@ import os
 import re
 import sys
 
-GAME_LO = 0x455000
+GAME_LO = 0x454790   # see the header of notes/game_functions.txt
 GAME_HI = 0x467200
 
 ADDR_RE = re.compile(r"0x([0-9A-Fa-f]{6,8})")

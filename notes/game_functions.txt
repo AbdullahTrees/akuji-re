@@ -1,23 +1,34 @@
 # Game-layer functions in akuji.exe
 #
-# Every function Ghidra knows about between 0x455000 and 0x4671FF - the range
+# Every function Ghidra knows about between 0x454790 and 0x4671FF - the range
 # CLAUDE.md section 2 identifies as Akuji's own code, above the Borland RTL/VCL
 # and the third-party DirectX component suite. That is the real denominator for
 # 'how much of the game is reconstructed'.
 #
+# The low bound is Events_SpawnNearCamera, the LOWEST address proved to be game
+# code by reading it. It is not a proof that 0x45478F is not game code - the
+# functions just below (0x454050..0x4546E8) have not been read either way, so
+# they are excluded rather than guessed at. The bound was 0x455000 until
+# Event_Begin (0x454EF4) and then Events_SpawnNearCamera turned up beneath it;
+# if something below 0x454790 is read and turns out to be the game's, move it
+# down again and say so here.
+#
 # Snapshotted from the Ghidra database so tools/coverage.py runs without it.
 # Regenerate with the GhidraMCP list_functions call when new functions are
-# created or renamed - the count grows as RTTI-only functions are found and
+# created or renamed - the count grows as frameless functions are found and
 # turned into functions by hand.
 #
 # address  name
+00454790  Events_SpawnNearCamera
+00454ef4  Event_Begin
 0045509c  EventScript_AdvanceStep
 00455210  EventScript_Execute
 00456038  TitleMenu_Update
 00456698  FUN_00456698
 004568d0  FUN_004568d0
 00456b14  FUN_00456b14
-00456e0c  FUN_00456e0c
+00456b4c  Entity_SolidCollideX
+00456e0c  Entity_SolidCollideY
 00457150  Entity_TileEdgeDistX
 00457228  Entity_TileEdgeDistY
 00457300  Entity_TileCollideX
@@ -32,7 +43,14 @@
 00458404  FUN_00458404
 00458490  FUN_00458490
 004585a8  Player_Update
+004593b0  Player_UpdateGlide
+00459624  Player_UpdateAirDash
+00459828  Player_UpdateKnockback
 00459a0c  FUN_00459a0c
+00459c1c  Camera_ShouldScrollX
+00459cd8  Camera_ShouldScrollY
+00459d9c  Camera_ApplyMoveX
+00459e08  Camera_ApplyMoveY
 00459e7c  FUN_00459e7c
 00459eb4  EntityUpdate_Type03
 00459f1c  EntityUpdate_Type04
