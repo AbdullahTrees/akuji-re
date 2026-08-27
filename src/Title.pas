@@ -75,7 +75,7 @@ type
     { Returns True when the caller should leave the title screen; the new
       GameStateValue has already been set. }
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
-    procedure Draw(C: TCanvas; F: TGameFont);
+    procedure Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
 
     property SubMode: Integer read FSubMode;
     property Index: Integer read FIndex;
@@ -175,18 +175,20 @@ begin
   end;
 end;
 
-procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont);
+procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
 var
   I: Integer;
 begin
   { The original blits p_Surfaces[1] for the menu and p_Surfaces[2] for options
-    as a full-screen 320x240 background before this. Colour variants below match
-    the original's param_5: 2 for items, 1 for the cursor, 0 for the credit. }
+    full-screen first. Colour variants match the original's param_5: 2 for menu
+    items, 1 for the cursor, 0 for the credit line. }
   if F = nil then Exit;
 
   case FSubMode of
     TSM_MENU:
       begin
+        if BgMenu <> nil then
+          C.Draw(0, 0, BgMenu);
         for I := Low(MENU_ITEMS) to High(MENU_ITEMS) do
           F.TextOut(C, MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I], 2);
         F.TextOut(C, MENU_CURSOR_X, (FIndex * 2 + $11) * 8, '>', 1);
@@ -195,6 +197,8 @@ begin
 
     TSM_OPTIONS:
       begin
+        if BgOptions <> nil then
+          C.Draw(0, 0, BgOptions);
         F.TextOut(C, 0, $20, '- OPTION -', 2);
         F.TextOut(C, OPT_CURSOR_X, (FIndex * 2 + 7) * 8, '>', 1);
       end;

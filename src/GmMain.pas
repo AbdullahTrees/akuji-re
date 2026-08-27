@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont;
+  QdaArchive, Title, GameFont, Surfaces;
 
 type
   TFrm_main = class(TForm)
@@ -40,6 +40,8 @@ type
     FTitle: TBitmap;
     FTitleScreen: TTitleScreen;
     FFont: TGameFont;
+    FSurfaces: TSurfaceSet;
+    FDataDir: string;
     FMoveY: Integer;
     FConfirm: Boolean;
     function FindGameData: string;
@@ -97,14 +99,19 @@ begin
   DataDir := FindGameData;
   if DataDir <> '' then
   begin
+    FDataDir := DataDir;
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
-    FTitle := FArchive.LoadBitmapByName('title.bmp');   { stored as title.BMP }
-    Sheet := FArchive.LoadBitmapByName('font9x9-01.bmp');
-    try
+
+    { Original: Title_Init calls Load_Stage_Assets(MainForm, 0), which pulls
+      surface set 0, then registers slot 0 as font 0. }
+    FSurfaces := TSurfaceSet.Create(FArchive);
+    FSurfaces.LoadSet(DataDir, 0);
+
+    Sheet := FSurfaces[0];
+    if Sheet <> nil then
       FFont := TGameFont.Create(Sheet);
-    finally
-      Sheet.Free;
-    end;
+
+    FTitle := FSurfaces[1];   { menu background - owned by FSurfaces }
   end;
 
   { Present() blits straight to the form canvas for speed, which is fine while
@@ -186,9 +193,7 @@ begin
         FTitleScreen.Update(FMoveY, 0, FConfirm);
         FMoveY := 0;
         FConfirm := False;
-        if Assigned(FTitle) then
-          DDDD1.Canvas.Draw(0, 0, FTitle);
-        FTitleScreen.Draw(DDDD1.Canvas, FFont);
+        FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
       end;
     GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
     GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
@@ -238,7 +243,7 @@ begin
   Application.OnIdle := nil;
   FFont.Free;
   FTitleScreen.Free;
-  FTitle.Free;
+  FSurfaces.Free;   { owns FTitle }
   FArchive.Free;
   { TODO: teardown - the original released the sprite engine and surfaces }
 end;
