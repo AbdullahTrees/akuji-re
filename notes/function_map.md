@@ -520,3 +520,60 @@ New-game defaults: lives 3/3, spawn tile (0x60, 0x73), scroll (0, 0x1C0),
 
 Offsets 10..0x119F are cleared as one 0x1195-byte block — per-world progress
 flags. Bits 0x4AB and 0x4B4 are set from settings bytes `+0x1C`/`+0x1D`.
+
+## Event scripts — `ev*.dat` decoded
+
+### `Load_Event_Scripts` @ `0x00465B50`
+
+Reads `data\ev%.03d.dat`, CommaText per line into a 0x24-byte record in
+`p_EventTable` (`0x46cce0`):
+
+| CSV field | Record | Meaning |
+|---|---|---|
+| 0 | `+0x00` | type (4 = a special case in the spawner) |
+| 1 | `+0x1C` | **required** progress flag — spawn only if `PlayerState.Progress[n]` set |
+| 2 | `+0x20` | **forbidden** progress flag — skip if set |
+| 3 | `+0x10` | tile X |
+| 4 | `+0x14` | tile Y |
+| 5 | `+0x0C` | **parameter string** (below) |
+| 6 | `+0x18` | second string |
+
+Runtime-only fields: `+0x04` spawned flag, `+0x05` alive flag, `+0x08` entity handle.
+
+It then loads a second file into `p_EventTable2` (`0x46d1c8`) as a plain string
+list — one string per line, unparsed.
+
+### `Events_SpawnNearCamera` @ `0x00454790`
+
+Runs every frame in states 60/140. Walks the table and spawns an entity when
+the record's tile is near the camera — roughly `camX-2 .. camX+12` — subject to
+the required/forbidden progress flags. Off-screen records have their spawned
+flag cleared so they can respawn.
+
+### The parameter string
+
+Field 5 is fixed-width, dash-separated: `<id:4>-<cmd:1>[-<params>]`. The spawner
+reads it with `Delphi_Copy(s, pos, len)` at positions that depend on the
+command. `Copy(s,1,4)` is always the entity/sprite id.
+
+Six command codes, from the constants at `0x454EB4..0x454EF0`:
+`*` `A` `M` `R` `J` `/`
+
+Shapes across all 692 records:
+
+| Shape | Count | Example |
+|---|---|---|
+| `NNNN-*` | 379 | `0014-*` |
+| `NNNN-A-NNNN` | 198 | `0024-A-0004` |
+| `NNNN-A-NNN` | 47 | `0038-A-001` |
+| `NNNN-M-N-NNNN-NN` | 21 | `0021-M-0-0160-04` |
+| `NNNN-M-N-NNNN--N` | 17 | `0030-M-0-0128--4` |
+| `NNNN-/-NNNN-NNN` | 13 | `0015-/-1036-002` |
+
+Per-command parameter meanings are **not** decoded — the spawner writes them
+into entity fields (`+0x18`, `+0x20`, `+0x24`, `+0x78`, `+0x7C`, `+0x88`,
+`+0x98`, `+0x9C`, `+0xE8..0xF4`) whose semantics are unknown. `A` looks like a
+movement or animation parameter, `M` takes a mode plus a distance, `*` is the
+bare no-parameter case.
+
+Also identified: `Delphi_Copy` `0x403eb4` = `Copy(s, index, count)`.
