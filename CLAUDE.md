@@ -217,7 +217,7 @@ that was wrong).
 
 | File | Format | Content |
 |---|---|---|
-| `stage.dat` | CSV | 66 rows x **16 fields**, filling a **19-int** record (stride `0x4C`). `rec[0]` surface set, `rec[1]` sprite set, `rec[2..4]` map layers (`-1` = none). Columns 8..15 land at `rec[11..18]`; `rec[8..10]` are runtime scratch |
+| `stage.dat` | CSV | 66 rows x **16 fields**, filling a **19-int** record (stride `0x4C`). Columns 8..15 land at `rec[11..18]`; `rec[8..10]` are runtime scratch. Mostly constant - see below |
 | `spr000..009.dat` | CSV | **7 fields**: surfaceIdx, frameW, frameH, cols, rows, originX, originY — expands to cols*rows frames, numbered sequentially across the file |
 | `surf000..009.dat` | CSV | **3 fields**: bitmap name, width, height — 32 slots, bitmaps pulled from `bmp.qda`. Slot 0 is the font, 1 the title background, 2 the options background |
 | `ev000..065.dat` | CSV | **solved** - 7 fields, 692 lines over 66 files, none irregular. `Load_Event_Scripts` `0x465B50` scatters them into a 0x24-byte record: csv 0 to +0x00 opcode, 1 to +0x1C, 2 to +0x20, 3 to +0x10, 4 to +0x14, 5 to +0x0C str, 6 to +0x18 str. It also loads `tk*.dat` |
@@ -326,8 +326,38 @@ field is `-4`. A plain split loses the sign, and nothing else in the checks
 notices - arity and range still pass. `--selftest-script` pins the count of
 negative arguments at 22 for exactly this reason.
 
-Still open: what the sub-opcodes mean, `stage.dat` columns 5..15, and the entity
-type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
+### `stage.dat` - surveyed, and mostly constant
+
+Only four of the sixteen columns vary at all. This describes the shipped data,
+not the loader - a constant column is unexercised, not proven unused, and
+`Load_Stage_Assets` still copies all 16.
+
+| csv | rec | over all 66 rows |
+|---|---|---|
+| 0 | `[0]` | surface set 0..9, matches `surf000..009.dat` |
+| 1 | `[1]` | sprite set 0..9, **equal to csv 0 on every row** |
+| 2 | `[2]` | map index - **equals the row number** on rows 1..65; row 0 is `-1` |
+| 3,4,6,7 | | `-1` on every row |
+| 5 | `[5]` | `6` on every row but row 0, which is `-1` |
+| 8..14 | `[11..17]` | `0` on every row - seven dead columns |
+| 15 | `[18]` | 0..9, **equal to csv 0 on 65 of 66 rows** |
+
+So a stage has one art set, not two; `rec[2..4]` are three layer slots of which
+only the first is ever used; and there are exactly 65 map files for rows 1..65,
+with row 0 the "no stage" placeholder - the same flush fit that validated the
+sound table.
+
+**csv 15 is a real separate field, and it is not the music.** It differs from
+csv 0 on exactly one row - 58, art set 7, csv 15 = 6 - and value 7 appears in
+csv 0 only there. The obvious guess is a MIDI index, and `AutoLoadMidis` rules
+it out: index 4 is `itemget`, a jingle, yet 13 rows carry csv 15 = 4, and
+10..14 are never used. Recorded so the guess is not repeated.
+
+`--selftest-stages` pins all of the above, including the single row-58
+exception.
+
+Still open: what the sub-opcodes mean, what csv 5 and csv 15 select, and the
+entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
 progress-flag block is no longer a mystery: an opcode-5 event sets
 `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
 inside the block, and csv 2 holds that same number - the two agree 154/154.
@@ -455,6 +485,10 @@ order of strength:
    on every count.
    Run `--selftest`, `--selftest-audio`, `--selftest-midi`, `--selftest-script`,
    then the matching `tools/*_ref.py` / `analyse_events.py`.
+   `--selftest-stages` is a different kind of check - it has no second reader,
+   and instead pins the relationships `stage.dat` exhibits (csv0 = csv1,
+   csv2 = row number, csv15 = csv0 on exactly 65 rows) so that documented
+   claims about the data cannot quietly rot.
 2. **Self-validating structure.** The QDA directory plus the sum of its entry
    sizes equals the file length exactly; every `.map` is exactly
    `24 + w*h*2` bytes; `save.dat` is exactly `SizeOf(TPlayerState)`, asserted at

@@ -33,6 +33,7 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
+  Stages,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -944,6 +945,134 @@ begin
     Log.Add('FAILED - the grammar in EventCommands.pas is wrong somewhere');
 end;
 
+{ ---------------------------------------------------------------------------
+  --selftest-stages : the stage table.
+
+  Most of stage.dat's 16 columns are constant across all 66 rows, so the useful
+  thing to check is not "does it load" but "do the relationships still hold" -
+  csv0 = csv1, csv2 = row number, csv15 = csv0 except at row 58, and the seven
+  dead columns still dead. Those are what Stages.pas's header claims, and this
+  is what stops the claims rotting.
+
+  It also checks the flush fit that makes the row-number reading credible: 65
+  map files for rows 1..65, with row 0 the placeholder.
+  --------------------------------------------------------------------------- }
+
+function SelfTestStages(Log: TStrings): Integer;
+var
+  GameDir: string;
+  T: TStageTable;
+  R: TStageRecord;
+  I, C, N: Integer;
+  SurfEqSpr, MapEqRow, ThemeEqSurf, MapsPresent: Integer;
+  DeadOK: Boolean;
+  Anomalies: string;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+
+  T := TStageTable.Create;
+  try
+    N := T.Load(GameDir);
+    Log.Add(Format('rows loaded: %d', [N]));
+    if N <> 66 then
+    begin
+      Log.Add('FAILED: expected 66 rows - wrong game directory?');
+      Log.Add('');
+      Log.Add('FAILED');
+      Exit(1);
+    end;
+
+    SurfEqSpr := 0; MapEqRow := 0; ThemeEqSurf := 0; MapsPresent := 0;
+    DeadOK := True;
+    Anomalies := '';
+
+    for I := 0 to N - 1 do
+    begin
+      R := T[I];
+      if R.Raw[0] = R.Raw[1] then Inc(SurfEqSpr);
+      if R.Raw[18] = R.Raw[0] then Inc(ThemeEqSurf)
+      else
+        Anomalies := Anomalies + Format(' row %d (art %d, theme %d)',
+          [I, R.Raw[0], R.Raw[18]]);
+
+      if I = 0 then
+      begin
+        { The placeholder row: no map, and csv5 is -1 rather than 6. }
+        if (R.Raw[2] = LAYER_NONE) and (R.Raw[5] = LAYER_NONE) then
+          Inc(MapEqRow);
+      end
+      else
+      begin
+        if R.Raw[2] = I then Inc(MapEqRow);
+        if FileExists(IncludeTrailingPathDelimiter(GameDir) + 'map' + PathDelim +
+                      Format('%.3d.map', [R.Raw[2]])) then
+          Inc(MapsPresent);
+      end;
+
+      { csv 8..14 land in rec[11..17] and are zero throughout. }
+      for C := 11 to 17 do
+        if R.Raw[C] <> 0 then
+          DeadOK := False;
+
+      { csv 3,4,6,7 are -1 throughout. }
+      if (R.Raw[3] <> LAYER_NONE) or (R.Raw[4] <> LAYER_NONE) or
+         (R.Raw[6] <> LAYER_NONE) or (R.Raw[7] <> LAYER_NONE) then
+        DeadOK := False;
+    end;
+
+    Log.Add(Format('csv0 = csv1 (art set is one field):     %d of %d', [SurfEqSpr, N]));
+    Log.Add(Format('csv2 = row number (row 0 = no map):     %d of %d', [MapEqRow, N]));
+    Log.Add(Format('map file present for rows 1..65:        %d of %d', [MapsPresent, N - 1]));
+    Log.Add(Format('csv15 = csv0:                           %d of %d', [ThemeEqSurf, N]));
+    if Anomalies <> '' then
+      Log.Add('  differing:' + Anomalies);
+    Log.Add(Format('csv3/4/6/7 all -1 and csv8..14 all 0:   %s',
+      [BoolToStr(DeadOK, 'yes', 'NO')]));
+    Log.Add('');
+
+    if SurfEqSpr <> N then
+    begin
+      Log.Add('FAILED: surface set and sprite set are not always equal');
+      Inc(Result);
+    end;
+    if MapEqRow <> N then
+    begin
+      Log.Add('FAILED: csv2 is not the row number');
+      Inc(Result);
+    end;
+    if MapsPresent <> N - 1 then
+    begin
+      Log.Add(Format('FAILED: %d of %d map files missing',
+        [N - 1 - MapsPresent, N - 1]));
+      Inc(Result);
+    end;
+    { 65 of 66, the exception being row 58. Pinned exactly: if this ever became
+      66 the field would be redundant, and if it dropped further the reading of
+      it as a near-shadow of the art set would be wrong. }
+    if ThemeEqSurf <> 65 then
+    begin
+      Log.Add(Format('FAILED: expected csv15 to equal csv0 on exactly 65 rows, got %d',
+        [ThemeEqSurf]));
+      Inc(Result);
+    end;
+    if not DeadOK then
+    begin
+      Log.Add('FAILED: a column documented as constant is not');
+      Inc(Result);
+    end;
+  finally
+    T.Free;
+  end;
+
+  if Result = 0 then
+    Log.Add('OK - every documented relationship in Stages.pas still holds')
+  else
+    Log.Add('FAILED - Stages.pas describes the data wrongly');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -968,6 +1097,8 @@ begin
         Result := SelfTestSettings(Log)
       else if ParamStr(1) = '--selftest-script' then
         Result := SelfTestScript(Log)
+      else if ParamStr(1) = '--selftest-stages' then
+        Result := SelfTestStages(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -989,7 +1120,8 @@ begin
      (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') or
      (ParamStr(1) = '--selftest-events') or
      (ParamStr(1) = '--selftest-settings') or
-     (ParamStr(1) = '--selftest-script') then
+     (ParamStr(1) = '--selftest-script') or
+     (ParamStr(1) = '--selftest-stages') then
   begin
     ExitCode := RunSelfTest;
     Exit;
