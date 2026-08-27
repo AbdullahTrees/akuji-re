@@ -19,6 +19,13 @@ The invariants, all of which hold over the shipped data with no exceptions:
   * every ParamB sub-opcode has a fixed argument count, except 15 which
     carries its own length
   * sub-op 3's argument always indexes inside that stage's own tk file
+  * every alternative's leading number is a progress-flag GUARD and falls
+    inside the 4501-byte progress block
+
+The separator hierarchy itself is no longer an inference: Event_Begin
+@ 0x00454EF4 does StringReplace(ParamB, '/', ',') and EventScript_AdvanceStep
+@ 0x0045509C does StringReplace(step, '.', ','), both followed by CommaText.
+The four one-character literals were read out of the binary.
 
 Usage:
     python analyse_events.py "<game dir>" [--verbose]
@@ -38,6 +45,7 @@ ARITY = {0: 5, 2: 0, 3: 1, 4: 1, 5: 1, 7: 0, 8: 0, 9: 1, 10: 0,
          12: 3, 13: 0, 15: -1, 16: 1, 17: 1, 80: 0, 99: 0}
 
 ENTITY_TYPE_COUNT = 81
+PROGRESS_LENGTH = 4501   # the progress block, from save.dat
 
 # ParamA's kind letter is an arity marker. Must match KIND_LETTERS/KIND_ARITY
 # in src/EventCommands.pas.
@@ -79,7 +87,8 @@ def main():
     verbose = '--verbose' in sys.argv
 
     records = spawns = bad_spawn = cmds = bad_arity = shape_mismatch = 0
-    bad_kind_arity = 0
+    bad_kind_arity = bad_guard = 0
+    guards = set()
     shapes = Counter()
     dialogue = bad_dialogue = lists = negatives = 0
     types = set()
@@ -160,6 +169,14 @@ def main():
                     if op is None:
                         continue
                     subops[op] += 1
+                    guard = to_int(fb[0])
+                    if guard is None or not 0 <= guard < PROGRESS_LENGTH:
+                        bad_guard += 1
+                        problems.append('stage %03d: guard %r outside the '
+                                        'progress block: %r'
+                                        % (st, fb[0], cmd))
+                    else:
+                        guards.add(guard)
                     args = fb[2:]
                     for x in args:
                         v = to_int(x)
@@ -197,11 +214,13 @@ def main():
           % (''.join(sorted(kinds)), bad_kind_arity))
     print('ParamB shapes:       %d none / %d bare id / %d program  (%d disagree with the opcode)'
           % (shapes['none'], shapes['id'], shapes['program'], shape_mismatch))
-    print('ParamB commands:     %d  (%d with a wrong argument count)'
+    print('ParamB alternatives: %d  (%d with a wrong argument count)'
           % (cmds, bad_arity))
     print('  sub-op 3 refs:     %d  (%d outside the stage dialogue)'
           % (dialogue, bad_dialogue))
     print('  sub-op 15 lists:   %d  (count field matched every time)' % lists)
+    print('  guards:            %d distinct, all inside the %d-byte progress'
+          ' block (%d outside)' % (len(guards), PROGRESS_LENGTH, bad_guard))
     print('negative arguments:  %d' % negatives)
     print()
     print('sub-opcode histogram:')
@@ -215,7 +234,8 @@ def main():
         for x in problems[:40]:
             print('  ' + x)
 
-    fail = bad_spawn + bad_arity + bad_dialogue + shape_mismatch + bad_kind_arity
+    fail = (bad_spawn + bad_arity + bad_dialogue + shape_mismatch
+            + bad_kind_arity + bad_guard)
     if records != 692:
         print('\nFAILED: expected 692 records, got %d' % records)
         fail += 1

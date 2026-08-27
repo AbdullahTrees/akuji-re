@@ -769,7 +769,9 @@ var
   I, J, K, L: Integer;
   Records, Spawns, BadSpawn, Cmds, BadArity, Dialogue, BadDialogue, Lists: Integer;
   Negatives, N: Integer;
-  Nones, Ids, Progs, ShapeMismatch, BadKindArity: Integer;
+  Nones, Ids, Progs, ShapeMismatch, BadKindArity, BadGuard: Integer;
+  GuardSeen: array[0..PROGRESS_LENGTH - 1] of Boolean;
+  DistinctGuards: Integer;
   Kind: TParamBKind;
   MinType, MaxType: Integer;
   SubOpUse: array[0..99] of Integer;
@@ -783,6 +785,9 @@ begin
   Records := 0; Spawns := 0; BadSpawn := 0; Cmds := 0; BadArity := 0;
   Dialogue := 0; BadDialogue := 0; Lists := 0; Negatives := 0;
   Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0; BadKindArity := 0;
+  BadGuard := 0; DistinctGuards := 0;
+  for I := 0 to PROGRESS_LENGTH - 1 do
+    GuardSeen[I] := False;
   MinType := MaxInt; MaxType := -1;
   Kinds := '';
   for I := 0 to High(SubOpUse) do
@@ -853,9 +858,9 @@ begin
 
         Prog := ParseProgram(Ev.ParamB);
         for K := 0 to High(Prog) do
-          for L := 0 to High(Prog[K].Commands) do
+          for L := 0 to High(Prog[K].Alternatives) do
           begin
-            Cmd := Prog[K].Commands[L];
+            Cmd := Prog[K].Alternatives[L];
             Inc(Cmds);
             if (Cmd.SubOp >= 0) and (Cmd.SubOp <= High(SubOpUse)) then
               Inc(SubOpUse[Cmd.SubOp]);
@@ -863,6 +868,20 @@ begin
             for N := 0 to Cmd.ArgCount - 1 do
               if Cmd.Args[N] < 0 then
                 Inc(Negatives);
+
+            { The leading number is a progress-flag guard, so it must index the
+              progress block - EventScript_AdvanceStep reads Progress[it]. }
+            if (Cmd.Guard < 0) or (Cmd.Guard >= PROGRESS_LENGTH) then
+            begin
+              Log.Add(Format('  stage %d event %d: guard %d outside the progress block: %s',
+                [I, J, Cmd.Guard, Cmd.Raw]));
+              Inc(BadGuard);
+            end
+            else if not GuardSeen[Cmd.Guard] then
+            begin
+              GuardSeen[Cmd.Guard] := True;
+              Inc(DistinctGuards);
+            end;
 
             if not CheckArity(Cmd) then
             begin
@@ -901,11 +920,13 @@ begin
     [Kinds, BadKindArity]));
   Log.Add(Format('ParamB shapes:       %d none / %d bare id / %d program  (%d disagree with the opcode)',
     [Nones, Ids, Progs, ShapeMismatch]));
-  Log.Add(Format('ParamB commands:     %d  (%d with a wrong argument count)',
+  Log.Add(Format('ParamB alternatives: %d  (%d with a wrong argument count)',
     [Cmds, BadArity]));
   Log.Add(Format('  sub-op 3 refs:     %d  (%d outside the stage dialogue)',
     [Dialogue, BadDialogue]));
   Log.Add(Format('  sub-op 15 lists:   %d  (count field matched every time)', [Lists]));
+  Log.Add(Format('  guards:            %d distinct, all inside the %d-byte progress block (%d outside)',
+    [DistinctGuards, PROGRESS_LENGTH, BadGuard]));
   Log.Add(Format('negative arguments:  %d', [Negatives]));
   Log.Add('');
   Log.Add('sub-opcode histogram:');
@@ -914,7 +935,8 @@ begin
       Log.Add(Format('  %2d  x%-4d arity %d', [I, SubOpUse[I], SUBOP_ARITY[I]]));
   Log.Add('');
 
-  Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch + BadKindArity);
+  Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch + BadKindArity
+              + BadGuard);
 
   { Same trap as --selftest-events: an empty load must not pass. These are the
     counts in the shipped data. }
@@ -939,6 +961,11 @@ begin
   begin
     Log.Add(Format('FAILED: expected 22 negative arguments, got %d'
       + ' - ParseFields is losing or inventing minus signs', [Negatives]));
+    Inc(Result);
+  end
+  else if DistinctGuards <> 23 then
+  begin
+    Log.Add(Format('FAILED: expected 23 distinct guards, got %d', [DistinctGuards]));
     Inc(Result);
   end
   else if (Nones <> 104) or (Ids <> 281) or (Progs <> 307) then

@@ -6,16 +6,26 @@
 
   ## Status of this decode
 
-  IMPORTANT: unlike the record layout, which was read out of Load_Event_Scripts
-  @ 0x00465B50, the GRAMMAR here was recovered from the shipped data, not from
-  the disassembly. The interpreter has not been found yet. See CLAUDE.md 14 for
-  what that means: this is tier-2 evidence (self-validating structure) and tier-3
-  (cross-corroboration), not tier-1.
+  The separator hierarchy is now TIER-1: it was inferred from the data first,
+  then confirmed in the code.
 
-  So the SHAPE below is solid - it is checked against all 692 records and the
-  invariants hold with zero exceptions - but the MEANING of most sub-opcodes is
-  deliberately absent. A sub-opcode gets a name here only when something outside
-  this file agrees with it. Everything else stays a number.
+      Event_Begin @ 0x00454EF4      StringReplace(ParamB, '/', ',') then
+                                    CommaText   ->  '/' splits STEPS
+      EventScript_AdvanceStep
+        @ 0x0045509C                StringReplace(step, '.', ',') then
+                                    CommaText   ->  '.' splits ALTERNATIVES
+
+  Both separators were read straight out of the binary as single-character
+  AnsiString literals with refcount -1, at 0x00455098 and 0x0045508C for the
+  first pair and 0x0045520C and 0x00455200 for the second. This is the program
+  itself saying what its separators are, not an inference from the data.
+
+  What is still NOT decoded is the meaning of the individual sub-opcodes. That
+  lives in the state-140 handler at 0x00455210, which Ghidra has not
+  disassembled: a pair of string constants sits between it and the previous
+  function and breaks the flow (CLAUDE.md 3). A sub-opcode gets a name here only
+  when something outside this file agrees with it; everything else stays a
+  number.
 
   ## ParamA (csv 5) - what the event places
 
@@ -50,6 +60,32 @@
   in 0030-M-0-0128--4 the last field is -4, so '-' is both the separator and
   the minus sign.
 
+  ## The leading number is a GUARD, not a target
+
+  Each alternative begins with four digits. That number indexes the player's
+  progress flags, and EventScript_AdvanceStep uses it to choose which
+  alternative runs:
+
+      for i := Count - 1 downto 0 do
+        if Progress[StrToInt(Copy(item[i], 1, 4))] = 1 then
+          begin  step := item[i];  break  end
+        else
+          step := ''
+
+  So alternatives are scanned BACKWARDS and the last one whose flag is set wins.
+  Exactly one runs, or none at all. That is why they are written general-first:
+  flag 0 is set in the shipped save and no event ever writes it, so an
+  alternative guarded on 0000 always matches and acts as the default - placed
+  first precisely because the backwards scan reaches it last.
+
+  23 of the 24 multi-alternative steps follow that convention. The one that does
+  not is 0008-80.0000-12-007-1-1, where the order is reversed: the 0000 branch
+  is tested first, always matches, and 0008-80 can never run. That looks like an
+  authoring slip in the original data rather than a misreading here, and it is
+  reproduced rather than corrected.
+
+  All 23 distinct guard values fall inside the 4501-byte progress block.
+
   ## ParamB (csv 6) - three shapes, chosen by the opcode
 
   ParamB is NOT always a program. Its shape is decided entirely by csv 0, with
@@ -68,9 +104,9 @@
 
   A program is:
 
-      step / step / ...           '/' separates steps
-      cmd . cmd . ...             '.' separates commands within a step
-      <target>-<subop>[-<arg>...] '-' separates fields within a command
+      step / step / ...          '/' separates steps, which run in order
+      alt . alt . ...            '.' separates ALTERNATIVES; exactly one runs
+      <guard>-<subop>[-<arg>...] '-' separates fields within an alternative
 
   Every sub-opcode has a fixed argument count except 15, which is
   self-describing. The arities below are observed over all 692 records:
@@ -152,10 +188,10 @@ type
     instead of being assumed away. }
   TParamBKind = (pbNone, pbId, pbProgram);
 
-  { One command: <target>-<subop>[-args]. Raw is kept so that a command whose
+  { One alternative: <guard>-<subop>[-args]. Raw is kept so that one whose
     meaning is still unknown can be round-tripped or logged verbatim. }
   TEventCommand = record
-    Target:   Integer;
+    Guard:    Integer;   { progress-flag index; runs only if that flag is set }
     SubOp:    Integer;
     ArgCount: Integer;
     Args:     array[0..MAX_CMD_ARGS - 1] of Integer;
@@ -164,9 +200,13 @@ type
 
   TEventCommandArray = array of TEventCommand;
 
-  { One step of a ParamB program - the commands between two '/'. }
+  { One step of a ParamB program - the alternatives between two '/'. Despite
+    holding several, a step performs at most ONE of them; see SelectAlternative
+    and the header. The field is called Alternatives rather than Commands
+    deliberately: an earlier version of this unit read them as commands that all
+    run, which is wrong. }
   TEventStep = record
-    Commands: TEventCommandArray;
+    Alternatives: TEventCommandArray;
   end;
 
   TEventProgram = array of TEventStep;
@@ -220,8 +260,14 @@ function KindArity(Kind: Char): Integer;
   seventh would mean the grammar is incomplete. }
 function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
 
-{ Number of commands across every step, for reporting. }
+{ Number of alternatives across every step, for reporting. }
 function CommandCount(const Prog: TEventProgram): Integer;
+
+{ The alternative a step selects for the given progress flags, or -1 when none
+  qualifies and the step does nothing. Reproduces EventScript_AdvanceStep's
+  backwards scan exactly, including that the LAST matching alternative wins. }
+function SelectAlternative(const Step: TEventStep;
+  const Progress: array of Byte): Integer;
 
 implementation
 
@@ -318,7 +364,7 @@ var
   F: TStringList;
   I: Integer;
 begin
-  Result.Target := -1;
+  Result.Guard := -1;
   Result.SubOp := -1;
   Result.ArgCount := 0;
   Result.Raw := S;
@@ -330,7 +376,7 @@ begin
     ParseFields(S, F);
     if F.Count < 2 then
       Exit;
-    Result.Target := StrToIntDef(F[0], -1);
+    Result.Guard := StrToIntDef(F[0], -1);
     Result.SubOp := StrToIntDef(F[1], -1);
     for I := 2 to F.Count - 1 do
     begin
@@ -398,9 +444,9 @@ begin
       Cmds.StrictDelimiter := True;
       Cmds.DelimitedText := Steps[S];
 
-      SetLength(Result[S].Commands, Cmds.Count);
+      SetLength(Result[S].Alternatives, Cmds.Count);
       for C := 0 to Cmds.Count - 1 do
-        Result[S].Commands[C] := ParseCommand(Cmds[C]);
+        Result[S].Alternatives[C] := ParseCommand(Cmds[C]);
     end;
   finally
     Cmds.Free;
@@ -458,7 +504,23 @@ var
 begin
   Result := 0;
   for S := 0 to High(Prog) do
-    Inc(Result, Length(Prog[S].Commands));
+    Inc(Result, Length(Prog[S].Alternatives));
+end;
+
+function SelectAlternative(const Step: TEventStep;
+  const Progress: array of Byte): Integer;
+var
+  I, G: Integer;
+begin
+  { Backwards, first match wins - so of several qualifying alternatives it is
+    the LAST one in the file that runs. }
+  for I := High(Step.Alternatives) downto 0 do
+  begin
+    G := Step.Alternatives[I].Guard;
+    if (G >= 0) and (G <= High(Progress)) and (Progress[G] <> 0) then
+      Exit(I);
+  end;
+  Result := -1;
 end;
 
 end.
