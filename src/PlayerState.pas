@@ -63,7 +63,8 @@ type
     Field11D0:   Integer;   // +0x11D0  init 0x68
     MusicTrack:  Integer;   // +0x11D4  index into the KbgmPlayer playlist
     Field11D8:   Integer;   // +0x11D8  passed to the spawned player entity
-    Field11DC:   Integer;   // +0x11DC  indexes a table read by HUD_Draw
+    TargetIndex: Integer;   // +0x11DC  index into HUD_Draw's 12-int goal
+                            //          table at 0x00468EC4, NOT the goal itself
     Difficulty:  Integer;   // +0x11E0  copy of Settings.GameLevel
   end;
 

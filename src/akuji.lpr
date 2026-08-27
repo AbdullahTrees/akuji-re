@@ -1,7 +1,7 @@
 { Akuji the Demon - Free Pascal / Lazarus source port.
 
   This file is a faithful reconstruction of the original Delphi .dpr program
-  block, recovered from `entry` at 0x004671ac in akuji.exe:
+  block, recovered from `entry` at 0x0046716c in akuji.exe:
 
       Delphi_RTL_Init(&LAB_00466ee4);
       TApplication_Initialize();
@@ -11,7 +11,16 @@
       Delphi_Halt0();
 
   The unit name GmMain was recovered from the class RTTI (TTypeData.UnitName
-  for TFrm_main). See CLAUDE.md section 5. }
+  for TFrm_main). See CLAUDE.md section 5.
+
+  Two notes on the entry point. Its address is 0x0046716C, taken from the PE
+  header's AddressOfEntryPoint rather than from a guess - an earlier version of
+  this comment said 0x004671AC, which is only the CreateForm CALL inside it.
+
+  And the title literal at 0x004671CC is odd: its Delphi length field reads 12,
+  but the bytes that follow are 'Akuji the Demon' + NUL, which is 15. The form
+  resource's Caption is unambiguously 'Akuji the Demon', so that is what is
+  used here; the discrepancy is recorded rather than resolved. }
 
 program akuji;
 

@@ -51,6 +51,10 @@ type
     FMoveY: Integer;
     FMoveX: Integer;
     FConfirm: Boolean;
+    { HUD life-icon animation, the three ints at PTR_DAT_0046D320. }
+    FLifeAnimX: Integer;
+    FLifeAnimIndex: Integer;
+    FLifeAnimTimer: Integer;
     function FindGameData: string;
     procedure LoadStage(StageIndex: Integer);
     procedure DrawHud;
@@ -239,18 +243,86 @@ end;
 { HUD_Draw @ 0x00461BA8: a "%3d/%-3d" counter, an h:mm:ss timer, and a row of
   life icons - filled up to Lives, empty out to MaxLives. Icon graphics are not
   wired yet, so the count is shown as text. }
+{ ---------------------------------------------------------------------------
+  DrawHud - HUD_Draw @ 0x00461BA8.
+
+  The earlier version of this was guesswork and got three things wrong: the
+  counter was at (0, 8) rather than (8, 32), the 'TIME' label was missing, and
+  lives were drawn as the text 'LIFE n/m'. The original draws lives as SPRITE
+  ICONS across the top of the screen, one per life, and the icon is animated.
+  --------------------------------------------------------------------------- }
+const
+  { Source x offsets of the life icon's animation frames, from the 4-int table
+    at 0x0046CB44. Three distinct frames played as a ping-pong. }
+  LIFE_ANIM_X: array[0..3] of Integer = (19, 38, 57, 38);
+  LIFE_ANIM_TICKS = 8;      { advances once the timer passes 8 }
+  LIFE_ICON_W = $12;        { 0x86 - 0x74 }
+  LIFE_ICON_H = $14;
+  LIFE_ICON_X0 = $74;       { source x of the unlit icon }
+  LIFE_ICON_Y = 8;          { on screen }
+  LIFE_ICON_STEP = $10;
+
+  { The right-hand value of the '%3d/%-3d' counter is NOT a player-state field.
+    Game_DrawText is handed PTR_DAT_0046D2B4[PlayerState+0x11DC], a 12-int
+    table of goals at 0x00468EC4 that ends exactly where the ability-name array
+    at 0x00468EF4 begins. So +0x11DC is an INDEX into this, not the target. }
+  COUNTER_TARGETS: array[0..11] of Integer =
+    (20, 50, 70, 130, 160, 400, 999, 30, 90, 270, 999, 0);
+
 procedure TFrm_main.DrawHud;
 var
-  Secs: Integer;
+  Secs, I, Target: Integer;
+  Sheet: TBitmap;
 begin
   if FFont = nil then Exit;
+  Sheet := FSurfaces[1];    { *(p_Surfaces + 4) - slot 1 }
+
+  { The counter icon, then '@ ' + the count. The '@' is a real glyph in the
+    9x9 sheet, not punctuation - the original concatenates the literal '@ '
+    at 0x00461EB8 in front of the formatted number. }
+  if Sheet <> nil then
+    DDDD1.DrawSprite(Sheet, 7, $12, Rect($60, 0, $74, 10));
+
+  Target := 0;
+  if (FPlayer.TargetIndex >= 0) and
+     (FPlayer.TargetIndex <= High(COUNTER_TARGETS)) then
+    Target := COUNTER_TARGETS[FPlayer.TargetIndex];
+  FFont.TextOut(DDDD1.Canvas, 8, $20,
+    '@ ' + Format('%3d/%-3d', [FPlayer.Counter, Target]), 0);
+
+  { Variant 2 for the label, 0 for the digits - the original passes exactly
+    these as Game_DrawText's fifth argument. }
+  FFont.TextOut(DDDD1.Canvas, $D0, $E0, 'TIME', 2);
   Secs := FPlayer.ElapsedSec;
-  FFont.TextOut(DDDD1.Canvas, 0, 8,
-    Format('%3d/%-3d', [FPlayer.Counter, FPlayer.Field11DC]), 0);
   FFont.TextOut(DDDD1.Canvas, $F8, $E0,
     Format('%.2d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]), 0);
-  FFont.TextOut(DDDD1.Canvas, 8, $18,
-    Format('LIFE %d/%d', [FPlayer.Lives, FPlayer.MaxLives]), 0);
+
+  { Advance the icon animation. The original ticks this inside HUD_Draw, so its
+    speed is tied to the HUD being drawn rather than to the frame loop. }
+  Inc(FLifeAnimTimer);
+  if FLifeAnimTimer > LIFE_ANIM_TICKS then
+  begin
+    FLifeAnimTimer := 0;
+    FLifeAnimIndex := (FLifeAnimIndex + 1) and 3;
+    FLifeAnimX := LIFE_ANIM_X[FLifeAnimIndex];
+  end;
+
+  { The original clamps the stored lives here rather than at the point of
+    damage, so a corrupt save is corrected by drawing the HUD. }
+  if FPlayer.Lives < 0 then
+    FPlayer.Lives := 0;
+  if FPlayer.MaxLives < FPlayer.Lives then
+    FPlayer.Lives := FPlayer.MaxLives;
+
+  if Sheet = nil then Exit;
+  { Lit icons run 1..Lives, unlit ones Lives+1..MaxLives, both at i*0x10 + 9. }
+  for I := 1 to FPlayer.Lives do
+    DDDD1.DrawSprite(Sheet, I * LIFE_ICON_STEP + 9, LIFE_ICON_Y,
+      Rect(FLifeAnimX + LIFE_ICON_X0, 0,
+           FLifeAnimX + LIFE_ICON_X0 + LIFE_ICON_W, LIFE_ICON_H));
+  for I := FPlayer.Lives + 1 to FPlayer.MaxLives do
+    DDDD1.DrawSprite(Sheet, I * LIFE_ICON_STEP + 9, LIFE_ICON_Y,
+      Rect(LIFE_ICON_X0, 0, LIFE_ICON_X0 + LIFE_ICON_W, LIFE_ICON_H));
 end;
 
 { Sound requests from the title screen. See notes/audio_map.md for which index

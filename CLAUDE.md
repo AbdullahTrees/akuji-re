@@ -108,7 +108,7 @@ up real identifiers — use them:
 ## 5. Program structure — fully mapped
 
 ```
-entry (0x4671ac)              the .dpr program block
+entry (0x46716c)              the .dpr program block
   Application.Initialize
   Application.Title := 'Akuji the Demon'
   Application.CreateForm(TFrm_main, Frm_main)

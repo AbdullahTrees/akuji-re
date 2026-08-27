@@ -1,0 +1,99 @@
+# Game-layer functions in akuji.exe
+#
+# Every function Ghidra knows about between 0x455000 and 0x4671FF - the range
+# CLAUDE.md section 2 identifies as Akuji's own code, above the Borland RTL/VCL
+# and the third-party DirectX component suite. 88 of them; that is the real
+# denominator for 'how much of the game is reconstructed'.
+#
+# Snapshotted from the Ghidra database so tools/coverage.py runs without it.
+# Regenerate with the GhidraMCP list_functions call when new names land.
+#
+# address  name
+0045509c  SaveGame_Select_Slot
+00456038  TitleMenu_Update
+00456698  FUN_00456698
+004568d0  FUN_004568d0
+00456b14  FUN_00456b14
+00456e0c  FUN_00456e0c
+00457150  FUN_00457150
+00457228  FUN_00457228
+00457300  FUN_00457300
+004574dc  FUN_004574dc
+004576b4  FUN_004576b4
+00457880  FUN_00457880
+00457ab4  FUN_00457ab4
+00457f98  FUN_00457f98
+004580bc  FUN_004580bc
+00458138  FUN_00458138
+00458274  FUN_00458274
+00458404  FUN_00458404
+00458490  FUN_00458490
+00459a0c  FUN_00459a0c
+00459e7c  FUN_00459e7c
+0045a5d4  FUN_0045a5d4
+0045a698  FUN_0045a698
+0045a7bc  FUN_0045a7bc
+0045a848  FUN_0045a848
+0045aa60  FUN_0045aa60
+0045aa78  FUN_0045aa78
+0045abd8  FUN_0045abd8
+0045af2c  FUN_0045af2c
+0045b0cc  FUN_0045b0cc
+0045b260  FUN_0045b260
+0045b3b4  FUN_0045b3b4
+0045b62c  FUN_0045b62c
+0045b7c4  FUN_0045b7c4
+0045bc00  FUN_0045bc00
+0045bc8c  FUN_0045bc8c
+0045bd9c  FUN_0045bd9c
+0045bf58  FUN_0045bf58
+0045c0f4  FUN_0045c0f4
+0045c678  FUN_0045c678
+0045cad8  FUN_0045cad8
+0045cc98  FUN_0045cc98
+0045d00c  FUN_0045d00c
+0045d598  FUN_0045d598
+0045d7d8  FUN_0045d7d8
+0045da28  FUN_0045da28
+0045dc84  FUN_0045dc84
+0045e4ec  FUN_0045e4ec
+0045e714  FUN_0045e714
+0045eb1c  FUN_0045eb1c
+0045ed50  FUN_0045ed50
+0045f218  FUN_0045f218
+0045f744  FUN_0045f744
+0045f824  FUN_0045f824
+00460884  FUN_00460884
+004608bc  FUN_004608bc
+004610c4  FUN_004610c4
+00461400  FUN_00461400
+004615a8  FUN_004615a8
+00461738  FUN_00461738
+004617fc  FUN_004617fc
+00461874  FUN_00461874
+00461a0c  FUN_00461a0c
+00461a44  FUN_00461a44
+00461ba8  HUD_Draw
+00461ee4  PauseMenu_Update
+0046214c  Title_Init
+00462210  Stage_Begin
+00462330  Title_MainMenu
+00462f40  Game_StartOrLoad
+00463154  Opening_Update
+00463624  FUN_00463624
+00464484  FUN_00464484
+004645b0  Configure_Stage_Params
+00464d30  TFrm_main_AppIdle
+004653c8  GameState_Reset
+00465584  TFrm_main_DDDD1Init
+00465a1c  Load_Stage_Assets
+00465b50  Load_Event_Scripts
+00465e9c  Load_Surface_Textures
+004660b8  Load_Sprite_Sheets
+00466340  Load_Map
+00466888  FUN_00466888
+004669f8  Load_StageTable
+00466c78  FUN_00466c78
+00466dfc  FUN_00466dfc
+00466e4c  Input_ConfirmPressed
+0046716c  entry
