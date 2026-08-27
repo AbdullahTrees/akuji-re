@@ -23,7 +23,7 @@ uses
   Forms,
   GmMain in 'GmMain.pas' {Frm_main};
 
-{$R *.res}
+{ $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
 begin
   Application.Initialize;

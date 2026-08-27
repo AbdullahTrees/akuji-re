@@ -1,54 +1,37 @@
 # Akuji the Demon — Project Brief
 
-Read this before touching anything. It records what the project is, what has been
-decided, and the mistakes that have already cost time here.
+Reconstructing the source of a 1998 Japanese doujin game from `akuji.exe`. The
+original source was never released. The output is **the** source, rebuilt in
+Object Pascal — cross-platform because Free Pascal is, not via any porting layer.
 
-Named `CLAUDE.md` so Claude Code auto-loads it; the content is tool-agnostic, so
-point any other agent at it too.
+Read sections 1–4 before touching anything.
 
 ---
 
-## 1. What this is
+## 1. Status
 
-`akuji.exe` is a 1998-era Japanese doujin game, **written in Object Pascal and
-compiled with Borland Delphi**. The goal is a **source port**: real, compilable,
-cross-platform source code — not a compatibility shim.
+**The rebuilt source builds and runs.** `lazbuild akuji.lpi` in `src/` produces a
+working 320x240 window titled "Akuji the Demon". The recovered form loads and all
+four component classes resolve. No game logic yet.
 
-Compiler identification is settled, on three independent proofs:
+Toolchain: Lazarus at `E:\lazarus`, FPC 3.2.2, targets Win64.
+Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 
-- PE sections are `CODE` / `DATA` / `BSS` — Borland's linker, nobody else's
-- `TimeDateStamp = 0x2A425E19` (19 Jun 1992) — Borland's fixed constant, not a build date
-- `__register` calling convention, negative VMT offsets, `AnsiString` refcounting,
-  and a textbook Delphi `.dpr` program block at `entry` (`0x004671ac`)
+**Next:** translate the state handlers (section 6) into `GmMain.pas`.
 
-## 2. Decisions made
+## 2. The three layers — most important section
 
-| Decision | Rationale |
-|---|---|
-| **Target Free Pascal + Lazarus LCL first** | The original is Object Pascal. Translating Pascal to Pascal preserves `AnsiString`, VMT dispatch, `try/finally`, and sets as *language features* instead of hand-reimplemented C. LCL supplies `TCanvas`/`TFont`/`TBitmap` near-1:1 with VCL |
-| **SDL2 later, only if measured** | SDL2 has mature Pascal bindings. Swapping the presentation layer is cheap once the game runs. Do not start here |
-| **Not C++** | Would require reimplementing the Delphi runtime *and* translating, simultaneously, with no working reference to check against. C++ remains a viable later migration from working source |
-| **Get it running before making it good** | The hard part of a decompilation project is knowing you got it right. Reach a verifiable running build by the cheapest route first |
+The binary is not "game code plus Windows APIs". Only the innermost is Akuji's:
 
-Project is private, not a community effort, so the "C++ has more contributors"
-argument was weighed and rejected.
-
-## 3. The three-layer structure — the most important section here
-
-The binary is **not** "game code plus Windows APIs". It is three layers, and only
-the innermost is Akuji's:
-
-| Layer | Marker classes | ~Functions | What to do |
+| Layer | Marker classes | ~Fns | Do |
 |---|---|---|---|
-| Borland RTL + VCL | `TObject`, `TCanvas`, `TForm`, `TApplication` | ~1597 | **Skip.** FPC RTL + LCL replace it |
-| Third-party DirectX suite | `TDDDD`, `TDDSD`, `TDDIDEX`, `TKbgmPlayer` | ~191 | **Replace wholesale.** Do not port |
-| **Akuji** | **`TFrm_main`** and its units | **~83** | **This is what you write** |
+| Borland RTL + VCL | `TObject`, `TCanvas`, `TForm`, `TApplication` | ~1597 | **Skip** — FPC RTL + LCL replace it |
+| Third-party DirectX suite | `TDDDD`, `TDDSD`, `TDDIDEX`, `TKbgmPlayer` | ~191 | **Replace wholesale** |
+| **Akuji** | **`TFrm_main`** + units | **~83** | **Write this** |
 
-**About 5% of the binary is the actual game** — roughly 80–110 functions, not 1,871.
+### Address-range rule
 
-### The address-range rule
-
-Delphi links its own units before the program's, so library code sits low:
+Delphi links its own units first, so library code sits low:
 
 | Range | Contents |
 |---|---|
@@ -58,237 +41,213 @@ Delphi links its own units before the program's, so library code sits low:
 | `0x444000`–`0x455000` | Third-party DirectX components |
 | `0x455000`+ | **The game** |
 
-**A game-sounding name below `0x444000` is wrong until proven otherwise.** The
-`0x455000` boundary is fuzzy — `Game_DrawTextOutlined` (`0x451004`) is game code
-below it — but every misidentification found so far has been under `0x444000`.
+**A game-sounding name below `0x444000` is wrong until proven otherwise.**
 
-## 4. Read this before naming anything
+## 3. Naming rules
 
-The most expensive mistake in this project was **naming functions after the Win32
-API they call.** That produced `Game_KillTimer`, `Game_Tick`,
-`Game_UpdateAndRender`, `VCL_Message_Loop`, `GDI_Blit_Sprite` — nineteen functions
-marked "Confirmed" that were all Borland library code. The port plan was then
-built around `GDI_Blit_Sprite` as "the core sprite blitter"; it is
-`Graphics.pas`'s transparent-blit helper, and the game's real blitter had never
-been found.
-
-`004038f4` was labelled `VCL_Message_Loop`, "PeekMessage/DispatchMessage pump". It
-contains no message-pump calls at all. It is `System._Halt0`, the process
-**shutdown** path. The notes even recorded it being called as a "fatal abort" —
-the contradiction sat in the document, unexamined.
-
-**Rules:**
+The costliest mistake here was **naming functions after the Win32 API they call**.
+That produced 19 "confirmed" names that were all Borland library code — an entire
+"Game Loop" section that was really `TApplication`'s tooltip implementation, and
+`VCL_Message_Loop` (`0x004038f4`), which contains no message pump at all and is
+`System._Halt0`, the shutdown path.
 
 1. Check the address range first.
-2. Name from the **cluster**, not the callee. Read callers and callees, and see
-   whether the group matches a known `Forms.pas` / `Controls.pas` routine.
-3. Do not mark a name confirmed without cross-function evidence. "Likely" is fine
-   and honest.
-4. Prefer built-in Ghidra features (`Auto Create Structure`) over hand-rolling —
-   but check whether a standard type already fits before keeping a generated one.
-   One auto-created struct here turned out to be `tagPOINT`, which already existed.
+2. Name from the **cluster**, not the callee — read callers and callees.
+3. Never mark confirmed without cross-function evidence. "Likely" is honest.
+4. Before keeping an auto-created struct, check whether a standard type fits. One
+   here turned out to be `tagPOINT`, which already existed.
 
-## 5. How Pascal source is actually recovered
+### Ghidra mislabels this binary constantly
 
-Ghidra cannot emit Pascal, and no transpiler exists. Recovery is manual
-re-authoring — but three things make it far cheaper than that sounds.
+Functions reachable only through RTTI or a VMT slot have **no call xrefs**, so
+auto-analysis guesses, and guesses wrong. `0x465584` was typed as a `longdouble`;
+the RTTI record at `0x464D10` was disassembled as code, and its runaway decoding
+swallowed the entry byte of the function at `0x464D30`.
 
-### 5a. The DFM gives you the form for free
+To fix one: `G` → address, `C` (clear), `D` (disassemble), `F` (create function).
+Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
-Delphi embeds the form design as a binary `TPF0` resource. It has been decoded to
-`notes/Frm_main.dfm` — **verbatim, not reconstructed**. It supplies component
-names, properties, and **the original event-handler method names**:
+## 4. How Pascal is recovered
 
-```
-object Frm_main: TFrm_main
-  Caption = 'Akuji the Demon'
-  ClientWidth = 320   ClientHeight = 240
-  OnDestroy = FormDestroy
-  OnKeyDown = FormKeyDown
-  object DDDD1: TDDDD              // DirectDraw, 320x240, Use3D = False
-    OnInit = DDDD1Init
-  object Joy: TDDIDEX              // DirectInput
-  object KbgmPlayer1: TKbgmPlayer  // MIDI, 15 tracks
-  object DDSD1: TDDSD              // DirectSound, 57 channels
-```
+Ghidra cannot emit Pascal; there is no transpiler. Translation is manual, but:
 
-That is the skeleton of `Frm_main.pas` with real identifiers. Use these names.
+**The form design is recovered verbatim.** Delphi embeds it as a `TPF0` resource.
+Decoded to `notes/Frm_main.dfm` (archival) and `src/GmMain.lfm` (working). It gave
+up real identifiers — use them:
 
-### 5b. Delphi idioms map mechanically
+- unit `GmMain`, class `TFrm_main` (86 published props, 744-byte instance),
+  instance `Frm_main`
+- handlers `FormDestroy`, `FormKeyDown`, `DDDD1Init`
+- components `DDDD1` (`+0x2D0`), `Joy` (`+0x2D4`), `KbgmPlayer1` (`+0x2D8`),
+  `DDSD1` (`+0x2DC`) — offsets confirmed against the RTTI field table
+- 320x240, windowed, `Use3D = False`
 
-Ghidra's C pseudocode carries recognisable Pascal fingerprints:
+**Idioms map mechanically:**
 
 | Decompiled | Pascal |
 |---|---|
 | `Delphi_AnsiString_Assign(&a, b)` | `a := b;` |
-| `Delphi_AnsiString_AddRef` / decref calls | *nothing* — the compiler emits these |
-| `FS:[0]` frame plus a `LAB_xxx` handler | `try...finally` / `try...except` |
-| `(**(code **)(*obj + 0x2C))(obj, ...)` | `obj.SomeVirtualMethod(...)` |
+| `Delphi_AnsiString_AddRef` / decref | *delete* — the compiler emits these |
+| `FS:[0]` frame + `LAB_xxx` handler | `try...finally` |
+| `(**(code **)(*obj + 0x2C))(obj, ...)` | `obj.SomeMethod(...)` |
 | `Delphi_TObject_Free(x)` | `x.Free;` |
 | `param_1` on a method | `Self` |
-| byte-sized bit ops over a small range | a Pascal `set of` |
+| byte-sized bit ops on a small range | a `set of` |
 
-### 5c. You do not port the component layer
+**Verified RTL helpers** (evidence-backed, trust these): `Delphi_GetMem`
+`004026d8`, `Delphi_FreeMem` `004026f0`, `Delphi_TObject_Free` `00402da4`,
+`Delphi_FillChar` `00406a50`, `Delphi_AnsiString_Assign` `00403cf8`,
+`Delphi_AnsiString_AddRef` `00403e60`, `Delphi_IntToStr` `00407f64`,
+`Delphi_FileOpen` `00407ff8`, `Delphi_FileRead` `0040805c`.
 
-`TDDDD` / `TDDSD` / `TDDIDEX` / `TKbgmPlayer` get *reimplemented* against the same
-published interface, which the DFM documents. Write an LCL (later SDL2) `TDDDD`
-that honours `InitialScreenWidth`/`InitialScreenHeight` and fires `OnInit`, and the
-game's calls into it keep working unchanged.
+## 5. Program structure — fully mapped
 
-## 6. Resolved: the D3DRM dependency costs nothing
+```
+entry (0x4671ac)              the .dpr program block
+  Application.Initialize
+  Application.Title := 'Akuji the Demon'
+  Application.CreateForm(TFrm_main, Frm_main)
+  Application.Run          -> TApplication_Run (0x44298c)
+                                repeat HandleMessage until Terminated
+                                  -> TApplication_Idle (0x442f8c)
+                                       -> FOnIdle == TFrm_main_AppIdle
+```
 
-The game will not launch without `d3drm.dll`, yet is purely 2D. Both are true:
+`TFrm_main` **overrides no virtual methods** — its VMT is identical to `TForm`'s.
+The game has exactly three published entry points:
 
-- `Direct3DRMCreate` is a **static import**, so Windows resolves it at load time
-  whether or not the code ever runs
-- The import belongs to the **DirectX component suite**, not to the game
-- The DFM settles it outright: **`Use3D = False`, `D3DOptions = []`**
+| Address | Method |
+|---|---|
+| `0x00465584` | `TFrm_main_DDDD1Init` — init |
+| `0x004665C8` | `FormKeyDown` — first test is VK_ESCAPE |
+| `0x00466644` | `FormDestroy` |
 
-The component layer is being replaced anyway, so the dependency leaves with it.
-This was the largest apparent risk in the port, and it is closed.
+`DDDD1Init` loads settings, then installs the loop:
+`Application.FOnIdle := TFrm_main_AppIdle` (`+0xD8` code, `+0xDC` data).
 
-## 7. Facts worth having
+## 6. The frame loop — `TFrm_main_AppIdle` @ `0x00464D30`
 
-- Original unit was **`GmMain.pas`**, class `TFrm_main` (86 published properties),
-  instance `Frm_main` — all recovered from `TTypeData` RTTI, not guessed
-- Native resolution **320x240**, windowed (`system.ini`: `fullscreen=off`)
-- Non-portable import surface is **24 of 396 imports** (6%): ddraw 2, dsound 1,
-  dinput 1, d3drm 1, winmm 6 (`timeGetTime` plus RIFF/WAV `mmio*`), Kbgm32 13
-- 248 imports are user32/gdi32/comctl32 — all VCL's, all replaced free by LCL
-- **67 gdi32 imports versus 2 ddraw entry points**: the game draws mostly through
-  GDI (`TCanvas`), which is why the LCL-first bet is sound
-- Audio is external (`Kbgm32.dll`, 13 exports) — a clean replaceable boundary
-- The MIDI playlist implies structure: 2 main areas, 2 bosses, **5 endings**
-- No `OnCreate`, no `OnPaint`, no `TTimer` on the form. The main loop is driven
-  elsewhere — likely `TApplication.OnIdle` (`FOnIdle` at `+0xD8`) or inside
-  `TDDDD`. **Unverified; worth confirming early.**
+Sets `Done := False`, so `TApplication_Idle` skips `WaitMessage` and re-enters
+immediately. That busy loop is the game's frame tick. Per frame:
 
-## 8. State of the work
+1. `Done := False`
+2. poll `Joy` — 3 device paths, chosen by `Settings+0x34` (`system.ini [device] input`)
+3. poll 4 buttons via `p_KeyMap` into `p_InputState+0x1C`
+4. `FUN_00449e78(DDDD1)` — begin frame
+5. **state dispatch** (below)
+6. sprite/entity update — `FUN_0044d758`, `FUN_0044d1e0`, `FUN_0044d31c` x8 layers
+7. button edge-detection and repeat timers
+8. `FUN_00449d00(DDDD1)` — present
+9. frame limiter
 
-**Done:** compiler and language identified; three-layer structure established;
-21 functions renamed (12 VCL tooltip cluster plus 9 entry-chain); `TApplication`
-struct recovered and applied across 13 functions; game entry point found; DFM
-decoded; D3DRM risk closed.
+### State machine — `p_GameState` (`0x0046d06c`), steps of 10
 
-**Next:** walk the `TFrm_main` VMT at `PTR_PTR_00464b54`. Its virtual methods are
-both the game's structure and the checklist of what remains to rebuild.
+| Value | Handler |
+|---|---|
+| 10 | `Stage_Init` (`0x46214c`) |
+| 20 | `FUN_00462330` |
+| 30 | `FUN_00462210` |
+| 40 | `Game_Init_PlayerState` (`0x462f40`) |
+| 60 | `FUN_00454790`, `FUN_00461ba8` |
+| 100 | `FUN_00461a44`, `FUN_00461ba8` |
+| 130 | `FUN_00461ee4` — **pause**; saves prior state to `0x46cbbc` |
+| 140 | `FUN_00454790`, `FUN_00455210`, `FUN_00461ba8` |
+| 150 | `FUN_00463624` |
+| 999 | **quit** — nils `FOnIdle`, calls `FUN_00442a40` |
 
-**`src/` holds the reconstructed source.** `akuji.lpr` and `GmMain.lfm` are done;
-the four component units and `GmMain.pas` are not. This is not a "port" of an
-existing codebase — no source was ever released. It is *the* source, rebuilt, and
-it happens to be cross-platform because Free Pascal is. Avoid "port" framing in
-new notes; `SDL_port_plan.md` predates this and uses it throughout.
+Also dispatched: `TitleMenu_Update` when `0x46cf28 <> 0`, `FUN_004568d0` when
+`0x46cd00 <> 0`.
 
-**Stale:** `exports/functions/` predates the renames. Regenerate with
-`ghidra_scripts/ExportAllFunctions.java` — clear the directory first, since it only
-writes and never deletes.
+### Frame limiter — replace this
 
-`SDL_port_plan.md` has been **deleted** — it assumed C + SDL2 throughout and was
-built on the misidentifications in section 4. Everything worth keeping was folded
-into sections 10–14 below. It is recoverable at commit `77f415b` if needed.
-This file and `notes/function_map.md` are authoritative.
+```
+while (timeGetTime() - LastFrameTime <= 15) { }   // busy-wait
+LastFrameTime := timeGetTime();
+```
 
-## 9. Tooling
+~60 FPS via spin-wait, gated by a flag at `0x46ce60`. Combined with
+`Done := False` this **pegs a CPU core at 100%**. Use a real sleep in the rebuild.
 
-Ghidra 12.0.4 with a GhidraMCP server on `127.0.0.1:8081/sse` (`.mcp.json` lives at
-`devel/source`). It binds at session start — **if it drops, the session must be
-restarted; it will not reconnect.** Ghidra scripts can be compile-checked offline
-with `javac` against the install's jars rather than guessed at.
+### Named globals
 
----
+`p_GameState` `0x46d06c`, `p_InputState` `0x46cc58`, `p_KeyMap` `0x46cea8`,
+`p_Settings` `0x46d0e8`, `p_LastFrameTime` `0x46d1e0`.
 
-## 10. Recovered input mapping
+## 7. Settings — `data\system.dat`, 56 bytes
 
-DirectInput scancodes from `DirectInput_Init` (`0x00453bdc`). These are the game's
-actual controls — reuse them directly rather than re-deriving:
+`DDDD1Init` writes defaults into `p_Settings`, then `FileRead(h, p_Settings, 0x38)`
+overwrites them.
 
-| DIK codes | Keys | Function |
+| Offset | Default | Meaning |
 |---|---|---|
-| `0x2C`–`0x2E` | Z, X, C | action buttons |
-| `0x1E`–`0x20` | A, S, D | secondary actions |
-| `0x02`–`0x0B` | 1–0 | item / weapon selection |
+| `+0x08`..`+0x14` | 1,2,3 | **key map** — copied to `p_KeyMap`, user-rebindable |
+| `+0x18`..`+0x1B` | 1,0,1,0 | flags; `+0x1A` = fullscreen |
+| `+0x24` | 10 | unknown |
+| `+0x34` | 1 | input device; overwritten from `system.ini [device] input` |
+
+`system.ini` is read via an INI object at `Self+0x2E0`. `InstanceSize` is `0x2E8`,
+so `+0x2E0`/`+0x2E4` are the form's only non-component fields.
+
+## 8. Assets — not yet reversed
+
+| Path | Loader |
+|---|---|
+| `data\stage.dat` | `Stage_Init` `0x46214c` |
+| `data\surf\` | `Load_Surface_Textures` `0x465e9c` |
+| `data\spr\` | `Load_Sprite_Sheets` `0x4660b8` |
+| `data\tk\` | `Load_Tile_Data` `0x466340` |
+| `data\ev\` | `Load_Event_Scripts` `0x465b50` |
+| `data\save.dat` | `Game_CheckSaveExists` `0x463154` |
+| `bmp.qda` | unidentified |
+
+`Load_Stage_Assets` `0x465a1c` orchestrates the first five.
+
+## 9. Input map (from `DirectInput_Init` `0x453bdc`)
+
+| DIK | Keys | Function |
+|---|---|---|
+| `0x2C`–`0x2E` | Z, X, C | actions |
+| `0x1E`–`0x20` | A, S, D | secondary |
+| `0x02`–`0x0B` | 1–0 | item select |
 | `0x39` | Space | jump |
-| `0xC8`–`0xCD` | arrow keys | movement |
-| `0x47`–`0x51` | numpad | alternate movement |
+| `0xC8`–`0xCD` | arrows | movement |
+| `0x47`–`0x51` | numpad | alt movement |
 
-In the rebuilt source these become LCL `OnKeyDown` handling in `FormKeyDown`
-(already named in the form resource) or `TDDIDEX` polling.
+## 10. Hazards that survive the rewrite
 
-## 11. Asset formats — still to reverse
+- **8-bit palettes.** Original uses `SelectPalette`/`RealizePalette`. Modern
+  drivers have no hardware palettes. Convert indexed surfaces to RGBA at load.
+- **Frame timing.** See section 6 — replace the spin-wait.
+- **MIDI.** `Kbgm32.dll` drives the system MIDI mapper with SysEx. Options: a
+  Pascal MIDI library, FluidSynth, or pre-render the 15 tracks to OGG.
+- **Write paths.** Original writes beside the exe and to
+  `HKCU\Software\Borland\Delphi\RTL`. Use a per-user config dir.
+- **Shift-JIS.** The game is Japanese in origin; data-file text is not UTF-8.
 
-None of these are decoded yet. The loading code reveals each format; the loaders
-are already partly identified in `notes/function_map.md`.
+## 11. Decisions
 
-| Path | Contents | Loader |
-|---|---|---|
-| `data\stage.dat` | stage definitions — tilemaps, entity placement, triggers | `Stage_Init` (`0x0046214c`) |
-| `data\surf\` | background / surface textures | `Load_Surface_Textures` (`0x00465e9c`) |
-| `data\spr\` | sprite sheets, probably with frame metadata | `Load_Sprite_Sheets` (`0x004660b8`) |
-| `data\tk\` | tile / terrain graphics, likely palette-indexed | `Load_Tile_Data` (`0x00466340`) |
-| `data\ev\` | event scripts, possibly bytecode — may need an interpreter | `Load_Event_Scripts` (`0x00465b50`) |
-| `data\save.dat` | save data; preserve the layout for save compatibility | `Game_CheckSaveExists` (`0x00463154`) |
-| `bmp.qda` | archive of some kind, top level | unidentified |
+**Free Pascal + Lazarus LCL**, SDL2 later only if measured. Not C++: that would
+mean reimplementing the Delphi runtime *and* translating at once, with no working
+reference to check against. The deleted `SDL_port_plan.md` (recoverable at
+`77f415b`) listed nine compiler/ABI problems for a C++ rewrite — **targeting
+Pascal removes eight**, because in Pascal they are language features. The project
+is private, so the "C++ has more contributors" argument was weighed and rejected.
 
-`Load_Stage_Assets` (`0x00465a1c`) orchestrates the first five.
+D3DRM is a non-issue: `Direct3DRMCreate` is a static import belonging to the
+DirectX component layer, not the game, and the form sets `Use3D = False`. It
+leaves with the layer.
 
-## 12. Verified Delphi RTL helpers
+Other notes: `notes/function_map.md` (detailed annotations), `notes/Frm_main.dfm`
+(archival, do not edit), `src/README.md` (file-by-file status).
 
-These identifications carry real evidence and predate the naming problems in
-section 4. They are the basis of the idiom table in section 5b — trust them.
+## 12. Tooling
 
-| Address | Name | Evidence |
-|---|---|---|
-| `004026d8` | `Delphi_GetMem` | dispatches through the memory-manager table at `PTR_FUN_0046801c`; raises error 1 (`EOutOfMemory`) on null |
-| `004026f0` | `Delphi_FreeMem` | dispatch at `PTR_FUN_00468020`; raises error 2 (`EInvalidPointer`) |
-| `00402da4` | `Delphi_TObject_Free` | calls `(**(code **)(*Self + -4))(Self, 1)` — VMT offset −4 is `vmtDestroy`. Exact `TObject.Free` shape |
-| `00406a50` | `Delphi_FillChar` | delegates with fill byte 0; callers use it for struct zero-init |
-| `00403cf8` | `Delphi_AnsiString_Assign` | refcount at −8, length at −4, `LOCK`-prefixed. Delphi's `LStrAsg` |
-| `00403e60` | `Delphi_AnsiString_AddRef` | atomic increment of the −8 refcount; skips literals (refcount −1) |
-| `00407f64` | `Delphi_IntToStr` | thin wrapper over Delphi's `FmtStr` |
-| `00407ff8` | `Delphi_FileOpen` | wraps `CreateFileA`; mode lookup tables at `DAT_00468138` / `DAT_00468144` |
-| `0040805c` | `Delphi_FileRead` | `ReadFile` wrapper, returns `0xFFFFFFFF` on error |
+Ghidra 12.0.4 + GhidraMCP on `127.0.0.1:8081/sse` (`.mcp.json` at `devel/source`).
+Binds at session start — **if it drops, restart the session; it will not
+reconnect.** The MCP server can read, rename and retype, but **cannot create or
+disassemble functions** — that is GUI-only.
 
-`DDraw_Check_HRESULT` (`00446734`) formats an HRESULT as `"(Error Code(%x))"` and
-aborts on failure. Note it calls `Delphi_Halt0` — which is what exposed
-`004038f4` as the shutdown path rather than a message loop.
-
-## 13. Runtime hazards that survive the rewrite
-
-Most of the old "porting challenges" list is obsolete (see section 14). These are
-genuine and still apply:
-
-- **8-bit palettes.** The original uses `SelectPalette` / `RealizePalette` /
-  `GetSystemPaletteEntries`. Modern display drivers have no hardware palettes and
-  GDI's emulation is unreliable — expect wrong colours if carried over verbatim.
-  **Convert indexed surfaces to 32-bit RGBA at load time.**
-- **Timer granularity.** The original's tick relies on Windows message-queue
-  timers (~10–16 ms). Use frame-delta timing instead, or the game runs at the
-  wrong speed.
-- **MIDI.** `Kbgm32.dll` drives the system MIDI mapper and sends SysEx
-  (`KBGMSendSysx`). Modern software synths may not respond identically. Options:
-  a Pascal MIDI library, FluidSynth, or pre-render the 15 tracks to OGG.
-- **Write paths.** The original writes settings beside the executable and into
-  `HKCU\Software\Borland\Delphi\RTL`. Modern Windows virtualises or blocks that.
-  Use a per-user config directory.
-- **8-bit `AnsiString` encoding.** The game is Japanese in origin; any Shift-JIS
-  text in the data files will need explicit decoding rather than assuming UTF-8.
-
-## 14. Obsolete concerns — deliberately dropped
-
-`SDL_port_plan.md` (deleted, recoverable at commit `77f415b`) listed nine
-compiler/ABI problems for a C++ rewrite: calling convention, Pascal string types,
-SEH exception frames, RTL initialisation, VCL class layout and VMTs, `set of`
-types, 1-byte enums, ref-counted dynamic arrays, and Variants.
-
-**Choosing Free Pascal eliminates eight of the nine.** Each was a problem only
-because the target was C++ — in Pascal they are language features the compiler
-already implements. That is the retrospective case for the section 2 decision,
-and the reason the old phase plan does not survive.
-
-The one that remains is calling convention, and only for reading: Ghidra shows
-`__register`, so parameter counts and types still need checking against call
-sites. It disappears once a function is rewritten in Pascal.
-
-Also dropped: the SDL2 API mapping tables (premature — LCL first, and SDL2's
-Pascal bindings differ from the C API anyway) and the six-phase plan, which was
-built on the misidentifications in section 4.
+Raw disassembly without Ghidra:
+`objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`
+(msys2 at `/c/msys64/mingw64/bin`). Ghidra scripts can be compile-checked with
+`javac` against the install's jars.
