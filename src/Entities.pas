@@ -73,8 +73,26 @@ const
 
   SLOT_NONE = -1;           { Entity_Spawn's failure return }
 
-  { See the header. Cancels out; it is not a scale factor. }
-  POSITION_BIAS = $10000;
+  { Positions are biased by POSITION_BIAS and held in 1/32 pixel units. The
+    bias cancels in any difference of two positions, which is why it looked
+    like it could be ignored - but converting to pixels needs it removed, and
+    Entity_IsOffScreen @ 0x004580BC shows the exact idiom the game uses:
+
+        p := Raw[EF_POS_X] - POSITION_BIAS;
+        if p < 0 then p := Raw[EF_POS_X] - (POSITION_BIAS - 31);
+        pixels := p shr 5;
+
+    The second line is round-toward-zero: an arithmetic shift floors, so 31 is
+    added back first for negatives. The same idiom appears in
+    EventScript_Execute, so it is the house style rather than a one-off.
+
+    Entity_IsOffScreen then compares against 0x140 and 0xF0 - 320 x 240, the
+    form size from the DFM. That is what fixes the unit as pixels. }
+  POSITION_BIAS  = $10000;
+  POSITION_SHIFT = 5;         { 1/32 pixel }
+  POSITION_ROUND = $10000 - 31;
+  SCREEN_W       = $140;      { 320 }
+  SCREEN_H       = $F0;       { 240 }
 
   { Field positions as INT indices into TEntity.Raw. Named only where the use
     is established; the rest keep their index. }
@@ -120,6 +138,49 @@ const
   EF_BOX_OFS_Y   = $29;   { +0xA4 }
   EF_TILE_OFS_X  = $3F;   { +0xFC }
   EF_TILE_OFS_Y  = $40;   { +0x100 - the LAST int in the record }
+
+  { --- The death sequence, from Entity_UpdateDying @ 0x004615A8 -------------
+
+    That function is called from THIRTY distinct sites - more than any other in
+    the game layer - which is why these fields are worth naming even though
+    only part of the state machine is understood.
+
+    It is a guard, run at the top of an entity's update:
+
+        if GameState <> GS_PLAY then Exit(True);
+        if (e^.Raw[EF_HITSTUN] < 1) and (e^.Raw[EF_CLASS] in [1, 2, 6]) then
+        begin
+          if e^.Raw[EF_DYING] = 0 then          // latch, runs once
+          begin
+            e^.Raw[EF_DYING] := 1;
+            ... per-class setup, spawning an effect entity ...
+          end;
+          if e^.Raw[EF_DEATH_TIMER] = 0 then
+          begin
+            if e^.Raw[EF_CLASS] = 2 then Play(SND_BOM03);
+            Entity_Destroy(e, True);
+          end;
+          Result := True;                        // caller skips normal update
+        end; }
+  EF_DEATH_T1    = $1C;   { +0x70, set alongside EF_DEATH_TIMER }
+  EF_DEATH_TIMER = $1D;   { +0x74, counts down; 0 destroys the entity }
+  EF_HITSTUN     = $24;   { +0x90, the guard requires < 1 }
+  EF_DYING       = $11;   { +0x44, one-shot latch for the setup above }
+  EF_CLASS       = $33;   { +0xCC }
+
+  { EF_CLASS is the entity's broad kind, NOT its type index - EF_TYPE is that.
+    Values seen so far, and where:
+
+        1, 2, 6   Entity_UpdateDying   each with its own death effect
+        4, 5, 7   Entity_Destroy       4 decrements a counter on its owner,
+                                       5 recursively destroys two child slots
+                                       at +0x4C and +0x50, 7 is checked before
+                                       calling 0x00461874
+
+    Class 2's death plays sound 34, which SoundTable independently gives as
+    bom03.wav - an explosion. That is unrelated evidence for the reading. }
+  EF_CHILD_A     = $13;   { +0x4C, destroyed with the parent when EF_CLASS = 5 }
+  EF_CHILD_B     = $14;   { +0x50 }
 
   { Two things fall out of where these land.
 
@@ -277,7 +338,17 @@ const
   than reading past the table, which the original would happily do. }
 function EntityType(Id: Integer): TEntityType;
 
+{ Pixel position of an entity, with the bias removed and rounded toward zero
+  exactly as the original does. }
+function EntityPixelX(const E: TEntity): Integer;
+function EntityPixelY(const E: TEntity): Integer;
+
+{ Entity_IsOffScreen @ 0x004580BC. Margin is multiplied by the entity's own
+  extent, so a bigger sprite gets a proportionally bigger margin. }
+function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
+
 implementation
+
 
 function EntityType(Id: Integer): TEntityType;
 var
@@ -461,6 +532,36 @@ begin
     kept - a divergence that matters only once sprites are drawn from it. }
 
   Result := Slot;
+end;
+
+function PixelOf(Raw: Integer): Integer;
+begin
+  { The original's round-toward-zero idiom, kept literally. }
+  if Raw - POSITION_BIAS < 0 then
+    Result := (Raw - POSITION_ROUND) shr POSITION_SHIFT
+  else
+    Result := (Raw - POSITION_BIAS) shr POSITION_SHIFT;
+end;
+
+function EntityPixelX(const E: TEntity): Integer;
+begin
+  Result := PixelOf(E.Raw[EF_POS_X]);
+end;
+
+function EntityPixelY(const E: TEntity): Integer;
+begin
+  Result := PixelOf(E.Raw[EF_POS_Y]);
+end;
+
+function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
+var
+  X, Y, W, H: Integer;
+begin
+  X := EntityPixelX(E);
+  Y := EntityPixelY(E);
+  W := E.Raw[EF_EXTENT_X] * Margin;
+  H := E.Raw[EF_EXTENT_Y] * Margin;
+  Result := (X < -W) or (X > W + SCREEN_W) or (Y < -H) or (Y > H + SCREEN_H);
 end;
 
 initialization

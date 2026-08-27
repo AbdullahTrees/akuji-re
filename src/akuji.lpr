@@ -492,6 +492,8 @@ end;
        sixteen sub-steps, with no floating point anywhere. }
 function SelfTestDirections(Log: TStrings): Integer;
 var
+  E: TEntity;
+  PosBad, Expect: Integer;
   I, D, Got, Bad, RoundTrips: Integer;
   Expected: Integer;
   X, Y: Integer;
@@ -546,6 +548,53 @@ begin
   { The record size is checked in Entities' initialization section rather than
     here: comparing SizeOf against a constant is folded at compile time, so the
     compiler proves it and then warns that the failure branch is unreachable. }
+  { --- the position -> pixel conversion -------------------------------------
+
+    Entity_IsOffScreen @ 0x004580BC removes POSITION_BIAS and shifts right by
+    5, but for negatives it subtracts POSITION_BIAS-31 first. An arithmetic
+    shift floors, so without that correction a negative position would round
+    the wrong way and an entity just off the left edge would be judged one
+    pixel further out than the original judges it.
+
+    This checks the Pascal against the rule stated independently: truncation
+    toward zero of (raw - bias) / 32. Getting this wrong is invisible in normal
+    play and shows up only at the screen edges, so it is worth pinning. }
+  PosBad := 0;
+  for I := -4000 to 4000 do
+  begin
+    E.Raw[EF_POS_X] := POSITION_BIAS + I;
+    Expect := I div 32;   { Pascal div truncates toward zero, like the original }
+    if EntityPixelX(E) <> Expect then
+    begin
+      if PosBad < 5 then
+        Log.Add(Format('  offset %d: EntityPixelX = %d, expected %d',
+          [I, EntityPixelX(E), Expect]));
+      Inc(PosBad);
+    end;
+  end;
+  Log.Add(Format('position -> pixel over -4000..4000: %d disagreements', [PosBad]));
+  Inc(Result, PosBad);
+
+  { IsOffScreen's bounds are 320x240 with a margin of Margin*extent. }
+  E.Raw[EF_EXTENT_X] := 16;
+  E.Raw[EF_EXTENT_Y] := 16;
+  E.Raw[EF_POS_Y] := POSITION_BIAS;
+  E.Raw[EF_POS_X] := POSITION_BIAS + 160 * 32;
+  if IsOffScreen(E, 1) then
+  begin
+    Log.Add('  FAILED: an entity at x=160 is not off screen');
+    Inc(Result);
+  end;
+  E.Raw[EF_POS_X] := POSITION_BIAS + (SCREEN_W + 17) * 32;
+  if not IsOffScreen(E, 1) then
+  begin
+    Log.Add(Format('  FAILED: x=%d with extent 16 should be off screen',
+      [SCREEN_W + 17]));
+    Inc(Result);
+  end;
+  Log.Add('IsOffScreen: on-screen and past-the-margin cases both correct');
+  Log.Add('');
+
   Log.Add(Format('entity pool: %d slots of %d bytes (SizeOf(TEntity) = %d), %d types',
     [ENTITY_COUNT, ENTITY_BYTES, SizeOf(TEntity), ENTITY_TYPE_COUNT]));
 
