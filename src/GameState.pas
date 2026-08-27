@@ -58,8 +58,29 @@ type
     AnyPressed: Boolean;                   // +0x34  any button newly pressed
   end;
 
+type
+  { data\system.dat, 56 bytes. Field meanings recovered from Title_Init,
+    DDDD1Init and the options screen. Offsets are the original's. }
+  TGameSettings = record
+    Field00: Integer;        // +0x00  unknown
+    GameLevel: Integer;      // +0x04  0..2
+    KeyMap: array[0..2] of Integer;  // +0x08..+0x10  jump, fire, pause
+    Field14: Integer;        // +0x14  (third key slot end / unknown)
+    Flags: array[0..3] of Byte;      // +0x18..+0x1B, +0x1A = fullscreen
+    Unknown1C: array[0..7] of Byte;  // +0x1C..+0x23
+    Volume: Integer;         // +0x24  0..10, SE VOLUME
+    GallerySel: Integer;     // +0x28  0..6
+    Unknown2C: array[0..6] of Byte;  // +0x2C..+0x32  gallery unlock flags
+    Pad33: Byte;
+    InputDevice: Integer;    // +0x34  from system.ini [device] input
+  end;
+
 var
   { Globals matching the original's. Names follow the p_* labels now in Ghidra. }
+  Settings: TGameSettings;                  // p_Settings        0x0046D0E8
+  FullScreenOn: Boolean = False;            // p_FullScreenOn    0x0046D268
+  WaitOn: Boolean = False;                  // p_WaitOn          0x0046D2E4
+  SoftwareVsync: Boolean = True;            // p_SoftwareVsync   0x0046CE60
   GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       0x0046D06C
   SavedGameState: Integer = 0;              // p_SavedGameState  0x0046CBBC
   PauseMenuIndex: Integer = 0;              // p_PauseMenuIndex  0x0046CF88

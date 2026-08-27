@@ -50,6 +50,25 @@ const
   OPT_VALUE_X  = $E8;
   OPT_CURSOR_X = $E0;
   OPT_ROW_EXIT = 9;
+  OPT_TITLE    = '- OPTION -';
+  OPT_CURSOR   = '<       >';    { brackets the value column }
+
+  { Row labels, verbatim from 0x00462E0C onward. }
+  OPT_LABELS: array[0..9] of string = (
+    'GAME LEVEL',
+    'FULL SCREEN',
+    'JUMP  BUTTON ASSIGN',
+    'FIRE  BUTTON ASSIGN',
+    'PAUSE BUTTON ASSIGN',
+    'WAIT',
+    'SOFTWARE VSYNC',      { this is the timeGetTime spin-wait, player-toggleable }
+    'SE VOLUME',
+    'GALLERY',
+    'EXIT');
+
+  TEXT_ON   = 'ON';
+  TEXT_OFF  = 'OFF';
+  KEY_SUFFIX = ' KEY';
 
   { Ranges the original clamps to }
   LEVEL_MIN = 0;  LEVEL_MAX = 2;    // p_Settings+0x04
@@ -69,6 +88,8 @@ type
     FIndex: Integer;          // p_MenuIndex 0x0046CF88, shared with the pause menu
     procedure MenuConfirm;
     procedure OptionsConfirm;
+    procedure DrawValues(C: TCanvas; F: TGameFont);
+    procedure AdjustValue(Delta: Integer);
   public
     constructor Create;
     procedure Reset;
@@ -128,6 +149,54 @@ begin
   { TODO row 8: omake viewer, needs p_Settings+0x2C unlock flags }
 end;
 
+procedure TTitleScreen.DrawValues(C: TCanvas; F: TGameFont);
+
+  procedure Val(Row: Integer; const S: string; Variant_: Integer = 0);
+  begin
+    F.TextOut(C, OPT_VALUE_X, $38 + Row * $10, S, Variant_);
+  end;
+
+  function OnOff(B: Boolean): string;
+  begin
+    if B then Result := TEXT_ON else Result := TEXT_OFF;
+  end;
+
+begin
+  Val(0, IntToStr(Settings.GameLevel), 2);
+  Val(1, OnOff(FullScreenOn));
+  Val(2, IntToStr(Settings.KeyMap[0]) + KEY_SUFFIX);
+  Val(3, IntToStr(Settings.KeyMap[1]) + KEY_SUFFIX);
+  Val(4, IntToStr(Settings.KeyMap[2]) + KEY_SUFFIX);
+  Val(5, OnOff(WaitOn));
+  Val(6, OnOff(SoftwareVsync));
+  Val(7, Format('%3d%%', [Settings.Volume * 10]));
+  Val(8, IntToStr(Settings.GallerySel), 2);
+end;
+
+procedure TTitleScreen.AdjustValue(Delta: Integer);
+begin
+  if Delta = 0 then Exit;
+  { Each row clamps to the range the original enforces; out-of-range moves are
+    swallowed rather than clipped, matching its "if out of range then delta:=0". }
+  case TOptionRow(FIndex) of
+    orLevel:
+      if (Settings.GameLevel + Delta >= LEVEL_MIN) and
+         (Settings.GameLevel + Delta <= LEVEL_MAX) then
+        Inc(Settings.GameLevel, Delta);
+    orToggle1:    FullScreenOn := not FullScreenOn;
+    orToggle2:    WaitOn := not WaitOn;
+    orFrameLimit: SoftwareVsync := not SoftwareVsync;
+    orVolume:
+      if (Settings.Volume + Delta >= VOLUME_MIN) and
+         (Settings.Volume + Delta <= VOLUME_MAX) then
+        Inc(Settings.Volume, Delta);
+    orOmake:
+      if (Settings.GallerySel + Delta >= OMAKE_MIN) and
+         (Settings.GallerySel + Delta <= OMAKE_MAX) then
+        Inc(Settings.GallerySel, Delta);
+  end;
+end;
+
 function TTitleScreen.Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
 var
   Limit: Integer;
@@ -152,9 +221,9 @@ begin
 
     TSM_OPTIONS:
       begin
-        { TODO: MoveX adjusts the row's value - level, volume, toggles, omake
-          index - each clamped to the ranges above. Key rebinding on rows 2..4
-          needs raw button polling, not an axis. }
+        AdjustValue(MoveX);
+        { Key rebinding on rows 2..4 still needs raw button polling rather than
+          an axis - the original scans 16 buttons and swaps if already bound. }
         if MoveY <> 0 then
         begin
           Limit := Ord(High(TOptionRow));
@@ -199,8 +268,16 @@ begin
       begin
         if BgOptions <> nil then
           C.Draw(0, 0, BgOptions);
-        F.TextOut(C, 0, $20, '- OPTION -', 2);
-        F.TextOut(C, OPT_CURSOR_X, (FIndex * 2 + 7) * 8, '>', 1);
+        F.TextOut(C, 0, $20, OPT_TITLE, 2);
+        for I := Low(OPT_LABELS) to High(OPT_LABELS) do
+          { EXIT is drawn on the right at (0xE8, 200) in the original, not in
+            the label column with the rest. }
+          if I = OPT_ROW_EXIT then
+            F.TextOut(C, OPT_VALUE_X, 200, OPT_LABELS[I], 2)
+          else
+            F.TextOut(C, OPT_LABEL_X, $38 + I * $10, OPT_LABELS[I], 2);
+        DrawValues(C, F);
+        F.TextOut(C, OPT_CURSOR_X, (FIndex * 2 + 7) * 8, OPT_CURSOR, 1);
       end;
   end;
 end;

@@ -43,6 +43,7 @@ type
     FSurfaces: TSurfaceSet;
     FDataDir: string;
     FMoveY: Integer;
+    FMoveX: Integer;
     FConfirm: Boolean;
     function FindGameData: string;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
@@ -190,8 +191,9 @@ begin
       end;
     GS_TITLE_MENU:
       begin
-        FTitleScreen.Update(FMoveY, 0, FConfirm);
+        FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
         FMoveY := 0;
+        FMoveX := 0;
         FConfirm := False;
         FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
       end;
@@ -231,6 +233,8 @@ begin
   case Key of
     VK_UP:                 FMoveY := -1;
     VK_DOWN:               FMoveY := 1;
+    VK_LEFT:               FMoveX := -1;
+    VK_RIGHT:              FMoveX := 1;
     VK_RETURN, VK_SPACE,
     VK_Z:                  FConfirm := True;   { Z is the original's confirm }
   end;
