@@ -145,7 +145,7 @@ immediately. That busy loop is the game's frame tick. Per frame:
 | Value | Handler |
 |---|---|
 | 10 | `Stage_Init` (`0x46214c`) |
-| 20 | `FUN_00462330` |
+| 20 | `Title_MainMenu` (`0x462330`) |
 | 30 | `FUN_00462210` |
 | 40 | `Game_Init_PlayerState` (`0x462f40`) |
 | 60 | `FUN_00454790`, `FUN_00461ba8` |
@@ -180,9 +180,12 @@ overwrites them.
 
 | Offset | Default | Meaning |
 |---|---|---|
-| `+0x08`..`+0x14` | 1,2,3 | **key map** — copied to `p_KeyMap`, user-rebindable |
+| `+0x04` | 0 | **game level / difficulty**, clamped 0..2 by the options screen |
+| `+0x08`..`+0x14` | 1,2,3 | **key map** — copied to `p_KeyMap`; rows 2..4 of the options screen rebind these |
 | `+0x18`..`+0x1B` | 1,0,1,0 | flags; `+0x1A` = fullscreen |
-| `+0x24` | 10 | unknown |
+| `+0x24` | 10 | **volume**, clamped 0..10; applied to all 57 channels as `(10 - v) * -0x1C2` |
+| `+0x28` | 0 | **omake (extras) selection**, clamped 0..6 |
+| `+0x2C`..`+0x32` | 0 | **omake unlock flags**, one byte per extra |
 | `+0x34` | 1 | input device; overwritten from `system.ini [device] input` |
 
 `system.ini` is read via an INI object at `Self+0x2E0`. `InstanceSize` is `0x2E8`,

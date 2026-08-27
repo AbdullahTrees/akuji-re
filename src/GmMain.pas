@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive;
+  QdaArchive, Title;
 
 type
   TFrm_main = class(TForm)
@@ -38,6 +38,9 @@ type
     FLimitFrames: Boolean; // flag at 0x0046CE60
     FArchive: TQdaArchive;
     FTitle: TBitmap;
+    FTitleScreen: TTitleScreen;
+    FMoveY: Integer;
+    FConfirm: Boolean;
     function FindGameData: string;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
@@ -104,6 +107,7 @@ begin
   OnPaint := FormPaint;
   DoubleBuffered := True;
 
+  FTitleScreen := TTitleScreen.Create;
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
   GameStateValue := GS_TITLE_INIT;
@@ -163,9 +167,21 @@ begin
         asset set 0, starts the music and sets all 57 sound channel volumes,
         then moves to GS_TITLE_MENU. Until that is translated, prove the asset
         pipeline by drawing the real title screen out of bmp.qda. }
-      if Assigned(FTitle) then
-        DDDD1.Canvas.Draw(0, 0, FTitle);
-    GS_TITLE_MENU:  ;  { TODO Title_MainMenu       0x00462330 }
+      begin
+        if Assigned(FTitle) then
+          DDDD1.Canvas.Draw(0, 0, FTitle);
+        { Original Title_Init falls straight through to the menu. }
+        GameStateValue := GS_TITLE_MENU;
+      end;
+    GS_TITLE_MENU:
+      begin
+        FTitleScreen.Update(FMoveY, 0, FConfirm);
+        FMoveY := 0;
+        FConfirm := False;
+        if Assigned(FTitle) then
+          DDDD1.Canvas.Draw(0, 0, FTitle);
+        FTitleScreen.Draw(DDDD1.Canvas);
+      end;
     GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
     GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
     GS_PLAY,
@@ -199,6 +215,12 @@ begin
       EnterPause;
     Exit;
   end;
+  case Key of
+    VK_UP:                 FMoveY := -1;
+    VK_DOWN:               FMoveY := 1;
+    VK_RETURN, VK_SPACE,
+    VK_Z:                  FConfirm := True;   { Z is the original's confirm }
+  end;
   Joy.KeyDown(Key);
 end;
 
@@ -206,6 +228,7 @@ end;
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   Application.OnIdle := nil;
+  FTitleScreen.Free;
   FTitle.Free;
   FArchive.Free;
   { TODO: teardown - the original released the sprite engine and surfaces }

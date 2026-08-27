@@ -389,3 +389,31 @@ indexed via `0x46ce88`).
 
 `p_Settings+0x24` (default 10) is **volume** — `Title_Init` applies it to all 57
 sound channels as `(10 - value) * -0x1C2`.
+
+## `Title_MainMenu` @ `0x00462330` — fully decoded
+
+Three sub-modes on `p_TitleSubMode` (`0x46cef8`):
+
+**0 — main menu.** Background `p_Surfaces[1]` full-screen. Items at x=`0xEE`,
+y=`(i*2+0x11)*8`: NEW GAME, CONTINUE, ` OPTION `, `  EXIT  `. Cursor x=`0xE6`.
+Credit string at (0, `0xD8`). Confirm: 0/1 → `GameState_Reset`, state `0x28`,
+sub-mode records which; 2 → options; 3 → state 999.
+
+**1 — options.** Background `p_Surfaces[2]`. Labels x=`0x28`, values x=`0xE8`,
+rows y=`0x38 + row*0x10`, cursor x=`0xE0` y=`(i*2+7)*8`. Ten rows:
+
+| Row | Controls | Range |
+|---|---|---|
+| 0 | game level | `p_Settings+0x04`, 0..2 |
+| 1 | toggle | `0x46d268` |
+| 2-4 | **key rebinding** | `p_KeyMap[0..2]`; polls 16 buttons, swaps if already bound |
+| 5 | toggle | `0x46d2e4` |
+| 6 | **frame limiter** | `p_FrameLimitOn` `0x46ce60` |
+| 7 | volume | `p_Settings+0x24`, 0..10, reapplied to 57 channels |
+| 8 | omake select | `p_Settings+0x28`, 0..6; confirm shows `omake%.02d.bmp` if `p_Settings[0x2C+i]` |
+| 9 | exit | → menu, cursor on OPTION |
+
+**2 — omake viewer.** Full-screen unlocked image; confirm returns to row 8.
+
+`p_MenuIndex` (`0x46cf88`) is the shared cursor for title, options and pause —
+it is not pause-specific, hence the rename from `p_PauseMenuIndex`.
