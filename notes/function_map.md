@@ -449,3 +449,34 @@ dark-brown outline `(61,35,35)`, and per-variant fill — 0 white, 1 pink
 
 Implemented as `src/GameFont.pas`. Glyphs are pre-cut into individual bitmaps
 because LCL's `Draw` honours `TBitmap.Transparent` but `CopyRect` does not.
+
+## Asset table formats — verified
+
+| Address | Name | Format |
+|---|---|---|
+| `4669f8` | `Load_StageTable` | `data\stage.dat`, 66 x 16 fields -> 19-int records |
+| `465e9c` | `Load_Surface_Textures` | `data\surf%.03d.dat`, 3 fields: name, w, h |
+| `4660b8` | `Load_Sprite_Sheets` | `data\spr%.03d.dat`, 7 fields: surfIdx, frameW, frameH, cols, rows, originX, originY |
+| `466340` | `Load_Map` | `map\%.03d.map`, 6 int32 header + uint16 tiles |
+| `4511a0` | `Font_Define` | font table at `0x46e8a4` |
+| `4511ec` | `Game_DrawText` | 32-column sheet, variant offsets by `CellH*v*2` |
+
+### stage.dat field -> record slot
+
+`Load_StageTable` does not map columns one-to-one:
+
+```
+csv[0..7]  -> rec[0..7]
+csv[8..15] -> rec[11..18]
+rec[8..10]  never written from file - runtime scratch
+```
+
+That is why 16 columns fill a 19-int (0x4C) record. `Load_Stage_Assets` indexes
+the *record*, so the gap has to be preserved in any reimplementation.
+
+Established: `rec[0]` surface set, `rec[1]` sprite set, `rec[2..4]` three map
+layers (`-1` = none, and `rec[2]` matches the map filename — line 64 has 64,
+and `064.map` exists). `rec[5]` is 6 on every line but the first; meaning
+untraced. `rec[6..7]` and `rec[11..18]` untraced.
+
+Global: `p_StageTable` `0x46cfb4`.

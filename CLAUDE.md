@@ -199,7 +199,7 @@ that was wrong).
 
 | File | Format | Content |
 |---|---|---|
-| `stage.dat` | CSV | `0,	0,	-1,-1,-1,	...` — per-stage integer rows |
+| `stage.dat` | CSV | 66 rows x **16 fields**, filling a **19-int** record (stride `0x4C`). `rec[0]` surface set, `rec[1]` sprite set, `rec[2..4]` map layers (`-1` = none). Columns 8..15 land at `rec[11..18]`; `rec[8..10]` are runtime scratch |
 | `spr000..009.dat` | CSV | **7 fields**: surfaceIdx, frameW, frameH, cols, rows, originX, originY — expands to cols*rows frames, numbered sequentially across the file |
 | `surf000..009.dat` | CSV | **3 fields**: bitmap name, width, height — 32 slots, bitmaps pulled from `bmp.qda`. Slot 0 is the font, 1 the title background, 2 the options background |
 | `ev000..065.dat` | CSV | `9,0000,1001,0019,0008,0014-*,1001` — event scripts |
