@@ -186,8 +186,8 @@ overwrites them.
 | Offset | Default | Meaning |
 |---|---|---|
 | `+0x04` | 0 | **game level / difficulty**, clamped 0..2 by the options screen |
-| `+0x08`..`+0x14` | 1,2,3 | **key map** — copied to `p_KeyMap`; rows 2..4 of the options screen rebind these |
-| `+0x18`..`+0x1B` | 1,0,1,0 | flags; `+0x1A` = fullscreen |
+| `+0x08`..`+0x14` | 0,1,2,3 | **key map, FOUR ints** - `FormDestroy` copies `p_KeyMap[0..3]` here. The shipped file holds the identity mapping |
+| `+0x18`..`+0x1B` | 1,0,0,0 | four flag bytes, each named by the global `FormDestroy` copies it from: `+0x18` `p_SoftwareVsync` `0x46CE60`, `+0x19` `p_WaitOn` `0x46D2E4`, `+0x1A` `p_FullScreenOn` `0x46D268`, `+0x1B` `p_DebugLog` `0x46CDB8` |
 | `+0x24` | 10 | **volume**, clamped 0..10; applied to all 57 channels as `(10 - v) * -0x1C2` |
 | `+0x28` | 0 | **omake (extras) selection**, clamped 0..6 |
 | `+0x2C`..`+0x32` | 0 | **omake unlock flags**, one byte per extra |
@@ -195,6 +195,17 @@ overwrites them.
 
 `system.ini` is read via an INI object at `Self+0x2E0`. `InstanceSize` is `0x2E8`,
 so `+0x2E0`/`+0x2E4` are the form's only non-component fields.
+
+**`FormDestroy` (`0x00466644`) writes this file back on exit** - it is the
+settings writer, not just a teardown. It gathers the loose globals into the
+record, writes all 56 bytes over `data\system.dat`, and mirrors the fullscreen
+flag into `system.ini`'s `[disp]` section as `on`/`off`. It also dumps
+`debug.log` when `+0x1B` is set; that is not reproduced.
+
+Because the game now writes this file, a wrong field mapping would corrupt real
+settings on first exit. `--selftest-settings <gamedir> <scratchdir>` does a
+load/save round trip into a scratch directory and requires it to be byte-exact.
+It currently is, and it never touches the game directory.
 
 ## 8. Assets — mostly solved
 
