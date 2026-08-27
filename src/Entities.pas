@@ -100,7 +100,40 @@ const
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
   EF_MINUS1_B8   = $2E;   { set to -1 on spawn }
   EF_TYPEF_0C    = $32;   { <- type table +0x0C .. +0x18 land at $32..$35 }
-  EF_TYPEF_20    = $37;   { <- type table +0x20 .. +0x44 land at $37..$40 }
+  EF_TYPEF_20    = $37;
+
+  { --- The bounding box and its tile-grid offsets ---------------------------
+
+    From Entity_TileEdgeDistX / Entity_TileEdgeDistY @ 0x00457150 / 0x00457228,
+    which are an exact X/Y pair: every field below appears in one at offset N
+    and in the other at N+4, with the X one reading p_LayerInfo+0x00/+0x10 and
+    the Y one p_LayerInfo+0x04/+0x14.
+
+    That pairing is the evidence. A misread would not produce two functions
+    identical except for a consistent +4 on six independent fields.
+
+    EF_EXTENT_* is halved before use (shr 1), so it is a full width/height and
+    the box is centred on the position. }
+  EF_EXTENT_X    = $26;   { +0x98 }
+  EF_EXTENT_Y    = $27;   { +0x9C }
+  EF_BOX_OFS_X   = $28;   { +0xA0, added going one way and subtracted the other }
+  EF_BOX_OFS_Y   = $29;   { +0xA4 }
+  EF_TILE_OFS_X  = $3F;   { +0xFC }
+  EF_TILE_OFS_Y  = $40;   { +0x100 - the LAST int in the record }
+
+  { Two things fall out of where these land.
+
+    EF_TILE_OFS_Y at int 64 is exactly the final slot of the 65-int record - an
+    independent check on ENTITY_INTS, since a wrong stride would have put it
+    outside.
+
+    And EF_TILE_OFS_X/Y are $3F/$40, i.e. EF_TYPEF_20 + 8 and + 9, so they ALIAS
+    the last two slots that Entity_Spawn fills from the type table (columns 8..17
+    -> ints $37..$40). Those two columns are type table +0x40 and +0x44, which a
+    separate survey found to be ZERO for all 81 types. That is consistent rather
+    than contradictory: they are runtime offsets whose initial value is 0, which
+    is also why the survey saw a dead column there. Do not treat them as two
+    different fields. }   { <- type table +0x20 .. +0x44 land at $37..$40 }
 
   ENTITY_TYPE_COUNT  = 81;
   ENTITY_TYPE_FIELDS = 18;
