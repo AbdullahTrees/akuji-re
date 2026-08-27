@@ -32,8 +32,8 @@ uses
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
-  KbgmPlayer, Directions, Entities, EventScripts, PlayerState, GameState,
-  Classes, SysUtils;
+  KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
+  Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
@@ -744,6 +744,206 @@ begin
     Log.Add('FAILED - do NOT let FormDestroy write settings until this passes');
 end;
 
+{ ---------------------------------------------------------------------------
+  --selftest-script : the event mini-language.
+
+  EventCommands.pas recovered its grammar from the shipped data rather than
+  from the interpreter, so the only thing holding it up is that the structure
+  checks out with no exceptions. This re-checks that from the Pascal side, and
+  it is a genuine second opinion: tools/analyse_events.py reaches the same
+  numbers from an independent splitter written straight from the file text.
+
+  A grammar that were mis-split would not produce fixed arities, so any failure
+  here means the reading is wrong, not that the data is odd.
+  --------------------------------------------------------------------------- }
+
+function SelfTestScript(Log: TStrings): Integer;
+var
+  GameDir: string;
+  S: TEventScript;
+  Ev: TEventRecord;
+  Sp: TEventSpawn;
+  Prog: TEventProgram;
+  Cmd: TEventCommand;
+  I, J, K, L: Integer;
+  Records, Spawns, BadSpawn, Cmds, BadArity, Dialogue, BadDialogue, Lists: Integer;
+  Negatives, N: Integer;
+  Nones, Ids, Progs, ShapeMismatch: Integer;
+  Kind: TParamBKind;
+  MinType, MaxType: Integer;
+  SubOpUse: array[0..99] of Integer;
+  Kinds: string;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+
+  Records := 0; Spawns := 0; BadSpawn := 0; Cmds := 0; BadArity := 0;
+  Dialogue := 0; BadDialogue := 0; Lists := 0; Negatives := 0;
+  Nones := 0; Ids := 0; Progs := 0; ShapeMismatch := 0;
+  MinType := MaxInt; MaxType := -1;
+  Kinds := '';
+  for I := 0 to High(SubOpUse) do
+    SubOpUse[I] := 0;
+
+  S := TEventScript.Create;
+  try
+    for I := 0 to 65 do
+    begin
+      S.Load(GameDir, I);
+      for J := 0 to S.Count - 1 do
+      begin
+        Ev := S[J];
+        Inc(Records);
+
+        { --- ParamA: the thing the event places --- }
+        Sp := ParseSpawn(Ev.ParamA);
+        if not Sp.Valid then
+        begin
+          Log.Add(Format('  stage %d event %d: ParamA does not parse: %s',
+            [I, J, Ev.ParamA]));
+          Inc(BadSpawn);
+        end
+        else
+        begin
+          Inc(Spawns);
+          if Sp.TypeId < MinType then MinType := Sp.TypeId;
+          if Sp.TypeId > MaxType then MaxType := Sp.TypeId;
+          if (Sp.TypeId < 0) or (Sp.TypeId >= ENTITY_TYPE_COUNT) then
+          begin
+            Log.Add(Format('  stage %d event %d: type %d outside ENTITY_TYPES',
+              [I, J, Sp.TypeId]));
+            Inc(BadSpawn);
+          end;
+          if Pos(Sp.Kind, Kinds) = 0 then
+            Kinds := Kinds + Sp.Kind;
+          for K := 0 to Sp.ArgCount - 1 do
+            if Sp.Args[K] < 0 then
+              Inc(Negatives);
+        end;
+
+        { --- ParamB: a program, a bare id, or nothing --- }
+        Kind := ClassifyParamB(Ev.ParamB);
+        case Kind of
+          pbNone:    Inc(Nones);
+          pbId:      Inc(Ids);
+          pbProgram: Inc(Progs);
+        end;
+
+        { The shape must be the one the opcode implies. This is the check that
+          would have caught reading a bare id like '1048' as a command. }
+        if (Kind = pbProgram) <> (OpcodeExpects(Ev.Opcode) = pbProgram) then
+        begin
+          Log.Add(Format('  stage %d event %d: opcode %d implies %s but ParamB is %s: %s',
+            [I, J, Ev.Opcode,
+             GetEnumName(TypeInfo(TParamBKind), Ord(OpcodeExpects(Ev.Opcode))),
+             GetEnumName(TypeInfo(TParamBKind), Ord(Kind)), Ev.ParamB]));
+          Inc(ShapeMismatch);
+        end;
+
+        Prog := ParseProgram(Ev.ParamB);
+        for K := 0 to High(Prog) do
+          for L := 0 to High(Prog[K].Commands) do
+          begin
+            Cmd := Prog[K].Commands[L];
+            Inc(Cmds);
+            if (Cmd.SubOp >= 0) and (Cmd.SubOp <= High(SubOpUse)) then
+              Inc(SubOpUse[Cmd.SubOp]);
+
+            for N := 0 to Cmd.ArgCount - 1 do
+              if Cmd.Args[N] < 0 then
+                Inc(Negatives);
+
+            if not CheckArity(Cmd) then
+            begin
+              Log.Add(Format('  stage %d event %d: sub-op %d has %d args: %s',
+                [I, J, Cmd.SubOp, Cmd.ArgCount, Cmd.Raw]));
+              Inc(BadArity);
+            end;
+
+            if Cmd.SubOp = SUBOP_LIST then
+              Inc(Lists);
+
+            { Sub-op 3's argument must index this stage's own dialogue file.
+              This is the check that ties the grammar to a second file. }
+            if Cmd.SubOp = SUBOP_DIALOGUE then
+            begin
+              Inc(Dialogue);
+              if (Cmd.Args[0] < 0) or (Cmd.Args[0] >= S.LineCount) then
+              begin
+                Log.Add(Format('  stage %d event %d: dialogue %d but tk%.3d has %d lines',
+                  [I, J, Cmd.Args[0], I, S.LineCount]));
+                Inc(BadDialogue);
+              end;
+            end;
+          end;
+      end;
+    end;
+  finally
+    S.Free;
+  end;
+
+  Log.Add(Format('records parsed:      %d', [Records]));
+  Log.Add(Format('ParamA spawns:       %d  (%d rejected)', [Spawns, BadSpawn]));
+  Log.Add(Format('  type range:        %d..%d  of ENTITY_TYPES 0..%d',
+    [MinType, MaxType, ENTITY_TYPE_COUNT - 1]));
+  Log.Add(Format('  kind letters:      %s', [Kinds]));
+  Log.Add(Format('ParamB shapes:       %d none / %d bare id / %d program  (%d disagree with the opcode)',
+    [Nones, Ids, Progs, ShapeMismatch]));
+  Log.Add(Format('ParamB commands:     %d  (%d with a wrong argument count)',
+    [Cmds, BadArity]));
+  Log.Add(Format('  sub-op 3 refs:     %d  (%d outside the stage dialogue)',
+    [Dialogue, BadDialogue]));
+  Log.Add(Format('  sub-op 15 lists:   %d  (count field matched every time)', [Lists]));
+  Log.Add(Format('negative arguments:  %d', [Negatives]));
+  Log.Add('');
+  Log.Add('sub-opcode histogram:');
+  for I := 0 to High(SubOpUse) do
+    if SubOpUse[I] > 0 then
+      Log.Add(Format('  %2d  x%-4d arity %d', [I, SubOpUse[I], SUBOP_ARITY[I]]));
+  Log.Add('');
+
+  Inc(Result, BadSpawn + BadArity + BadDialogue + ShapeMismatch);
+
+  { Same trap as --selftest-events: an empty load must not pass. These are the
+    counts in the shipped data. }
+  if Records <> 692 then
+  begin
+    Log.Add(Format('FAILED: expected 692 records, got %d - wrong game directory?',
+      [Records]));
+    Inc(Result);
+  end
+  else if (Spawns <> 692) or (Cmds = 0) or (Dialogue <> 149) or (Lists <> 13) then
+  begin
+    Log.Add(Format('FAILED: expected 692 spawns / 149 dialogue refs / 13 lists,'
+      + ' got %d / %d / %d', [Spawns, Dialogue, Lists]));
+    Inc(Result);
+  end
+  { The signed-field split is the one fragile part of the grammar: '-' is both
+    the separator and the minus sign, and an earlier version of ParseFields
+    dropped the sign, turning -4 into 4. Nothing above would have noticed - the
+    arity and range checks all still passed. The shipped data holds exactly 22
+    negative arguments, so pinning that count is what makes the bug visible. }
+  else if Negatives <> 22 then
+  begin
+    Log.Add(Format('FAILED: expected 22 negative arguments, got %d'
+      + ' - ParseFields is losing or inventing minus signs', [Negatives]));
+    Inc(Result);
+  end
+  else if (Nones <> 104) or (Ids <> 281) or (Progs <> 307) then
+  begin
+    Log.Add(Format('FAILED: expected 104 none / 281 id / 307 program, got %d / %d / %d',
+      [Nones, Ids, Progs]));
+    Inc(Result);
+  end;
+
+  if Result = 0 then
+    Log.Add('OK - grammar holds over every record with no exceptions')
+  else
+    Log.Add('FAILED - the grammar in EventCommands.pas is wrong somewhere');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -766,6 +966,8 @@ begin
         Result := SelfTestEvents(Log)
       else if ParamStr(1) = '--selftest-settings' then
         Result := SelfTestSettings(Log)
+      else if ParamStr(1) = '--selftest-script' then
+        Result := SelfTestScript(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -786,7 +988,8 @@ begin
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
      (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') or
      (ParamStr(1) = '--selftest-events') or
-     (ParamStr(1) = '--selftest-settings') then
+     (ParamStr(1) = '--selftest-settings') or
+     (ParamStr(1) = '--selftest-script') then
   begin
     ExitCode := RunSelfTest;
     Exit;

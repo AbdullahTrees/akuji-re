@@ -22,7 +22,9 @@ Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 against independent Python implementations (section 13).
 
 **Next:** the entity system - the ~0x104-byte record, the state 60/100/140
-update path, collision, the player controller.
+update path, collision, the player controller. The event scripts' *grammar* is
+solved (section 8); finding the interpreter is what would give the sub-opcodes
+their meaning, and it is likely near the state 100/140 handlers.
 
 ## 2. The three layers — most important section
 
@@ -293,10 +295,42 @@ names and 15 MIDI names (`SoundTable.pas`, the form resource), the 81-entry
 entity type table and the 64-step direction table (`Entities.pas`,
 `Directions.pas`).
 
-Still open: most `ev*.dat` opcodes (0, 1, 4, 6, 9 - 5 and 7 are decoded) and
-`stage.dat` columns 5..15. The progress-flag block is no longer a mystery: an
-opcode-5 event sets `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per
-flag, and all 154 such events in the shipped data resolve inside the block.
+### The event mini-language - shape solved, meaning open
+
+`ParamA` and `ParamB` are not values, they are little programs.
+`src/EventCommands.pas` parses them; `tools/analyse_events.py` is the second
+reader. **The grammar came from the data, not from the interpreter** - the code
+that executes these programs has not been found, so this is tier-2/3 evidence
+(section 14), and sub-opcodes stay numbered unless something outside the file
+agrees with them.
+
+    ParamA   <4-digit type>-<letter>[-arg...]     type 14..80, letters * A / M R J
+    ParamB   step / step,  cmd . cmd,  <target>-<subop>[-arg...]
+
+`ParamB`'s shape is fixed by the opcode, with no exceptions in 692 records:
+opcodes 0/1/4/6/7 carry a program (307), opcode 5 a bare id (154), opcode 9 a
+bare id or `*` (231). Every sub-opcode has a fixed arity except 15, which
+carries its own length. Arities: 0->5, 3->1, 4->1, 5->1, 7->0, 8->0, 9->1,
+10->0, 12->3, 13->0, 15->variable, 16->1, 17->1, 80->0, 99->0.
+
+Two sub-opcodes have outside support. **3 is dialogue** - its argument indexes
+the stage's own `tk*.dat`, and all 149 references land in range. **15 is a
+list** - arg[1] is a count and exactly that many items follow, true for all 13.
+
+`ParamA`'s type is bounded 14..80 against `ENTITY_TYPES`' 81 entries, flush at
+the top; 0..13 are never placed by a stage, which fits them being spawned by
+code.
+
+**Gotcha: `-` is both separator and minus.** In `0030-M-0-0128--4` the last
+field is `-4`. A plain split loses the sign, and nothing else in the checks
+notices - arity and range still pass. `--selftest-script` pins the count of
+negative arguments at 22 for exactly this reason.
+
+Still open: what the sub-opcodes mean, `stage.dat` columns 5..15, and the entity
+type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
+progress-flag block is no longer a mystery: an opcode-5 event sets
+`Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
+inside the block, and csv 2 holds that same number - the two agree 154/154.
 `tk*.dat` is the dialogue those events refer to; its escape codes are identified.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
@@ -360,6 +394,12 @@ Binds at session start — **if it drops, restart the session; it will not
 reconnect.** The MCP server can read, rename and retype, but **cannot create or
 disassemble functions** — that is GUI-only.
 
+**Reading self-test results.** `akuji.exe` is a GUI-subsystem binary, so the
+self-tests write `src/selftest.log` and print nothing to stdout. Check the log
+*and* the process exit code - and do not pipe the run through `tail`, because
+then `$?` is the pipe's status, not the program's. That mistake made a failing
+`--selftest` look green.
+
 Raw disassembly without Ghidra:
 `objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`
 (msys2 at `/c/msys64/mingw64/bin`). Ghidra scripts can be compile-checked with
@@ -410,13 +450,17 @@ order of strength:
    44/44 QDA entries byte-identical, 57/57 effects byte-identical after
    decoding, 15/15 MIDI tracks matching on a checksum of the *merged* event
    stream (which also validates the track merge, not just the chunk walk).
-   Run `--selftest`, `--selftest-audio`, `--selftest-midi`, then the matching
-   `tools/*_ref.py`.
+   The event mini-language is checked the same way: `--selftest-script` and
+   `tools/analyse_events.py` are independent splitters that agree line for line
+   on every count.
+   Run `--selftest`, `--selftest-audio`, `--selftest-midi`, `--selftest-script`,
+   then the matching `tools/*_ref.py` / `analyse_events.py`.
 2. **Self-validating structure.** The QDA directory plus the sum of its entry
    sizes equals the file length exactly; every `.map` is exactly
    `24 + w*h*2` bytes; `save.dat` is exactly `SizeOf(TPlayerState)`, asserted at
    startup; the sound-name array terminates cleanly right where the key-name
-   array begins.
+   array begins; every event sub-opcode has a fixed argument count and sub-op 15
+   carries its own length, over 518 commands with no exceptions.
 3. **Cross-corroboration between unrelated parts of the binary.** The form
    resource's `ChannelCount = 57` matches the name array length and the file
    count. `Title_Init`'s `Font_Define` arguments match constants derived
