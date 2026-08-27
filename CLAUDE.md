@@ -200,8 +200,8 @@ that was wrong).
 | File | Format | Content |
 |---|---|---|
 | `stage.dat` | CSV | `0,	0,	-1,-1,-1,	...` — per-stage integer rows |
-| `spr000..009.dat` | CSV | `0,	8,8,	1,1,	0,0` — sprite metadata |
-| `surf000..009.dat` | CSV | `title.bmp,		320,	240` — **name, width, height**, referencing entries in `bmp.qda` |
+| `spr000..009.dat` | CSV | **7 fields**: surfaceIdx, frameW, frameH, cols, rows, originX, originY — expands to cols*rows frames, numbered sequentially across the file |
+| `surf000..009.dat` | CSV | **3 fields**: bitmap name, width, height — 32 slots, bitmaps pulled from `bmp.qda`. Slot 0 is the font, 1 the title background, 2 the options background |
 | `ev000..065.dat` | CSV | `9,0000,1001,0019,0008,0014-*,1001` — event scripts |
 | `tk000..065.dat` | text | **game dialogue**, with escape codes `
 ` newline, `\e` end, `\k` wait-for-key, `\w`. Not tile data |
@@ -270,11 +270,14 @@ right next to the `%.03d` format in the disassembly.
 
 ### Remaining asset work
 
-`save.dat` (4580 bytes, binary) is undecoded. The CSV formats need column
-meanings worked out — the loaders are `Stage_Init` `0x46214c`,
-`Load_Surface_Textures` `0x465e9c`, `Load_Sprite_Sheets` `0x4660b8`,
-`Load_Tile_Data` `0x466340`, `Load_Event_Scripts` `0x465b50`, orchestrated by
-`Load_Stage_Assets` `0x465a1c`.
+Solved and implemented in Pascal: `bmp.qda` (`QdaArchive.pas`), `map/*.map`,
+`surf*.dat` (`Surfaces.pas`), `spr*.dat` (`Sprites.pas`), the 9x9 font
+(`GameFont.pas`).
+
+Still open: `save.dat` (4580 bytes, binary), `stage.dat` column meanings, and
+`ev*.dat` event-script opcodes. `tk*.dat` is dialogue text whose escape codes
+(`
+`, `\e`, `\k`, `\w`) are identified but whose consumer is not yet traced.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 

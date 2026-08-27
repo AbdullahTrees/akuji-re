@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont, Surfaces;
+  QdaArchive, Title, GameFont, Surfaces, Sprites;
 
 type
   TFrm_main = class(TForm)
@@ -41,6 +41,7 @@ type
     FTitleScreen: TTitleScreen;
     FFont: TGameFont;
     FSurfaces: TSurfaceSet;
+    FSprites: TSpriteSet;
     FDataDir: string;
     FMoveY: Integer;
     FMoveX: Integer;
@@ -107,6 +108,8 @@ begin
       surface set 0, then registers slot 0 as font 0. }
     FSurfaces := TSurfaceSet.Create(FArchive);
     FSurfaces.LoadSet(DataDir, 0);
+    FSprites := TSpriteSet.Create;
+    FSprites.LoadSet(DataDir, 0);
 
     Sheet := FSurfaces[0];
     if Sheet <> nil then
@@ -247,6 +250,7 @@ begin
   Application.OnIdle := nil;
   FFont.Free;
   FTitleScreen.Free;
+  FSprites.Free;
   FSurfaces.Free;   { owns FTitle }
   FArchive.Free;
   { TODO: teardown - the original released the sprite engine and surfaces }
