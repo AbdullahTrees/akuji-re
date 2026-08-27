@@ -23,8 +23,8 @@
 00457300  Entity_TileCollideX
 004574dc  Entity_TileCollideY
 004576b4  FUN_004576b4
-00457880  FUN_00457880
-00457ab4  FUN_00457ab4
+00457880  Entity_PlayerTouch
+00457ab4  Entity_TakeProjectileHits
 00457f98  Entity_BoxesOverlap
 004580bc  Entity_IsOffScreen
 00458138  FUN_00458138

@@ -38,13 +38,37 @@
 
   Two of them are decoded, both from Entity_Destroy @ 0x00461400:
 
+      0   TRIGGERS ON TOUCH, unconditionally. Entity_PlayerTouch @ 0x00457880
+          starts the event as soon as the player's hitbox overlaps the entity
+          carrying it.
+      1   TRIGGERS ON TOUCH PLUS A BUTTON. Same overlap test, but it also
+          requires the player's EF_VEL_Y to be 0 - standing, not jumping - and
+          an input condition. This is the "walk up to it and press a button"
+          case, which is why it is by far the most common opcode: 249 of 692.
       5   sets a player progress flag. It takes the FIRST FOUR CHARACTERS of
           the +0x18 string, parses them as an integer, and writes 1 to
           PlayerState.Progress[that]. This is how the 0x1195-byte progress
           block is populated - see ProgressIndexOf below.
-      7   calls FUN_00454EF4(eventIndex, 4).
+      7   calls Event_Begin(eventIndex, 4).
 
-  The rest are not decoded and are deliberately left unnamed. }
+  Opcodes 0, 1 and 7 all reach the same place - Event_Begin @ 0x00454EF4 - so
+  they are three ways of STARTING a script rather than three different actions.
+  What the script then does is EventCommands.pas's business.
+
+  That also explains the shape of the data: opcode 1 carries a program 249
+  times, and sub-op 3 (dialogue) accounts for 149 of all sub-opcode uses. Signs
+  and conversations are the bulk of the game's events.
+
+      6   TRIGGERS ON BEING HIT. Entity_TakeProjectileHits @ 0x00457AB4 starts
+          the event when a projectile connects with the entity carrying it.
+          Only 5 events use it, which fits a boss-defeated or
+          shoot-the-switch trigger rather than anything routine.
+
+  So four of the seven opcodes are ways of starting a script, differing only in
+  what triggers them: 0 on touch, 1 on touch plus a button, 6 on being shot,
+  7 from Entity_Destroy.
+
+  Opcodes 4 and 9 are still not decoded and are deliberately left unnamed. }
 
 unit EventScripts;
 
@@ -60,8 +84,11 @@ const
   EVENT_CSV_FIELDS   = 7;
 
   { The only two opcodes whose behaviour has been read out of the binary. }
+  EVOP_TOUCH        = 0;   { starts on overlap }
+  EVOP_TOUCH_BUTTON = 1;   { starts on overlap while standing, with a button }
   EVOP_SET_PROGRESS = 5;
-  EVOP_CALL_454EF4  = 7;
+  EVOP_ON_HIT       = 6;   { starts when a projectile hits the entity }
+  EVOP_CALL_454EF4  = 7;   { starts unconditionally from Entity_Destroy }
 
 type
   TEventRecord = record

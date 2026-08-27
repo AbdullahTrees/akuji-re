@@ -107,14 +107,20 @@ const
     the original rate-limits per-entity behaviour without a scheduler. }
   EF_BLOCK_B     = $12;   { 10 ints at +0x48, contiguous with A }
   EF_TIMER_COUNT = 10;
-  EF_TIMER       = $1C;   { FUN_004617FC seeds this with 30 }
+  EF_TIMER       = $1C;   { +0x70. One slot with several uses, all timers:
+                            Entity_MaybeDropItem seeds it with 30, the death
+                            sequence uses it as a countdown, and a hit sets it
+                            and EF_DEATH_TIMER to 8 as invulnerability. }
   EF_POS_X       = $1E;   { biased; use PosX }
   EF_POS_Y       = $1F;
   EF_VEL_X       = $20;   { zeroed on spawn, written as -96 by FUN_004617FC }
   EF_VEL_Y       = $21;
   EF_FACING      = $22;   { direction 0..63, see Directions.pas }
   EF_TYPEF_08    = $23;   { <- type table +0x08 }
-  EF_TYPEF_04    = $24;   { <- type table +0x04 }
+  EF_HP          = $24;   { type table col 1. On a target this is HIT POINTS;
+                            on a projectile the SAME slot is its damage. One
+                            field, two roles by role - see the note below. }
+  EF_TYPEF_04    = EF_HP; { the old provenance name, kept for the spawn code }
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
   EF_MINUS1_B8   = $2E;   { set to -1 on spawn }
   EF_TYPEF_0C    = $32;   { <- type table +0x0C .. +0x18 land at $32..$35 }
@@ -148,7 +154,7 @@ const
     It is a guard, run at the top of an entity's update:
 
         if GameState <> GS_PLAY then Exit(True);
-        if (e^.Raw[EF_HITSTUN] < 1) and (e^.Raw[EF_CLASS] in [1, 2, 6]) then
+        if (e^.Raw[EF_HP] < 1) and (e^.Raw[EF_CLASS] in [1, 2, 6]) then
         begin
           if e^.Raw[EF_DYING] = 0 then          // latch, runs once
           begin
@@ -162,9 +168,7 @@ const
           end;
           Result := True;                        // caller skips normal update
         end; }
-  EF_DEATH_T1    = $1C;   { +0x70, set alongside EF_DEATH_TIMER }
   EF_DEATH_TIMER = $1D;   { +0x74, counts down; 0 destroys the entity }
-  EF_HITSTUN     = $24;   { +0x90, the guard requires < 1 }
   EF_DYING       = $11;   { +0x44, one-shot latch for the setup above }
   EF_CLASS       = $33;   { +0xCC }
 
@@ -281,6 +285,62 @@ const
     sprite search also stops at 256, so an entity in one of those slots could
     not obtain a sprite either; the 33 extra slots are vestigial. }
   ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
+
+  { --- Touching the player, from Entity_PlayerTouch @ 0x00457880 ------------
+
+    Called once per frame for every slot above SLOT_ACTOR_LAST. It builds the
+    PLAYER's hitbox - slot 0, read straight off the array base - and this
+    entity's, using the +0xA8/+0xAC inset pair that Entity_BoxesOverlap also
+    uses, and tests them for overlap.
+
+    On overlap it switches on EF_TOUCH_KIND, which Entity_Spawn fills from type
+    table column 3. That is a DIFFERENT field from EF_CLASS, which comes from
+    column 4 - the two sit next to each other at +0xC8 and +0xCC and are easy
+    to conflate:
+
+        EF_TOUCH_KIND  $32  +0xC8  type col 3  what touching the player does
+        EF_CLASS       $33  +0xCC  type col 4  how the entity dies
+
+    Touch kinds seen: 1 and 7 call 0x00458138 with 1 and 2; 2, 4 and 5 call
+    their own handlers; 6 sets EF_BLOCK_A := 2 but only while the player's
+    EF_VEL_Y is positive, i.e. while falling onto it. }
+  EF_TOUCH_KIND = $32;
+
+  { --- CORRECTION: +0x90 is hit points, not hit-stun -------------------------
+
+    It was first named EF_HITSTUN from Entity_UpdateDying alone, where all that
+    is visible is a guard requiring it to be < 1 before the entity may die. That
+    reading fits a stun counter just as well as a health one, and the wrong one
+    was picked.
+
+    Entity_TakeProjectileHits @ 0x00457AB4 settles it. On a hit it does
+
+        e^.Raw[EF_HP] := e^.Raw[EF_HP] - projectile^.Raw[EF_HP];
+        if e^.Raw[EF_HP] < 1 then
+          begin  e^.Raw[EF_HP] := 0;  e^.Raw[EF_DYING] := 0  end
+        else
+          Play(SND_HIT01);
+
+    Subtracting a per-projectile amount and clamping at zero is health. The
+    sound it plays when the entity SURVIVES is index 17, which SoundTable gives
+    independently as hit01.wav.
+
+    The genuine stun is the +0x70/+0x74 pair, set to 8 on every hit - the same
+    two fields the death sequence reuses as its countdown. }
+
+  { --- Being hit, from Entity_TakeProjectileHits @ 0x00457AB4 ---------------
+
+    Runs for every entity above SLOT_ACTOR_LAST and scans slots 1..$20 - the
+    actor range - for projectiles overlapping it. That the scan bound is
+    exactly SLOT_ACTOR_LAST is more evidence for where that boundary sits.
+
+    EF_VULN_KIND decides what a hit does, and it is a wide switch: kinds 2, 4,
+    5, 6, 7 and $5A..$5D each behave differently, several of them gated on the
+    projectile's own EF_BLOCK_A, which acts as its power or element. Only the
+    common path is translated here. }
+  EF_VULN_KIND  = $35;   { +0xD4, from type table column 6 }
+  EF_HIT_SOUND  = $38;   { +0xE0, from type column 9; indexes a table at 0x46CC48 }
+  HIT_STUN_FRAMES = 8;
 
   { Two things fall out of where these land.
 
