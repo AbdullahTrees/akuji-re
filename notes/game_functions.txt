@@ -11,7 +11,8 @@
 # turned into functions by hand.
 #
 # address  name
-0045509c  SaveGame_Select_Slot
+0045509c  EventScript_AdvanceStep
+00455210  EventScript_Execute
 00456038  TitleMenu_Update
 00456698  FUN_00456698
 004568d0  FUN_004568d0
@@ -74,7 +75,7 @@
 004617fc  FUN_004617fc
 00461874  FUN_00461874
 00461a0c  FUN_00461a0c
-00461a44  FUN_00461a44
+00461a44  GameOver_Update
 00461ba8  HUD_Draw
 00461ee4  PauseMenu_Update
 0046214c  Title_Init
