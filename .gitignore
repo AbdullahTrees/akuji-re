@@ -22,3 +22,7 @@ lib/
 *.compiled
 *.lps
 exports/
+
+# Lazarus package build output
+*.lpk.bak
+backup/

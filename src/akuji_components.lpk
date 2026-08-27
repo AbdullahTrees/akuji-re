@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="akuji_components"/>
+    <Type Value="RunAndDesignTime"/>
+    <Author Value="Akuji source reconstruction"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="Design-time registration for the Akuji component classes (TDDDD, TDDIDEX, TDDSD, TKbgmPlayer). Install this so the Lazarus form designer can open GmMain.lfm."/>
+    <Files Count="5">
+      <Item1>
+        <Filename Value="DDDDComponent.pas"/>
+        <UnitName Value="DDDDComponent"/>
+      </Item1>
+      <Item2>
+        <Filename Value="DDIDComponent.pas"/>
+        <UnitName Value="DDIDComponent"/>
+      </Item2>
+      <Item3>
+        <Filename Value="DDSDComponent.pas"/>
+        <UnitName Value="DDSDComponent"/>
+      </Item3>
+      <Item4>
+        <Filename Value="KbgmPlayer.pas"/>
+        <UnitName Value="KbgmPlayer"/>
+      </Item4>
+      <Item5>
+        <Filename Value="AkujiReg.pas"/>
+        <HasRegisterProc Value="True"/>
+        <UnitName Value="AkujiReg"/>
+      </Item5>
+    </Files>
+    <RequiredPkgs Count="1">
+      <Item1>
+        <PackageName Value="LCL"/>
+      </Item1>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
