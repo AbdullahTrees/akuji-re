@@ -155,10 +155,10 @@ immediately. That busy loop is the game's frame tick. Per frame:
 | 20 | `Title_MainMenu` (`0x462330`) |
 | 30 | `FUN_00462210` |
 | 40 | `Game_Init_PlayerState` (`0x462f40`) |
-| 60 | `FUN_00454790`, `FUN_00461ba8` |
-| 100 | `FUN_00461a44`, `FUN_00461ba8` |
+| 60 | `FUN_00454790`, `FUN_00461ba8` — **normal gameplay**; a finished event script returns here |
+| 100 | `GameOver_Update` (`0x461a44`), `FUN_00461ba8` — **game over** |
 | 130 | `FUN_00461ee4` — **pause**; saves prior state to `0x46cbbc` |
-| 140 | `FUN_00454790`, `FUN_00455210`, `FUN_00461ba8` |
+| 140 | `FUN_00454790`, `FUN_00455210`, `FUN_00461ba8` — **event-script runner**; `0x455210` is the interpreter and is NOT yet disassembled |
 | 150 | `FUN_00463624` |
 | 999 | **quit** — nils `FOnIdle`, calls `FUN_00442a40` |
 
@@ -275,6 +275,14 @@ Globals: `p_TileMaps` `0x46cdec` (per-layer tilemap objects), `p_LayerInfo`
 `+0x1C` mapH), `p_Surfaces` `0x46d344` (32 slots), `p_UseArchive` `0x46ccb4`
 (set to 1 by `DDDD1Init`, selects `bmp.qda` over loose files).
 
+### CAUTION: `SaveGame_Select_Slot` was a bad name
+
+`0x45509C` was called `SaveGame_Select_Slot`. It has nothing to do with save
+slots: it advances an event script to its next step and picks which alternative
+runs from the progress flags. Renamed `EventScript_AdvanceStep`. Like
+`Load_Tile_Data` below it came from the original unverified pass, so treat every
+remaining name from that pass as a hypothesis rather than a fact.
+
 ### CAUTION: `Load_Tile_Data` was a bad name
 
 `0x466340` was listed as `Load_Tile_Data` reading `data	k\`. Both halves were
@@ -299,13 +307,25 @@ entity type table and the 64-step direction table (`Entities.pas`,
 
 `ParamA` and `ParamB` are not values, they are little programs.
 `src/EventCommands.pas` parses them; `tools/analyse_events.py` is the second
-reader. **The grammar came from the data, not from the interpreter** - the code
-that executes these programs has not been found, so this is tier-2/3 evidence
-(section 14), and sub-opcodes stay numbered unless something outside the file
-agrees with them.
+reader.
 
-    ParamA   <4-digit type>-<letter>[-arg...]     type 14..80, letters * A / M R J
-    ParamB   step / step,  cmd . cmd,  <target>-<subop>[-arg...]
+**The separators are tier-1** - inferred from the data first, then confirmed in
+the code:
+
+| where | what it does |
+|---|---|
+| `Event_Begin` `0x454EF4` | `StringReplace(ParamB, '/', ',')` then `CommaText` |
+| `EventScript_AdvanceStep` `0x45509C` | `StringReplace(step, '.', ',')` then `CommaText` |
+
+Both were read out of the binary as one-character `AnsiString` literals
+(refcount `-1`) at `0x455098`/`0x45508C` and `0x45520C`/`0x455200`. The
+sub-opcode *meanings* are still open - they live in `0x455210`, which is not
+disassembled - so those stay numbered.
+
+    ParamA   <4-digit type>-<letter>[-arg...]    type 14..80, letters * A / M R J
+    ParamB   step / step                         steps run in order
+             alt . alt                           exactly ONE alternative runs
+             <guard>-<subop>[-arg...]            guard = a progress-flag index
 
 `ParamB`'s shape is fixed by the opcode, with no exceptions in 692 records:
 opcodes 0/1/4/6/7 carry a program (307), opcode 5 a bare id (154), opcode 9 a
@@ -316,6 +336,32 @@ carries its own length. Arities: 0->5, 3->1, 4->1, 5->1, 7->0, 8->0, 9->1,
 Two sub-opcodes have outside support. **3 is dialogue** - its argument indexes
 the stage's own `tk*.dat`, and all 149 references land in range. **15 is a
 list** - arg[1] is a count and exactly that many items follow, true for all 13.
+
+#### The leading number is a guard, not a target
+
+`EventScript_AdvanceStep` picks which alternative runs:
+
+```
+for i := Count - 1 downto 0 do
+  if Progress[StrToInt(Copy(item[i], 1, 4))] = 1 then
+    begin  step := item[i];  break  end
+  else
+    step := ''
+```
+
+Alternatives are scanned **backwards**, so the *last* one whose flag is set
+wins, and exactly one runs or none. They are written general-first because flag
+0 is set in the shipped save and no event ever writes it - so `0000-` always
+matches and acts as the default, placed first precisely because the scan reaches
+it last. All 23 distinct guards fall inside the 4501-byte progress block.
+
+23 of the 24 multi-alternative steps follow that convention. The exception,
+`0008-80.0000-12-007-1-1`, has them reversed so `0008-80` can never run - an
+authoring slip in the original data, reproduced rather than corrected.
+
+**This corrected an earlier reading.** `.` was first documented here as
+separating commands that all run. It does not; it separates alternatives of
+which one is chosen. `TEventStep.Alternatives` is named to keep that straight.
 
 `ParamA`'s type is bounded 14..80 against `ENTITY_TYPES`' 81 entries, flush at
 the top; 0..13 are never placed by a stage, which fits them being spawned by
