@@ -2,11 +2,13 @@
 #
 # Every function Ghidra knows about between 0x455000 and 0x4671FF - the range
 # CLAUDE.md section 2 identifies as Akuji's own code, above the Borland RTL/VCL
-# and the third-party DirectX component suite. 88 of them; that is the real
-# denominator for 'how much of the game is reconstructed'.
+# and the third-party DirectX component suite. That is the real denominator for
+# 'how much of the game is reconstructed'.
 #
 # Snapshotted from the Ghidra database so tools/coverage.py runs without it.
-# Regenerate with the GhidraMCP list_functions call when new names land.
+# Regenerate with the GhidraMCP list_functions call when new functions are
+# created or renamed - the count grows as RTTI-only functions are found and
+# turned into functions by hand.
 #
 # address  name
 0045509c  SaveGame_Select_Slot
@@ -65,10 +67,10 @@
 0045f824  FUN_0045f824
 00460884  FUN_00460884
 004608bc  FUN_004608bc
-004610c4  FUN_004610c4
+004610c4  Entity_Spawn
 00461400  FUN_00461400
 004615a8  FUN_004615a8
-00461738  FUN_00461738
+00461738  Entity_SteerToPlayer
 004617fc  FUN_004617fc
 00461874  FUN_00461874
 00461a0c  FUN_00461a0c
@@ -91,6 +93,8 @@
 00465e9c  Load_Surface_Textures
 004660b8  Load_Sprite_Sheets
 00466340  Load_Map
+004665c8  TFrm_main_FormKeyDown
+00466644  TFrm_main_FormDestroy
 00466888  FUN_00466888
 004669f8  Load_StageTable
 00466c78  FUN_00466c78
