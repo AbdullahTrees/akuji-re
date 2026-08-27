@@ -27,3 +27,4 @@ exports/
 *.lpk.bak
 backup/
 src/akuji_components.pas
+selftest.log
