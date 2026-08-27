@@ -64,9 +64,15 @@ type
   TGameSettings = record
     CurrentStage: Integer;   // +0x00  Stage_Begin passes this to Load_Stage_Assets
     GameLevel: Integer;      // +0x04  0..2
-    KeyMap: array[0..2] of Integer;  // +0x08..+0x10  jump, fire, pause
-    Field14: Integer;        // +0x14  (third key slot end / unknown)
-    Flags: array[0..3] of Byte;      // +0x18..+0x1B, +0x1A = fullscreen
+    { FOUR entries, not three. FormDestroy @ 0x00466644 copies p_KeyMap[0..3]
+      into +0x08, +0x0C, +0x10 and +0x14, so the old 'Field14' was the fourth
+      key slot. The shipped file holds 0,1,2,3 - the identity mapping. }
+    KeyMap: array[0..3] of Integer;  // +0x08..+0x14
+    { FormDestroy names each of these by the global it copies from. }
+    SoftwareVsyncFlag: Byte; // +0x18  <- p_SoftwareVsync 0x0046CE60
+    WaitOnFlag: Byte;        // +0x19  <- p_WaitOn        0x0046D2E4
+    FullScreenFlag: Byte;    // +0x1A  <- p_FullScreenOn  0x0046D268
+    DebugLogFlag: Byte;      // +0x1B  <- p_DebugLog      0x0046CDB8
     Unknown1C: array[0..7] of Byte;  // +0x1C..+0x23
     Volume: Integer;         // +0x24  0..10, SE VOLUME
     GallerySel: Integer;     // +0x28  0..6
@@ -81,26 +87,126 @@ var
   FullScreenOn: Boolean = False;            // p_FullScreenOn    0x0046D268
   WaitOn: Boolean = False;                  // p_WaitOn          0x0046D2E4
   SoftwareVsync: Boolean = True;            // p_SoftwareVsync   0x0046CE60
+  DebugLog: Boolean = False;                // p_DebugLog        0x0046CDB8
   GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       0x0046D06C
   SavedGameState: Integer = 0;              // p_SavedGameState  0x0046CBBC
-  PauseMenuIndex: Integer = 0;              // p_PauseMenuIndex  0x0046CF88
+  { 0x0046CF88 is ONE global shared by the title menu and the pause menu -
+    Title_MainMenu clamps it to 0..3 and PauseMenu_Update reuses it. That is why
+    FormKeyDown stashes it before entering pause and zeroes it. }
+  PauseMenuIndex: Integer = 0;              // p_MenuIndex       0x0046CF88
+  SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  0x0046D2C0
   Input: TInputState;                       // p_InputState      0x0046CC58
 
 { Convenience for the pause path, which the original open-codes. }
 procedure EnterPause;
 procedure LeavePause;
 
+{ data\system.dat, from DDDD1Init (which reads it over a set of defaults) and
+  FormDestroy @ 0x00466644 (which writes it back on exit).
+
+  The file is a raw 56-byte image of TGameSettings, so the record must stay
+  exactly that size - asserted at startup, the same guard TPlayerState uses.
+
+  SaveSettings gathers the loose globals back into the record first, in the
+  original's order, because those are what the options screen actually edits. }
+function LoadSettings(const AGameDir: string): Boolean;
+function SaveSettings(const AGameDir: string): Boolean;
+procedure SettingsToGlobals;
+procedure GlobalsToSettings;
+
 implementation
 
+uses
+  Classes, SysUtils;
+
+{ The order is the original's, from FormKeyDown @ 0x004665C8: the menu index is
+  saved and cleared BEFORE the game state is saved. }
 procedure EnterPause;
 begin
+  SavedMenuIndex := PauseMenuIndex;
+  PauseMenuIndex := 0;
   SavedGameState := GameStateValue;
   GameStateValue := GS_PAUSE;
+end;
+
+function SettingsFileName(const AGameDir: string): string;
+begin
+  Result := IncludeTrailingPathDelimiter(AGameDir) + 'data' + PathDelim +
+            'system.dat';
+end;
+
+procedure SettingsToGlobals;
+begin
+  SoftwareVsync := Settings.SoftwareVsyncFlag <> 0;
+  WaitOn        := Settings.WaitOnFlag <> 0;
+  FullScreenOn  := Settings.FullScreenFlag <> 0;
+  DebugLog      := Settings.DebugLogFlag <> 0;
+end;
+
+procedure GlobalsToSettings;
+begin
+  Settings.SoftwareVsyncFlag := Ord(SoftwareVsync);
+  Settings.WaitOnFlag        := Ord(WaitOn);
+  Settings.FullScreenFlag    := Ord(FullScreenOn);
+  Settings.DebugLogFlag      := Ord(DebugLog);
+end;
+
+function LoadSettings(const AGameDir: string): Boolean;
+var
+  F: TFileStream;
+  Name: string;
+begin
+  Result := False;
+  Name := SettingsFileName(AGameDir);
+  if not FileExists(Name) then
+    Exit;
+  F := TFileStream.Create(Name, fmOpenRead or fmShareDenyNone);
+  try
+    { The original reads 0x38 unconditionally. Refuse a short file rather than
+      leaving the tail of the record holding whatever was there before - the
+      same guard LoadSave makes for save.dat. }
+    if F.Size < SizeOf(TGameSettings) then
+      Exit;
+    F.ReadBuffer(Settings, SizeOf(TGameSettings));
+    Result := True;
+  finally
+    F.Free;
+  end;
+  if Result then
+    SettingsToGlobals;
+end;
+
+function SaveSettings(const AGameDir: string): Boolean;
+var
+  F: TFileStream;
+begin
+  GlobalsToSettings;
+  Result := False;
+  try
+    F := TFileStream.Create(SettingsFileName(AGameDir), fmCreate);
+    try
+      F.WriteBuffer(Settings, SizeOf(TGameSettings));
+      Result := True;
+    finally
+      F.Free;
+    end;
+  except
+    { The original opens for write, falls back to create, and ignores failure
+      either way - a read-only game directory must not stop it shutting down. }
+    on E: Exception do
+      Result := False;
+  end;
 end;
 
 procedure LeavePause;
 begin
   GameStateValue := SavedGameState;
 end;
+
+initialization
+  { data\system.dat is a raw image of this record, so a layout slip makes
+    every setting after the slip garbage. }
+  Assert(SizeOf(TGameSettings) = $38,
+         'TGameSettings must be exactly 56 bytes to match system.dat');
 
 end.

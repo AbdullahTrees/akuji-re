@@ -105,7 +105,6 @@ var
   DataDir: string;
   Sheet: TBitmap;
 begin
-  { TODO: load data\system.dat (56-byte struct, CLAUDE.md section 7) }
   { TODO: read system.ini -> input device, fullscreen }
   { TODO: init input, sprite engine }
 
@@ -113,6 +112,14 @@ begin
   if DataDir <> '' then
   begin
     FDataDir := DataDir;
+
+    { The original writes its defaults into p_Settings and then lets
+      FileRead(h, p_Settings, 0x38) overwrite them, so a missing or short
+      system.dat simply leaves the defaults standing. Same here: the record's
+      initial value is the default and LoadSettings only reports whether the
+      file was actually applied. }
+    LoadSettings(DataDir);
+
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
 
     { Original: Title_Init calls Load_Stage_Assets(MainForm, 0), which pulls
@@ -142,7 +149,7 @@ begin
       A machine with no sound device must still play, so a failure here is
       recorded and ignored rather than raised. }
     DDSD1.Open(DataDir);
-    DDSD1.Volume := 10;
+    DDSD1.Volume := Settings.Volume;
     KbgmPlayer1.Open(DataDir);
   end;
 
@@ -425,17 +432,48 @@ begin
 end;
 
 { FormKeyDown @ 0x004665C8. The original's first test is VK_ESCAPE. }
+{ ---------------------------------------------------------------------------
+  FormKeyDown @ 0x004665C8.
+
+  Now translated from the real function rather than guessed. The whole of the
+  original is:
+
+      if Key = VK_ESCAPE then
+      begin
+        if GameState = $82 then begin GameState := 999; Exit end;
+        SavedMenuIndex := MenuIndex;  MenuIndex := 0;
+        SavedGameState := GameState;  GameState := $82;
+      end;
+      if (Key = $52) and (Shift = $04) then GameState := 10;
+
+  Two corrections to what was here before:
+
+    - Escape while already paused QUITS. It does not resume. Resuming is the
+      pause menu's own PAUSE_CONTINUE entry, which is what calls LeavePause.
+    - Ctrl+R is a soft reset back to the title. Shift is compared for EQUALITY
+      with $04, not tested for membership, so Ctrl+Shift+R deliberately does
+      not fire - reproduced with `Shift = [ssCtrl]` rather than `ssCtrl in`.
+  --------------------------------------------------------------------------- }
 procedure TFrm_main.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
   if Key = VK_ESCAPE then
   begin
     if GameStateValue = GS_PAUSE then
-      LeavePause
-    else
-      EnterPause;
-    Exit;
+    begin
+      GameStateValue := GS_QUIT;
+      Exit;
+    end;
+    EnterPause;
   end;
+
+  if (Key = Ord('R')) and (Shift = [ssCtrl]) then
+    GameStateValue := GS_TITLE_INIT;
+
+  { DIVERGENCE, not part of the original handler. The original reads movement
+    and buttons from the Joy component in the frame loop, through one of three
+    DirectInput paths; none of that is implemented yet, so the menus are driven
+    from the keyboard here instead. Delete this block once Joy polls for real. }
   case Key of
     VK_UP:                 FMoveY := -1;
     VK_DOWN:               FMoveY := 1;
@@ -447,10 +485,23 @@ begin
   Joy.KeyDown(Key);
 end;
 
-{ FormDestroy @ 0x00466644 }
+{ ---------------------------------------------------------------------------
+  FormDestroy @ 0x00466644 - which is really the settings writer.
+
+  The original copies the loose runtime globals back into the settings record
+  and writes all 56 bytes over data\system.dat, then mirrors the fullscreen
+  flag into system.ini's [disp] section as 'on' or 'off'. It also dumps
+  'debug.log' first when the debug flag is set, and that is not reproduced.
+
+  Note the order: p_KeyMap[0..3] -> +0x08..+0x14, then the four flag bytes,
+  then the write. GlobalsToSettings does the flags; the key map already lives
+  in the record.
+  --------------------------------------------------------------------------- }
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   Application.OnIdle := nil;
+  if FDataDir <> '' then
+    SaveSettings(FDataDir);
   FFont.Free;
   FTitleScreen.Free;
   FMap.Free;

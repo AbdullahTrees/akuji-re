@@ -32,7 +32,7 @@ uses
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
-  KbgmPlayer, Directions, Entities, EventScripts, PlayerState,
+  KbgmPlayer, Directions, Entities, EventScripts, PlayerState, GameState,
   Classes, SysUtils;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -653,6 +653,97 @@ begin
     Log.Add('OK');
 end;
 
+{ --selftest-settings <gamedir> <scratchdir> : the 56-byte settings record.
+
+  This one matters more than it looks. FormDestroy WRITES data\system.dat back
+  on exit, so a wrong field mapping would not merely misread the file - it
+  would corrupt the player's settings the first time the game is closed. A
+  round trip is the only cheap way to know the layout is right.
+
+  Loads the real file, saves into a scratch directory, and compares the two
+  byte for byte. Nothing is written to the game directory. }
+function SelfTestSettings(Log: TStrings): Integer;
+var
+  GameDir, Scratch, SrcName, DstName: string;
+  A, B: TMemoryStream;
+  I, Diff: Integer;
+  PA, PB: PByte;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Scratch := IncludeTrailingPathDelimiter(ParamStr(3));
+
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add(Format('scratch:  %s', [Scratch]));
+  Log.Add('');
+
+  if not LoadSettings(GameDir) then
+  begin
+    Log.Add('FAILED: could not load data\system.dat');
+    Exit(1);
+  end;
+
+  Log.Add(Format('SizeOf(TGameSettings) = %d (must be 56)', [SizeOf(TGameSettings)]));
+  Log.Add('');
+  Log.Add(Format('  +00 CurrentStage   %d', [Settings.CurrentStage]));
+  Log.Add(Format('  +04 GameLevel      %d', [Settings.GameLevel]));
+  Log.Add(Format('  +08 KeyMap         %d, %d, %d, %d',
+    [Settings.KeyMap[0], Settings.KeyMap[1], Settings.KeyMap[2], Settings.KeyMap[3]]));
+  Log.Add(Format('  +18 SoftwareVsync  %d', [Settings.SoftwareVsyncFlag]));
+  Log.Add(Format('  +19 WaitOn         %d', [Settings.WaitOnFlag]));
+  Log.Add(Format('  +1A FullScreen     %d', [Settings.FullScreenFlag]));
+  Log.Add(Format('  +1B DebugLog       %d', [Settings.DebugLogFlag]));
+  Log.Add(Format('  +24 Volume         %d', [Settings.Volume]));
+  Log.Add(Format('  +28 GallerySel     %d', [Settings.GallerySel]));
+  Log.Add(Format('  +34 InputDevice    %d', [Settings.InputDevice]));
+  Log.Add('');
+
+  ForceDirectories(Scratch + 'data');
+  if not SaveSettings(Scratch) then
+  begin
+    Log.Add('FAILED: could not write the scratch copy');
+    Exit(1);
+  end;
+
+  SrcName := IncludeTrailingPathDelimiter(GameDir) + 'data' + PathDelim + 'system.dat';
+  DstName := Scratch + 'data' + PathDelim + 'system.dat';
+  A := TMemoryStream.Create;
+  B := TMemoryStream.Create;
+  try
+    A.LoadFromFile(SrcName);
+    B.LoadFromFile(DstName);
+    Log.Add(Format('original %d bytes, round-tripped %d bytes', [A.Size, B.Size]));
+    if A.Size <> B.Size then
+    begin
+      Log.Add('FAILED: sizes differ');
+      Exit(1);
+    end;
+    Diff := 0;
+    PA := PByte(A.Memory);
+    PB := PByte(B.Memory);
+    for I := 0 to A.Size - 1 do
+      if PA[I] <> PB[I] then
+      begin
+        if Diff < 8 then
+          Log.Add(Format('  byte +%.2X: original %.2X, round-tripped %.2X',
+            [I, PA[I], PB[I]]));
+        Inc(Diff);
+      end;
+    Log.Add(Format('%d differing bytes', [Diff]));
+    if Diff > 0 then
+      Result := 1;
+  finally
+    B.Free;
+    A.Free;
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - load/save is byte-exact, so FormDestroy will not corrupt system.dat')
+  else
+    Log.Add('FAILED - do NOT let FormDestroy write settings until this passes');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -673,6 +764,8 @@ begin
         Result := SelfTestDirections(Log)
       else if ParamStr(1) = '--selftest-events' then
         Result := SelfTestEvents(Log)
+      else if ParamStr(1) = '--selftest-settings' then
+        Result := SelfTestSettings(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -692,7 +785,8 @@ begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
      (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') or
-     (ParamStr(1) = '--selftest-events') then
+     (ParamStr(1) = '--selftest-events') or
+     (ParamStr(1) = '--selftest-settings') then
   begin
     ExitCode := RunSelfTest;
     Exit;
