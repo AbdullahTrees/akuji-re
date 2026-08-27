@@ -153,6 +153,8 @@ begin
 
   Log.Add('');
   Log.Add(Format('decoded %d of %d, %d missing', [Ok, SOUND_COUNT, Missing]));
+  if Ok = 0 then
+    Log.Add('FAILED: nothing decoded at all - wrong game directory?');
 
   { The original's attenuation curve, tabulated so it can be checked against
     the disassembly by hand: SetVolume((10 - v) * -0x1C2), hundredths of a dB. }
@@ -628,9 +630,25 @@ begin
   Log.Add(Format('progress block: %d bytes from offset %d',
     [PROGRESS_LENGTH, PROGRESS_START]));
 
+  { A test that passes when it loaded nothing is worse than no test: point it
+    at the wrong directory and it would report OK having checked zero events.
+    The shipped data has 692 events and 203 dialogue lines, so anything less
+    than a full load is a failure, not an empty pass. }
+  if Total = 0 then
+  begin
+    Log.Add('FAILED: no events loaded at all - wrong game directory?');
+    Inc(Result);
+  end
+  else if (Total <> 692) or (Lines <> 203) then
+  begin
+    Log.Add(Format('FAILED: expected 692 events and 203 dialogue lines, got %d and %d',
+      [Total, Lines]));
+    Inc(Result);
+  end;
+
   Log.Add('');
   if Result > 0 then
-    Log.Add(Format('FAILED: %d bad progress indices', [Result]))
+    Log.Add(Format('FAILED: %d problems', [Result]))
   else
     Log.Add('OK');
 end;
