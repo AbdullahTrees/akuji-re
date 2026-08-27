@@ -286,6 +286,29 @@ const
     not obtain a sprite either; the 33 extra slots are vestigial. }
   ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
 
+  { --- What the two 10-int blocks are for ----------------------------------
+
+    Entity_Spawn zeroes ints $08..$11 and $12..$1B, ten each. Reading two
+    handlers shows what the split is:
+
+      Block A ($08..$11)  PARAMETERS, set once when the entity is placed
+      Block B ($12..$1B)  RUNTIME COUNTERS, ticked by the handler
+
+    EntityUpdate_Type32_Emitter @ 0x0045A5D4 is the clearest case. It is an
+    invisible spawner - type 32 is one of the three rows with no sprite - and it
+    reads its whole configuration out of block A while keeping its state in
+    block B:
+
+      A[1] $09  frames between spawns      B[0] $12  countdown to next spawn
+      A[2] $0A  how many to spawn in all   B[1] $13  how many spawned so far
+      A[3] $0B  scatter radius, in tiles   B[2] $14  countdown to next sound
+      A[4] $0C  frames between sounds
+
+    When B[1] passes A[2] it destroys itself. That is the pattern to expect
+    from the other handlers: block A is the stage author's configuration and
+    block B is the handler's scratch. }
+  EF_BLOCK_LEN = 10;
+
   { --- Touching the player, from Entity_PlayerTouch @ 0x00457880 ------------
 
     Called once per frame for every slot above SLOT_ACTOR_LAST. It builds the

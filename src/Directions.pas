@@ -17,11 +17,22 @@
   for all 64 entries, which is the quarter-turn relationship between sine and
   cosine. So there is really one table, emitted twice.
 
-  The table's address is confirmed from a second direction: the global at
-  0x0046CEE4 holds 0x00468B14 in the file image, and Entity_SpawnDebris
-  @ 0x00461874 indexes it with Random($40) to pick a heading for each particle.
-  A 64-entry random index into this exact address is independent evidence both
-  that DIR_COUNT is 64 and that the table starts where it was read from.
+  BOTH tables are confirmed from the code, and so is the relationship between
+  them. The game reaches them through two globals:
+
+      0x0046CEE4 -> 0x00468B14   the X component
+      0x0046CE34 -> 0x00468C14   the Y component
+
+  EntityUpdate_Type33_Explosion @ 0x0045A698 uses the pair together: it picks a
+  random heading with Random($40), then takes the X velocity from the first
+  table and the Y velocity from the second, at the SAME index. Entity_SpawnDebris
+  @ 0x00461874 uses the first alone the same way.
+
+  So DirVelY computing DIR_COS[(Dir + 16) and 63] rather than storing a second
+  table is not a shortcut taken on faith - the two tables in the image were read
+  out and checked entry by entry, and the quarter-turn relation holds for all 64.
+  A 64-entry random index into these exact addresses is also independent
+  evidence that DIR_COUNT is 64.
 
   Its closed form is exact for every entry:
 
