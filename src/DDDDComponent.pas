@@ -16,7 +16,7 @@ unit DDDDComponent;
 interface
 
 uses
-  Classes, SysUtils, Graphics, Controls;
+  Classes, SysUtils, Graphics, Controls, Forms;
 
 type
   TDDDDDebugOptionItem = (ddoHaltOnError);
@@ -47,8 +47,17 @@ type
     { Called once the form is up. Fires OnInit. }
     procedure Initialize;
 
-    { Present the offscreen surface. No-op until a target exists. }
-    procedure Flip;
+    { --- interface recovered from the original, not invented ---
+      TDDDD_Clear      0x00449E78  fills the back buffer with BackColor (+0x4C)
+      TDDDD_Present    0x00449D00  fullscreen: DirectDraw Flip
+                                   windowed:   Blt back buffer to window origin
+      TDDDD_DrawSprite 0x00448918  (surface, x, y, transparent, srcRect)
+      The frame loop calls Clear at step 4 and Present at step 8. }
+
+    procedure Clear;
+    procedure Present;
+    procedure DrawSprite(Src: TBitmap; X, Y: Integer; const SrcRect: TRect;
+                         Transparent: Boolean = True);
 
     { Everything the game draws goes here. Backed by a TBitmap for now, which
       is why LCL-first works: the game already draws through TCanvas. }
@@ -99,9 +108,29 @@ begin
     FOnInit(Self);
 end;
 
-procedure TDDDD.Flip;
+procedure TDDDD.Clear;
 begin
-  { TODO: blit FSurface to the owning form's canvas. }
+  FSurface.Canvas.Brush.Color := FBackColor;
+  FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
+end;
+
+procedure TDDDD.Present;
+begin
+  { The original branched on a fullscreen flag at +0x3C: DirectDraw Flip when
+    set, otherwise Blt to the window's screen origin. Windowed is the shipped
+    configuration (system.ini fullscreen=off), so that is the path to build. }
+  if Owner is TWinControl then
+    TCustomForm(Owner).Canvas.Draw(0, 0, FSurface);
+end;
+
+procedure TDDDD.DrawSprite(Src: TBitmap; X, Y: Integer; const SrcRect: TRect;
+  Transparent: Boolean);
+begin
+  Src.Transparent := Transparent;
+  FSurface.Canvas.CopyRect(
+    Rect(X, Y, X + (SrcRect.Right - SrcRect.Left),
+               Y + (SrcRect.Bottom - SrcRect.Top)),
+    Src.Canvas, SrcRect);
 end;
 
 initialization

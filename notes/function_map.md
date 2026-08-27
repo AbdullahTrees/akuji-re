@@ -309,3 +309,26 @@ exactly two vtable calls (`+0x44`, `+0x50`) in init, and released in `FUN_004497
 
 **Porting cost: zero.** The component layer is being replaced anyway, and the
 D3DRM dependency leaves with it. This closes the largest open risk in the port.
+
+## Frame-loop internals (2026-08-27)
+
+| Address | Name | Evidence |
+|---|---|---|
+| `00464d30` | `TFrm_main_AppIdle` | the frame loop; `Done := False`, state dispatch, present, spin-wait |
+| `00465584` | `TFrm_main_DDDD1Init` | loads settings, installs `Application.OnIdle` |
+| `00449e78` | `TDDDD_Clear` | 100-byte `DDBLTFX` + `BackColor` (+0x4C), surface vtable `+0x14` = `Blt` |
+| `00449d00` | `TDDDD_Present` | vtable `+0x2C` = `Flip` when fullscreen; else 124-byte `DDSURFACEDESC2` + `Blt` to window origin |
+| `00448918` | `TDDDD_DrawSprite` | `(surface, x, y, transparent, srcRect)` |
+| `00461ba8` | `HUD_Draw` | `"%3d/%-3d"` counter, `"%.2d:%.2d:%.2d"` timer, life-icon loops |
+| `004511ec` | `Game_DrawText` | takes x, y, colour index and a string |
+| `00451004` | `Game_DrawTextOutlined` | draws 4x at +/-1 for outline, then centred |
+
+### `p_PlayerState` @ `0x0046cff0` — the 0x11E4 struct from `Game_Init_PlayerState`
+
+| Offset | Meaning |
+|---|---|
+| `+0x11B4` | current lives/health (clamped to 0..`+0x11B8`) |
+| `+0x11B8` | maximum lives/health |
+| `+0x11BC` | elapsed seconds — HUD renders it as `h:mm:ss` |
+| `+0x11C4` | counter shown as `%3d/%-3d` |
+| `+0x11DC` | index into the table at `0x0046d2b4` |

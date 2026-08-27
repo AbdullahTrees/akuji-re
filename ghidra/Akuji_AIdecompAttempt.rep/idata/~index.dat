@@ -1,5 +1,3 @@
-VERSION=1
-/
-  00000000:akuji.exe:c0a8064e66e9940957547800
-NEXT-ID:1
-MD5:d41d8cd98f00b204e9800998ecf8427e
+version https://git-lfs.github.com/spec/v1
+oid sha256:eead3b202d787fc4d0d297beb8dec6ae7bee68e071a145a8d064a1298ae6f686
+size 110
