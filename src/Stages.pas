@@ -33,11 +33,11 @@
        1     [1]    sprite set, 0..9  - matches spr000..009.dat
        2     [2]    map index. EQUALS THE ROW NUMBER on rows 1..65, and
                     map.map..065.map is exactly that set. Row 0 is -1
-       3     [3]    -1 on every row
-       4     [4]    -1 on every row
-       5     [5]    6 on every row but row 0, which is -1
-       6     [6]    -1 on every row
-       7     [7]    -1 on every row
+       3     [3]    map index for layer 1 - -1 on every row, so unused
+       4     [4]    map index for layer 2 - -1 on every row, so unused
+       5     [5]    TILESET surface slot for layer 0. 6 on every row but row 0
+       6     [6]    tileset slot for layer 1 - -1, unused
+       7     [7]    tileset slot for layer 2 - -1, unused
        8..14 [11..17]  0 on every row - seven dead columns
       15     [18]   TERRAIN id - picks the debris impact sound; equals
                     csv 0 on 65 of 66 rows
@@ -73,9 +73,46 @@
   rows carry csv 15 = 4, and indices 10..14 are never used. Recorded so the
   guess is not made again.
 
-  Only rec[2] has its meaning from the code (Load_Stage_Assets builds the map
-  filename from it). rec[0] and rec[1] are from the code too. Everything else
-  above is a property of the data. }
+  ## csv 5..7 are the tilesets, paralleling csv 2..4
+
+  Load_Stage_Assets @ 0x00465A1C loops the three layers and calls
+
+      Load_Map(form, rec[2 + layer], layer, rec[5 + layer])
+
+  and Load_Map uses that fourth argument as p_Surfaces[it] - the layer's
+  TILESET. So the two triples are parallel: rec[2..4] say WHICH map each layer
+  loads and rec[5..7] say which surface holds its tiles. Only layer 0 is ever
+  used, which is why the other four are -1 throughout.
+
+  rec[5] is 6 on every real row, and surface slot 6 is bg001.bmp, bg003.bmp,
+  bg004.bmp ... in each art set - the background sheet. Row 0 carries -1 and
+  its art set has nothing in slot 6, which is consistent.
+
+  ## Where the terrain id goes
+
+  The same function ends with
+
+      Terrain_Configure(TileMaps[0], Surfaces[rec[5]], rec[18])
+
+  so rec[18] - csv 15 - is passed straight in as the terrain id, confirming
+  that reading from a second direction. Terrain_Configure @ 0x004645B0 switches
+  on it 1..9 and sets the SOLID TILE THRESHOLD, the value Entity_TileCollideX/Y
+  compare each tile index against:
+
+      terrain 1, 2, 4     threshold $32
+      terrain 3, 6, 7, 8  threshold $3C
+      terrain 5           threshold $46
+      terrain 9           threshold $50
+
+  Terrain 0 has no case and leaves the threshold alone; only row 0, the
+  placeholder, carries it. So the terrain id does not merely pick a sound - it
+  decides which tiles are solid.
+
+  Terrains 1..4 additionally build an animated background entity; 5..9 do not.
+
+  With that, every column of stage.dat is accounted for. rec[0], rec[1],
+  rec[2..4], rec[5..7] and rec[18] all have their meaning from the code;
+  rec[11..17] are zero throughout and nothing reads them. }
 
 unit Stages;
 
@@ -89,7 +126,8 @@ uses
 const
   STAGE_FIELDS  = 16;   { columns in stage.dat }
   STAGE_RECORD  = 19;   { ints per record, stride 0x4C }
-  STAGE_LAYERS  = 3;    { rec[2..4] }
+  STAGE_LAYERS  = 3;    { rec[2..4] maps, rec[5..7] their tilesets }
+  STAGE_TILESET = 5;    { rec[5 + layer] }
   LAYER_NONE    = -1;
 
 type
@@ -106,6 +144,7 @@ type
     function GetSpriteSet(Index: Integer): Integer;
     function GetLayer(StageIndex, Layer: Integer): Integer;
     function GetTerrainId(Index: Integer): Integer;
+    function GetTileset(StageIndex, Layer: Integer): Integer;
   public
     function Load(const ADataDir: string): Integer;
 
@@ -117,9 +156,14 @@ type
     property SpriteSet[Index: Integer]: Integer read GetSpriteSet;
     property Layer[StageIndex, LayerIndex: Integer]: Integer read GetLayer;
 
-    { csv 15 / rec[18]: the terrain id Entity_SpawnDebris reads to choose the
-      impact sound. Equals SurfaceSet everywhere except stage 58. }
+    { csv 15 / rec[18]: the terrain id. Load_Stage_Assets hands it to
+      Terrain_Configure, which uses it to set the solid-tile threshold, and
+      Entity_SpawnDebris reads it to choose the impact sound. Equals
+      SurfaceSet everywhere except stage 58. }
     property TerrainId[Index: Integer]: Integer read GetTerrainId;
+
+    { rec[5 + layer] - the surface slot holding that layer's tiles. }
+    property Tileset[StageIndex, Layer: Integer]: Integer read GetTileset;
   end;
 
 implementation
@@ -157,6 +201,13 @@ begin
   if (Layer < 0) or (Layer >= STAGE_LAYERS) then
     Exit(LAYER_NONE);
   Result := GetRecord(StageIndex).Raw[2 + Layer];
+end;
+
+function TStageTable.GetTileset(StageIndex, Layer: Integer): Integer;
+begin
+  if (Layer < 0) or (Layer >= STAGE_LAYERS) then
+    Exit(LAYER_NONE);
+  Result := GetRecord(StageIndex).Raw[STAGE_TILESET + Layer];
 end;
 
 function TStageTable.GetTerrainId(Index: Integer): Integer;

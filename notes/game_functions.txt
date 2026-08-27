@@ -85,7 +85,7 @@
 00463154  Opening_Update
 00463624  FUN_00463624
 00464484  FUN_00464484
-004645b0  Configure_Stage_Params
+004645b0  Terrain_Configure
 00464d30  TFrm_main_AppIdle
 004653c8  GameState_Reset
 00465584  TFrm_main_DDDD1Init

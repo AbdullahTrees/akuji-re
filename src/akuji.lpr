@@ -1116,6 +1116,7 @@ var
   R: TStageRecord;
   I, C, N: Integer;
   SurfEqSpr, MapEqRow, ThemeEqSurf, MapsPresent, Terrain3, Terrain4: Integer;
+  LayerBad: Integer;
   DeadOK: Boolean;
   Anomalies: string;
 begin
@@ -1137,7 +1138,7 @@ begin
     end;
 
     SurfEqSpr := 0; MapEqRow := 0; ThemeEqSurf := 0; MapsPresent := 0;
-    Terrain3 := 0; Terrain4 := 0;
+    Terrain3 := 0; Terrain4 := 0; LayerBad := 0;
     DeadOK := True;
     Anomalies := '';
 
@@ -1145,6 +1146,24 @@ begin
     begin
       R := T[I];
       if R.Raw[0] = R.Raw[1] then Inc(SurfEqSpr);
+      { rec[5] is the tileset surface slot for layer 0, and Load_Stage_Assets
+        passes it to Terrain_Configure as well. Layers 1 and 2 are unused, so
+        their map index AND their tileset are both -1 - the two triples have to
+        agree or the reading of csv 5..7 as tilesets is wrong. }
+      for C := 1 to STAGE_LAYERS - 1 do
+        if (R.Raw[2 + C] = LAYER_NONE) <> (R.Raw[STAGE_TILESET + C] = LAYER_NONE) then
+        begin
+          Log.Add(Format('  row %d layer %d: map %d but tileset %d - they disagree',
+            [I, C, R.Raw[2 + C], R.Raw[STAGE_TILESET + C]]));
+          Inc(LayerBad);
+        end;
+      if (I > 0) and (R.Raw[STAGE_TILESET] <> 6) then
+      begin
+        Log.Add(Format('  row %d: layer 0 tileset is %d, expected surface slot 6',
+          [I, R.Raw[STAGE_TILESET]]));
+        Inc(LayerBad);
+      end;
+
       if R.Raw[18] = 3 then Inc(Terrain3);
       if R.Raw[18] = 4 then Inc(Terrain4);
       if R.Raw[18] = R.Raw[0] then Inc(ThemeEqSurf)
@@ -1185,6 +1204,9 @@ begin
       counts move, the reading of csv 15 as a terrain id needs revisiting. }
     Log.Add(Format('terrain 3 (water01) / terrain 4 (water02): %d / %d stages',
       [Terrain3, Terrain4]));
+    Log.Add(Format('csv 5..7 tilesets agree with csv 2..4 maps:  %d violations',
+      [LayerBad]));
+    Inc(Result, LayerBad);
     if Anomalies <> '' then
       Log.Add('  differing:' + Anomalies);
     Log.Add(Format('csv3/4/6/7 all -1 and csv8..14 all 0:   %s',

@@ -428,8 +428,8 @@ not the loader - a constant column is unexercised, not proven unused, and
 | 0 | `[0]` | surface set 0..9, matches `surf000..009.dat` |
 | 1 | `[1]` | sprite set 0..9, **equal to csv 0 on every row** |
 | 2 | `[2]` | map index - **equals the row number** on rows 1..65; row 0 is `-1` |
-| 3,4,6,7 | | `-1` on every row |
-| 5 | `[5]` | `6` on every row but row 0, which is `-1` |
+| 3,4 | | map index for layers 1,2 - `-1` throughout, so unused |
+| 5,6,7 | `[5..7]` | **tileset surface slot per layer**, parallel to csv 2..4. `6, -1, -1` |
 | 8..14 | `[11..17]` | `0` on every row - seven dead columns |
 | 15 | `[18]` | 0..9, **equal to csv 0 on 65 of 66 rows** |
 
@@ -438,10 +438,23 @@ only the first is ever used; and there are exactly 65 map files for rows 1..65,
 with row 0 the "no stage" placeholder - the same flush fit that validated the
 sound table.
 
+`stage.dat` is now **fully decoded**. `Load_Stage_Assets` calls
+`Load_Map(form, rec[2+layer], layer, rec[5+layer])` and `Load_Map` uses that
+fourth argument as the layer's tileset surface, so csv 2..4 say which map each
+layer loads and csv 5..7 which surface holds its tiles. Only layer 0 is used.
+Slot 6 is `bg00N.bmp` in every art set.
+
 **csv 15 is the TERRAIN id.** `Entity_SpawnDebris` `0x461874` reads it as
 `rec[18]` for the current stage and picks the debris impact sound: terrain 3
 plays `water01.wav`, terrain 4 plays `water02.wav`, anything else is silent for
 that debris kind. Ten stages carry 3 and thirteen carry 4.
+
+It does more than pick a sound. `Load_Stage_Assets` passes it to
+`Terrain_Configure` `0x4645B0`, which switches on it 1..9 and sets the
+**solid-tile threshold** that `Entity_TileCollideX/Y` compare each tile index
+against — `$32` for terrains 1/2/4, `$3C` for 3/6/7/8, `$46` for 5, `$50` for 9.
+Terrains 1..4 also build an animated background entity. So the terrain decides
+which tiles are solid.
 
 It differs from csv 0 on exactly one row — 58, art set 7 but terrain 6 — so that
 stage looks like area 7 and sounds like area 6. It is not the music, which was
@@ -451,7 +464,7 @@ carry csv 15 = 4, and 10..14 are never used.
 `--selftest-stages` pins all of the above, including the single row-58
 exception.
 
-Still open: what csv 5 selects, and the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
+Still open: the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
 progress-flag block is no longer a mystery: an opcode-5 event sets
 `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
 inside the block, and csv 2 holds that same number - the two agree 154/154.
