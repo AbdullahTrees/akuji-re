@@ -37,8 +37,125 @@ unit PlayerState;
 
 interface
 
+
 uses
   Classes, SysUtils;
+
+{ ===========================================================================
+  The player controller - Player_Update @ 0x004585A8, the type 1 handler.
+
+  Ghidra could not find this one: it is frameless, so Function Start Search
+  never matched it, and it had to be created explicitly. It is the single
+  largest piece of game behaviour in the binary.
+
+  ## The state machine
+
+  The state lives in the entity's EF_STATE (block A[0]) and drives everything:
+
+      0   on the ground, walking or standing
+      1   dashing
+      2   airborne
+      3   landing recovery
+      4   wall kick
+      5   attacking
+      6   a special move, delegated to 0x004593B0
+      7   a second special move, delegated to 0x00459624
+      8   a third, delegated to 0x00459828
+      9   dying - after 0x79 frames, GameState := 100 (game over)
+     10   dying by falling - spawns debris, then the same
+
+  States 9 and 10 both end at GameState 100, which is the game-over screen
+  recovered earlier from a completely different direction.
+
+  ## The dash is a double tap, and the game says so
+
+  In state 0, pressing a direction stores it and opens a 30-frame window. Press
+  the SAME direction again inside that window, with the ability flag at
+  PlayerState[4] set, and the state becomes 1 with sound 21 - puu01.wav.
+
+  tk001.dat, the game's own tutorial text, reads:
+
+      "Press the arrow key twice to perform a Dash move."
+
+  Three independent sources agreeing - the code, the sound table, and the
+  script the game shows the player - is about as good as evidence gets here.
+
+  Dashing moves at dir shl 6 against dir shl 5 walking, so exactly double.
+
+  ## Every sound matches its name
+
+  Not one of these was chosen to fit; they are what the handler passes, and the
+  names come from the array recovered during the audio work:
+
+      jump                 3   jump.wav
+      land, hard           4   yuka01.wav      (yuka is Japanese for floor)
+      attack               5   shot01.wav
+      charge reaches full  6   power01.wav
+      charged shot         7   shot02.wav
+      land, soft           8   yuka02.wav
+      dash starts         21   puu01.wav
+      death               12   voice02.wav
+
+  The hard/soft landing split is on fall distance: the handler counts frames of
+  downward motion in block A[3], capped at 0x5A, and divides by 3. Under 11 it
+  plays the soft sound; at or over, the hard one plus two type-3 dust entities
+  thrown left and right.
+
+  ## Attacking
+
+  Two attacks share state 5, chosen by how long the button is held:
+
+    tapped   sound 5, one type 2 projectile
+    held     a counter climbs to 60; sound 6 fires at exactly 60, and every 8th
+             frame before that spawns a type 5 spark. Releasing after 60 plays
+             sound 7 and fires a faster projectile.
+
+  Both are limited by a weapon table at 0x0046CD44, indexed by the current
+  weapon in PlayerState +0x11CC, with 16-byte records:
+
+      +0x00  how many of this shot may exist at once
+      +0x04  speed, multiplied by the direction table entry
+      +0x08  the value written to the projectile's block A[0]
+      +0x0C  the projectile's lifetime
+
+  =========================================================================== }
+
+const
+  { All from Player_Update. The player falls slower than loose objects, which
+    use GRAVITY = 8 in Entities.pas - this is a deliberate difference in the
+    original, not a discrepancy. }
+  PLAYER_GRAVITY      = 4;
+  PLAYER_TERMINAL     = $200;   { same cap as everything else }
+
+  PLAYER_WALK_SHIFT   = 5;      { velocity = direction shl this }
+  PLAYER_DASH_SHIFT   = 6;      { twice walking speed }
+  DASH_TAP_WINDOW     = 30;     { frames to press the same direction again }
+  DASH_STATE_FRAMES   = 8;
+
+  CHARGE_FULL_FRAMES  = 60;     { when the charge sound fires }
+  CHARGE_SPARK_EVERY  = 8;      { a spark entity every N frames while charging }
+
+  FALL_FRAMES_CAP     = $5A;    { landing severity counts up to this }
+  FALL_HARD_THRESHOLD = 11;     { cap div 3 compared against this }
+
+  { The play clock the HUD shows. PlayerState +0x11C0 counts frames and rolls
+    into +0x11BC every 60, so +0x11BC is seconds. }
+  TICKS_PER_SECOND    = 60;
+
+  { Player state machine, EF_STATE on the player entity. }
+  PS_GROUND   = 0;
+  PS_DASH     = 1;
+  PS_AIRBORNE = 2;
+  PS_LANDING  = 3;
+  PS_WALLKICK = 4;
+  PS_ATTACK   = 5;
+  PS_SPECIAL1 = 6;
+  PS_SPECIAL2 = 7;
+  PS_SPECIAL3 = 8;
+  PS_DYING    = 9;
+  PS_FELL     = 10;
+
+  WEAPON_RECORD_BYTES = $10;    { the table at 0x0046CD44 }
 
 const
   PLAYER_STATE_SIZE = $11E4;   { 4580 - the whole of save.dat }
