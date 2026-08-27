@@ -21,9 +21,22 @@ Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 **Audio works**: 57 effects and 15 MIDI tracks, both readers cross-checked
 against independent Python implementations (section 13).
 
-**Next:** the entity system - the ~0x104-byte record, the state 60 update path,
-collision, the player controller. The event scripts are now fully decoded,
-grammar and sub-opcodes both (section 8).
+**The entity system is largely decoded** - the record, the dispatcher, the
+collision path, the death and damage rules, and the player controller. See
+section 15.
+
+**Coverage** (`python tools/coverage.py`): 38 of 139 game-layer functions have
+a Pascal counterpart, and 90 of the 139 carry real names. The denominator jumped
+from 91 when 48 hidden handlers were created (section 12) - the work did not
+grow, it stopped being invisible.
+
+**Before committing, run `tools/check.sh`.** One command: build, eight
+self-tests, three reference implementations, and a negative control. It exits
+non-zero on any failure, so use it as `tools/check.sh && git commit`.
+
+**Next:** the three special-move routines `Player_Update` delegates to
+(`0x4593B0`, `0x459624`, `0x459828`), then the remaining ~100 entity-type
+handlers, which are now individually addressable.
 
 ## 2. The three layers — most important section
 
@@ -33,7 +46,7 @@ The binary is not "game code plus Windows APIs". Only the innermost is Akuji's:
 |---|---|---|---|
 | Borland RTL + VCL | `TObject`, `TCanvas`, `TForm`, `TApplication` | ~1597 | **Skip** — FPC RTL + LCL replace it |
 | Third-party DirectX suite | `TDDDD`, `TDDSD`, `TDDIDEX`, `TKbgmPlayer` | ~191 | **Replace wholesale** |
-| **Akuji** | **`TFrm_main`** + units | **~83** | **Write this** |
+| **Akuji** | **`TFrm_main`** + units | **139** | **Write this** |
 
 ### Address-range rule
 
@@ -152,13 +165,13 @@ immediately. That busy loop is the game's frame tick. Per frame:
 |---|---|
 | 10 | `Stage_Init` (`0x46214c`) |
 | 20 | `Title_MainMenu` (`0x462330`) |
-| 30 | `FUN_00462210` |
+| 30 | `FUN_00462210` — entered by event sub-op 0 after a stage load |
 | 40 | `Game_Init_PlayerState` (`0x462f40`) |
 | 60 | `FUN_00454790`, `FUN_00461ba8` — **normal gameplay**; a finished event script returns here |
 | 100 | `GameOver_Update` (`0x461a44`), `FUN_00461ba8` — **game over** |
 | 130 | `FUN_00461ee4` — **pause**; saves prior state to `0x46cbbc` |
 | 140 | `FUN_00454790`, `EventScript_Execute` (`0x455210`), `FUN_00461ba8` — **event-script runner** |
-| 150 | `FUN_00463624` |
+| 150 | `FUN_00463624` — entered by event sub-op 80 (`soulget`) |
 | 999 | **quit** — nils `FOnIdle`, calls `FUN_00442a40` |
 
 Also dispatched: `TitleMenu_Update` when `0x46cf28 <> 0`, `FUN_004568d0` when
@@ -302,173 +315,147 @@ names and 15 MIDI names (`SoundTable.pas`, the form resource), the 81-entry
 entity type table and the 64-step direction table (`Entities.pas`,
 `Directions.pas`).
 
-### The event mini-language - shape solved, meaning open
+### The event mini-language — solved
 
-`ParamA` and `ParamB` are not values, they are little programs.
-`src/EventCommands.pas` parses them; `tools/analyse_events.py` is the second
-reader.
+`ParamA` and `ParamB` in `ev*.dat` are not values, they are little programs.
+**`src/EventCommands.pas` carries the full decode**; this is the shape.
 
-**The separators are tier-1** - inferred from the data first, then confirmed in
-the code:
+    ParamA   <4-digit type>-<letter>[-arg...]   type 14..80; the letter is an
+                                                arity marker: * 0, A 1,
+                                                / J R 2, M 3
+    ParamB   step / step                        steps run in order
+             alt . alt                          exactly ONE alternative runs
+             <guard>-<subop>[-arg...]           guard = a progress-flag index
 
-| where | what it does |
+Both separators are **tier-1**, read out of the binary as one-character
+`AnsiString` literals: `Event_Begin` `0x454EF4` does
+`StringReplace(ParamB, '/', ',')` and `EventScript_AdvanceStep` `0x45509C` does
+`StringReplace(step, '.', ',')`, each followed by `CommaText`.
+
+**The interpreter reads fixed positions, not dash-separated fields.**
+`EventScript_Execute` `0x455210` pulls `Copy(alt, 6, 2)` for the sub-opcode and
+arguments at 9, 14, 19, 24, 29 with per-opcode widths — which is why every
+number in the data is zero-padded. `EventCommands.pas` splits on `-` anyway
+because it is more legible and rejects malformed input; `--selftest-script`
+verifies the two agree over **988 arguments, 0 disagreements**.
+
+**Alternatives are guarded, and scanned backwards** — the *last* one whose
+progress flag is set wins, or none runs. Flag 0 is set in the shipped save and
+no event ever writes it, so a `0000-` alternative is the always-true default,
+written first precisely because the scan reaches it last.
+
+**Opcodes**: 0, 1, 6 and 7 are all just *triggers* for `Event_Begin` — on touch,
+on touch-while-standing-with-a-button (the "walk up and press" case, 249 of
+692), on being shot, and unconditionally from `Entity_Destroy`. 5 sets a
+progress flag. **4 and 9 are still undecoded.**
+
+**Sub-opcodes**: all 15 decoded from the interpreter — 3 dialogue, 4/5 set/clear
+flag, 9 sound, 12 music, 13 save, 15 test-flags, 17 wait, 80 soul-get, 99 nop,
+and others. Table in `EventCommands.pas`. Every argument count matches the arity
+inferred from the data alone before the interpreter was found.
+
+### `stage.dat` — solved
+
+66 rows × 16 fields into a 19-int record (stride `0x4C`); csv 8..15 land at
+`rec[11..18]`. Full detail in `src/Stages.pas`.
+
+| csv | meaning |
 |---|---|
-| `Event_Begin` `0x454EF4` | `StringReplace(ParamB, '/', ',')` then `CommaText` |
-| `EventScript_AdvanceStep` `0x45509C` | `StringReplace(step, '.', ',')` then `CommaText` |
+| 0, 1 | surface set and sprite set — **equal on every row**, so one art set |
+| 2,3,4 | map index per layer; **csv 2 equals the row number**, 3 and 4 unused |
+| 5,6,7 | tileset surface slot per layer; slot 6 is `bg00N.bmp`, 6 and 7 unused |
+| 8..14 | zero on every row; nothing reads them |
+| 15 | **terrain id** |
 
-Both were read out of the binary as one-character `AnsiString` literals
-(refcount `-1`) at `0x455098`/`0x45508C` and `0x45520C`/`0x455200`.
+Terrain does two things: `Terrain_Configure` `0x4645B0` uses it to set the
+**solid-tile threshold** (`$32`/`$3C`/`$46`/`$50` by terrain), and
+`Entity_SpawnDebris` uses it to pick the impact sound (3 → `water01`,
+4 → `water02`). It equals csv 0 on 65 of 66 rows; row 58 looks like area 7 and
+sounds like area 6. It is **not** the music — `AutoLoadMidis` index 4 is
+`itemget`, a jingle, yet 13 rows carry 4.
 
-**The sub-opcodes are decoded too**, from `EventScript_Execute` `0x455210` —
-the state-140 handler, which had to be created by hand in the GUI.
+Row 0 is the "no stage" placeholder: csv 2 and csv 5 are `-1` and there are
+exactly 65 map files for rows 1..65.
 
-    ParamA   <4-digit type>-<letter>[-arg...]    type 14..80, letters * A / M R J
-    ParamB   step / step                         steps run in order
-             alt . alt                           exactly ONE alternative runs
-             <guard>-<subop>[-arg...]            guard = a progress-flag index
+## 8a. The entity system
 
-`ParamB`'s shape is fixed by the opcode, with no exceptions in 692 records:
-opcodes 0/1/4/6/7 carry a program (307), opcode 5 a bare id (154), opcode 9 a
-bare id or `*` (231). Every sub-opcode has a fixed arity except 15, which
-carries its own length. Arities: 0->5, 3->1, 4->1, 5->1, 7->0, 8->0, 9->1,
-10->0, 12->3, 13->0, 15->variable, 16->1, 17->1, 80->0, 99->0.
+`src/Entities.pas` carries the detail; this is the map.
 
-Two sub-opcodes have outside support. **3 is dialogue** - its argument indexes
-the stage's own `tk*.dat`, and all 149 references land in range. **15 is a
-list** - arg[1] is a count and exactly that many items follow, true for all 13.
+### The pool
 
-#### The interpreter reads fixed positions, not dash-separated fields
+289 slots of `0x104` bytes, allocated in three ranges by `Entity_Spawn`
+`0x4610C4`: slot 0 is the player, `1..$20` the actors, `$21..$120` everything
+else. **But `Entity_UpdateAll` walks only 256 of them** and returns — slots
+`$100..$120` can be spawned into and will never update, draw or cull.
+`Entity_Spawn`'s sprite search also stops at 256, so they are vestigial. That is
+in the original and is reproduced, not corrected.
 
-`EventScript_Execute` does not split on `-`. It pulls fixed character ranges:
-`Copy(alt, 6, 2)` for the sub-opcode, then arguments at 9, 14, 19, 24, 29 with
-widths that vary per sub-opcode. **That is why every number in the data is
-zero-padded** — the padding is load-bearing. It also explains `0030-M-0-0128--4`
-without needing `-` to be overloaded.
+### The dispatcher
 
-`EventCommands.pas` splits on `-` anyway, because it is more legible and rejects
-malformed input rather than reading whatever sits at an offset. The two are
-verified equivalent: `--selftest-script` reads every argument both ways and
-compares — **988 arguments, 0 disagreements**.
+`Entity_UpdateAll` `0x4608BC` switches on `EF_TYPE` into **80 handlers, one per
+type** — that is what the whole `0x456000`–`0x45FFFF` block is. Types 0, 18 and
+20 have no arm; 18 and 20 are also two of the three rows whose type-table column
+0 is `-1`, so they are inert markers. The third, type 32, updates while drawing
+nothing.
 
-#### What the sub-opcodes do
+### The type table's 18 columns
 
-| op | args | effect |
-|---|---|---|
-| 0 | 5 | load stage; player/camera tiles from a2..a5, then state 30 |
-| 3 | 1 | **dialogue** — show line a1 of the stage's `tk` file |
-| 4 / 5 | 1 | `Progress[a1] := 1` / `:= 0` |
-| 7 | 0 | disable this event (`Opcode := -1`, x,y := `-0x20`) |
-| 8 | 0 | destroy this event's entity |
-| 9 | 1 | play sound effect a1 through `DDSD1` |
-| 10 | 0 | calls `0x456698` when `0x46CD00` is clear |
-| 12 | 3 | play music: MIDI index + two 1-char flags |
-| 13 | 0 | **save** — writes `PlayerState` over `data\save.dat`, `0x11E4` bytes |
-| 15 | var | test a list of flags, then set one |
-| 16 | 1 | sets `+0x20` on this event's entity |
-| 17 | 1 | **wait** a1 frames (6 chars), then advance |
-| 80 | 0 | plays sound `0x10` and MIDI 11 (`soulget`), then state 150 |
-| 99 | 0 | do nothing; advance |
+`Entity_Spawn` copies the row into the new entity, so every column's
+destination is known (see `Entities.pas`). Two are decoded outright, both
+booleans: **column 5** → `EF_SCREEN_SPACE` (the layer scroll is added only when
+0) and **column 10** → `EF_CULL_OFFSCREEN` (destroy once `IsOffScreen(e, 4)`).
+**Column 7 is never copied at all** and is zero for all 81 types — dead, not
+undiscovered.
 
-Ops 1, 6, 11 and 14 exist in the interpreter but never occur in the shipped
-data. **Every argument count above matches the arity inferred earlier from the
-data alone** — that agreement is what confirms the field split.
+### Coordinates
 
-Sub-op 15 is `<guard>-15-<flag to set>-<count>-<item>...`, where each 6-char
-item is a 1-char expected value plus a 4-char flag index, compared against `'1'`
-(`0x456000`) and `'0'` (`0x45600C`). So `14000` means "flag 4000 must be 1" and
-`04000` means "must be 0" — which is why both forms appear.
+Positions are biased by `0x10000` in **1/32 pixel** units. Converting to pixels
+rounds **toward zero**: subtract the bias, but for negatives subtract
+`bias - 31` first, because an arithmetic shift floors. Invisible in normal play,
+visible only at screen edges — `--selftest-dir` pins it over 8001 values.
 
-#### The leading number is a guard, not a target
+### Collision
 
-`EventScript_AdvanceStep` picks which alternative runs:
+| function | what it does |
+|---|---|
+| `Entity_TileCollideX/Y` `0x457300`/`0x4574DC` | tile index hit moving that far, vs the terrain's solid threshold |
+| `Entity_TileEdgeDistX/Y` `0x457150`/`0x457228` | how far it may actually move, to land flush |
+| `Entity_BoxesOverlap` `0x457F98` | entity-vs-entity AABB |
+| `Entity_IsOffScreen` `0x4580BC` | culling, margin × the entity's own extent |
 
-```
-for i := Count - 1 downto 0 do
-  if Progress[StrToInt(Copy(item[i], 1, 4))] = 1 then
-    begin  step := item[i];  break  end
-  else
-    step := ''
-```
+**Two different inset pairs**: `+0xA0/+0xA4` for tile collision, `+0xA8/+0xAC`
+for entity-vs-entity. The solid-tile threshold is set per terrain by
+`Terrain_Configure` — so terrain decides which tiles are solid.
 
-Alternatives are scanned **backwards**, so the *last* one whose flag is set
-wins, and exactly one runs or none. They are written general-first because flag
-0 is set in the shipped save and no event ever writes it - so `0000-` always
-matches and acts as the default, placed first precisely because the scan reaches
-it last. All 23 distinct guards fall inside the 4501-byte progress block.
+Gravity is **8** per frame for loose objects, **4** for the player, both capped
+at `$200`.
 
-23 of the 24 multi-alternative steps follow that convention. The exception,
-`0008-80.0000-12-007-1-1`, has them reversed so `0008-80` can never run - an
-authoring slip in the original data, reproduced rather than corrected.
+### Death and damage
 
-**This corrected an earlier reading.** `.` was first documented here as
-separating commands that all run. It does not; it separates alternatives of
-which one is chosen. `TEventStep.Alternatives` is named to keep that straight.
+`Entity_UpdateDying` `0x4615A8` is called from **30 sites** — the guard at the
+top of every handler. `Entity_TakeProjectileHits` `0x457AB4` scans slots
+`1..$20` for projectiles; a hit subtracts the projectile's `$24` from the
+target's `$24` (**same slot, two roles** — hit points on a target, damage on a
+projectile), sets `+0x70/+0x74` to 8 as invulnerability, and plays `hit01.wav`
+if the target survives.
 
-`ParamA`'s type is bounded 14..80 against `ENTITY_TYPES`' 81 entries, flush at
-the top; 0..13 are never placed by a stage, which fits them being spawned by
-code. Its **kind letter is an arity marker**, the same role the sub-opcode
-plays: `*` 0 args, `A` 1, `/` `J` `R` 2, `M` 3, with no exceptions in 692
-records. The letter belongs to the placement, not the type - six types (14, 38,
-40, 43, 62, 65) appear both ways, and every one of them mixes only `*` with
-`A`, i.e. the same entity placed with or without a parameter.
+`EF_TOUCH_KIND` (`$32`, column 3) is what touching the player does;
+`EF_CLASS` (`$33`, column 4) is how the entity dies. They sit adjacent at
+`+0xC8`/`+0xCC` and are easy to conflate.
 
-**Gotcha: `-` is both separator and minus.** In `0030-M-0-0128--4` the last
-field is `-4`. A plain split loses the sign, and nothing else in the checks
-notices - arity and range still pass. `--selftest-script` pins the count of
-negative arguments at 22 for exactly this reason.
+### The two 10-int blocks
 
-### `stage.dat` - surveyed, and mostly constant
+`$08..$11` is mostly **parameters**, `$12..$1B` is **runtime counters** — except
+`A[0]` (`EF_STATE`), which is per-type state, not a parameter.
 
-Only four of the sixteen columns vary at all. This describes the shipped data,
-not the loader - a constant column is unexercised, not proven unused, and
-`Load_Stage_Assets` still copies all 16.
+### The player — `Player_Update` `0x4585A8`
 
-| csv | rec | over all 66 rows |
-|---|---|---|
-| 0 | `[0]` | surface set 0..9, matches `surf000..009.dat` |
-| 1 | `[1]` | sprite set 0..9, **equal to csv 0 on every row** |
-| 2 | `[2]` | map index - **equals the row number** on rows 1..65; row 0 is `-1` |
-| 3,4 | | map index for layers 1,2 - `-1` throughout, so unused |
-| 5,6,7 | `[5..7]` | **tileset surface slot per layer**, parallel to csv 2..4. `6, -1, -1` |
-| 8..14 | `[11..17]` | `0` on every row - seven dead columns |
-| 15 | `[18]` | 0..9, **equal to csv 0 on 65 of 66 rows** |
-
-So a stage has one art set, not two; `rec[2..4]` are three layer slots of which
-only the first is ever used; and there are exactly 65 map files for rows 1..65,
-with row 0 the "no stage" placeholder - the same flush fit that validated the
-sound table.
-
-`stage.dat` is now **fully decoded**. `Load_Stage_Assets` calls
-`Load_Map(form, rec[2+layer], layer, rec[5+layer])` and `Load_Map` uses that
-fourth argument as the layer's tileset surface, so csv 2..4 say which map each
-layer loads and csv 5..7 which surface holds its tiles. Only layer 0 is used.
-Slot 6 is `bg00N.bmp` in every art set.
-
-**csv 15 is the TERRAIN id.** `Entity_SpawnDebris` `0x461874` reads it as
-`rec[18]` for the current stage and picks the debris impact sound: terrain 3
-plays `water01.wav`, terrain 4 plays `water02.wav`, anything else is silent for
-that debris kind. Ten stages carry 3 and thirteen carry 4.
-
-It does more than pick a sound. `Load_Stage_Assets` passes it to
-`Terrain_Configure` `0x4645B0`, which switches on it 1..9 and sets the
-**solid-tile threshold** that `Entity_TileCollideX/Y` compare each tile index
-against — `$32` for terrains 1/2/4, `$3C` for 3/6/7/8, `$46` for 5, `$50` for 9.
-Terrains 1..4 also build an animated background entity. So the terrain decides
-which tiles are solid.
-
-It differs from csv 0 on exactly one row — 58, art set 7 but terrain 6 — so that
-stage looks like area 7 and sounds like area 6. It is not the music, which was
-the first guess: `AutoLoadMidis` index 4 is `itemget`, a jingle, yet 13 rows
-carry csv 15 = 4, and 10..14 are never used.
-
-`--selftest-stages` pins all of the above, including the single row-58
-exception.
-
-Still open: the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
-progress-flag block is no longer a mystery: an opcode-5 event sets
-`Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
-inside the block, and csv 2 holds that same number - the two agree 154/154.
-`tk*.dat` is the dialogue those events refer to; its escape codes are identified.
+State machine in `EF_STATE`: ground, dash, airborne, landing, wall kick, attack,
+three special moves, two death states (both ending at GameState 100). The dash
+is a **double tap** inside a 30-frame window — `tk001.dat` says so in as many
+words. Every sound it plays matches its name. Weapons come from a 16-byte-record
+table at `0x46CD44` indexed by `PlayerState +0x11CC`. Full detail in
+`src/PlayerState.pas`.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 
@@ -530,6 +517,29 @@ Ghidra 12.0.4 + GhidraMCP on `127.0.0.1:8081/sse` (`.mcp.json` at `devel/source`
 Binds at session start — **if it drops, restart the session; it will not
 reconnect.** The MCP server can read, rename and retype, but **cannot create or
 disassemble functions** — that is GUI-only.
+
+### Ghidra cannot find Borland's frameless functions
+
+48 of the 78 entity-type update handlers were invisible to auto-analysis, and
+re-running it does not help. Borland omits `push ebp` / `mov ebp,esp` for
+routines that need no stack frame, so those functions begin with things like
+`8b 15` or `53 56 57` — **0 of the 48 started with `55 8B EC`**, which is the
+pattern Function Start Search matches.
+
+They are created by `ghidra_scripts/CreateEntityUpdateHandlers.java`, which
+searches for nothing: the 48 addresses are hard-coded, read out of
+`Entity_UpdateAll`'s switch one per case arm. That restraint is the point — the
+alternative, a heuristic instruction finder, is what mangled the `'.'` literal
+at `0x45520C` into `ADD byte ptr CS:[EAX],AL`.
+
+**Expect more of these.** Any frameless routine reached only by a call Ghidra
+has not followed will be missing the same way. Compile-check new scripts with
+`javac` against the install's jars (`C:\Users\Abdullah\Documents\ghidra_12.0.4_PUBLIC`).
+
+Auto-analysis is safe for names, incidentally: renames are `USER_DEFINED`, which
+analyzers may not overwrite. Verified — all 15 `Entity_*` names survived a full
+run. The risk is bad *disassembly*, so leave **Aggressive Instruction Finder**
+off in a binary this full of string literals.
 
 **Reading self-test results.** `akuji.exe` is a GUI-subsystem binary, so the
 self-tests write `src/selftest.log` and print nothing to stdout. Check the log
@@ -607,6 +617,23 @@ order of strength:
    count. `Title_Init`'s `Font_Define` arguments match constants derived
    separately from the font sheet. The DFM's `AutoLoadMidis` matches the static
    name array entry for entry.
+
+### `tools/check.sh` is the gate
+
+One command runs all of the above plus a negative control, and exits non-zero
+if anything fails:
+
+    tools/check.sh && git commit -m "..."
+
+It exists because two failures this session came from shell chains, not from
+the code: a run piped through `tail` reported the pipe's exit status and made a
+failing `--selftest` look green, and a `;` between the build and the commit let
+non-compiling source through. It also fixes the quoting centrally — the game
+directory has spaces, and unquoted expansion has caused both false passes and
+false failures here.
+
+Mutation-test anything that claims to check something. A test that cannot fail
+is worse than none: `--selftest-events` once passed having loaded zero events.
 
 What this does **not** cover is game logic behaviour - entity movement,
 collision, scoring. Establishing that needs differential tracing against the

@@ -8,12 +8,29 @@ Targets Free Pascal / Lazarus, so it builds for Windows, Linux, macOS and ARM
 from this one tree. That is a property of the language, not a porting layer.
 
     E:\lazarus\lazbuild.exe akuji.lpi
-    akuji.exe --selftest <bmp.qda> [outdir]        # archive reader
-    akuji.exe --selftest-audio <gamedir> [pcmdir]  # all 57 effects
-    akuji.exe --selftest-midi <gamedir>            # all 15 tracks
 
-Each writes `selftest.log`. The `tools/*_ref.py` scripts re-derive the same
-numbers independently and diff against it.
+    ../tools/check.sh          # build + every check, one command
+
+`check.sh` is the commit gate — use it as `tools/check.sh && git commit`. It
+exits non-zero if anything fails, which a hand-written shell chain has twice
+failed to do here.
+
+The individual modes, if you want one:
+
+    akuji.exe --selftest <bmp.qda> [outdir]         # archive reader
+    akuji.exe --selftest-audio <gamedir> [pcmdir]   # all 57 effects
+    akuji.exe --selftest-midi <gamedir>             # all 15 tracks
+    akuji.exe --selftest-dir <gamedir>              # directions, entity record
+    akuji.exe --selftest-events <gamedir>           # ev*.dat / tk*.dat
+    akuji.exe --selftest-script <gamedir>           # the event mini-language
+    akuji.exe --selftest-stages <gamedir>           # stage.dat relationships
+    akuji.exe --selftest-settings <gamedir> <scratch>
+
+`akuji.exe` is a GUI-subsystem binary, so these print nothing to stdout — each
+writes `selftest.log`. Read the log **and** the unpiped exit code; piping the
+run through `tail` gives you the pipe's status, not the program's. The
+`tools/*_ref.py` scripts re-derive the same numbers independently and diff
+against it.
 
 ## Layout
 
@@ -61,6 +78,8 @@ interface, which `GmMain.lfm` documents.
 | `TileMaps.pas` | `map\%.03d.map` | `Load_Map` `0x466340` |
 | `PlayerState.pas` | `data\save.dat` | `Game_StartOrLoad` `0x462F40` |
 | `GameFont.pas` | the 9x9 sheet | `Font_Define` `0x4511A0`, `Game_DrawText` `0x4511EC` |
+| `EventScripts.pas` | `data\ev*.dat`, `data\tk*.dat` | `Load_Event_Scripts` `0x465B50` |
+| `EventCommands.pas` | the mini-language inside those records | `EventScript_Execute` `0x455210` |
 
 ## Audio layer
 
@@ -86,12 +105,26 @@ nothing else. See `../notes/audio_map.md` for the recovered call map.
 |---|---|
 | `GameState.pas` | state constants, `TGameSettings`, input record |
 | `Title.pas` | `Title_MainMenu` `0x462330` — menu, options, gallery |
+| `Entities.pas` | the pool, the 81-entry type table, the record layout |
+| `Directions.pas` | the 64-step angle system, both tables confirmed |
+| `PlayerState.pas` | `save.dat`, and the player controller's state machine |
+
+`Entities.pas` and `PlayerState.pas` carry long header comments recording what
+each field means and what the evidence for it was. That is deliberate: the
+entity record has 65 integer slots and several are reused for different things
+by role — `$24` is hit points on a target and damage on a projectile, `$1C` is
+a timer with three separate uses. Read the headers before naming anything new.
 
 ## Not yet written
 
-Entity system, player controller, collision, scrolling, the state 60/100/140
-update path, and event-script command semantics. That is the bulk of the
-remaining work — see `../CLAUDE.md` sections 2 and 6.
+The entity behaviours themselves — roughly 100 per-type update handlers, plus
+scrolling and the three special-move routines `Player_Update` delegates to. The
+*structure* around them is decoded: the dispatcher, the record, collision,
+death, damage, and the player's own state machine. See `../CLAUDE.md` section
+8a.
+
+Event opcodes 4 and 9 also remain, and the entity type table has 18 columns of
+which only two are decoded outright (the destination of all 18 is known).
 
 ## Rules
 

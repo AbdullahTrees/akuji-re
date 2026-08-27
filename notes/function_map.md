@@ -1,5 +1,26 @@
 # Function Map — Akuji the Demon
 
+> ## Read this first: `game_functions.txt` is the authoritative list
+>
+> **`notes/game_functions.txt` is generated from the Ghidra database and is
+> current.** It holds all 139 game-layer functions with their real names, and
+> `tools/coverage.py` reads it. This file is older, hand-written, and only
+> partly true.
+>
+> Three names in here have since been **disproved** by reading the code:
+>
+> | in this file | actually |
+> |---|---|
+> | `Load_Tile_Data` `0x466340` | `Load_Map` — reads `map\*.map`, not `tk*.dat` |
+> | `SaveGame_Select_Slot` `0x45509C` | `EventScript_AdvanceStep` — nothing to do with saves |
+> | `Configure_Stage_Params` `0x4645B0` | `Terrain_Configure` — takes the terrain id |
+>
+> All three came from the same early pass that guessed names from the Win32 API
+> a function calls. Treat every remaining name here as a hypothesis. The
+> narrative sections below are still useful; the name-to-address claims are not,
+> unless `game_functions.txt` agrees.
+
+
 ## Legend
 
 | Prefix | Meaning |
