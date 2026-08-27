@@ -182,6 +182,23 @@ const
   EF_CHILD_A     = $13;   { +0x4C, destroyed with the parent when EF_CLASS = 5 }
   EF_CHILD_B     = $14;   { +0x50 }
 
+  { --- Fields confirmed by Entity_SpawnDebris @ 0x00461874 ------------------
+
+    That function spawns five particles and sets each one's fields directly, so
+    it names them by use rather than by inference. It writes +0x80 and +0x84 as
+    the velocity pair, +0x78/+0x7C as the position pair, +0x1C and +0x20 as
+    per-particle variation - all of which already carried those names here,
+    from other evidence. Nothing below is new; it is corroboration, recorded
+    because agreement from an unrelated function is what the naming rules ask
+    for.
+
+    Its X velocity is DIR_COS[Random(64)] div 2, times Random(3)+1, which is
+    also what ties Directions.pas to the entity system for the first time. Y is
+    (i + 4) * -8 for particle i, so the five fan upward at fixed speeds - screen
+    Y grows downward, so negative is up. }
+  EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
+  EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
+
   { Two things fall out of where these land.
 
     EF_TILE_OFS_Y at int 64 is exactly the final slot of the 65-int record - an

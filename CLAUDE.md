@@ -438,16 +438,20 @@ only the first is ever used; and there are exactly 65 map files for rows 1..65,
 with row 0 the "no stage" placeholder - the same flush fit that validated the
 sound table.
 
-**csv 15 is a real separate field, and it is not the music.** It differs from
-csv 0 on exactly one row - 58, art set 7, csv 15 = 6 - and value 7 appears in
-csv 0 only there. The obvious guess is a MIDI index, and `AutoLoadMidis` rules
-it out: index 4 is `itemget`, a jingle, yet 13 rows carry csv 15 = 4, and
-10..14 are never used. Recorded so the guess is not repeated.
+**csv 15 is the TERRAIN id.** `Entity_SpawnDebris` `0x461874` reads it as
+`rec[18]` for the current stage and picks the debris impact sound: terrain 3
+plays `water01.wav`, terrain 4 plays `water02.wav`, anything else is silent for
+that debris kind. Ten stages carry 3 and thirteen carry 4.
+
+It differs from csv 0 on exactly one row — 58, art set 7 but terrain 6 — so that
+stage looks like area 7 and sounds like area 6. It is not the music, which was
+the first guess: `AutoLoadMidis` index 4 is `itemget`, a jingle, yet 13 rows
+carry csv 15 = 4, and 10..14 are never used.
 
 `--selftest-stages` pins all of the above, including the single row-58
 exception.
 
-Still open: what csv 5 and csv 15 select, and the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
+Still open: what csv 5 selects, and the entity type table's 18 columns (`+1C`, `+40`, `+44` are zero for all 81 types). The
 progress-flag block is no longer a mystery: an opcode-5 event sets
 `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per flag, all 154 resolve
 inside the block, and csv 2 holds that same number - the two agree 154/154.

@@ -39,7 +39,8 @@
        6     [6]    -1 on every row
        7     [7]    -1 on every row
        8..14 [11..17]  0 on every row - seven dead columns
-      15     [18]   0..9, and equal to csv 0 on 65 of 66 rows
+      15     [18]   TERRAIN id - picks the debris impact sound; equals
+                    csv 0 on 65 of 66 rows
 
   Three findings worth keeping:
 
@@ -51,15 +52,26 @@
   placeholder for "no stage", which is why STAGE_FIELDS covers 66 rows for 65
   levels. This is the same kind of flush fit that validated the sound table.
 
-  **csv 15 shadows csv 0 but is not the same field.** They agree on 65 rows and
-  differ on exactly one - row 58, where the art set is 7 and csv 15 is 6. Value
-  7 appears in csv 0 only on that row and never in csv 15. So csv 15 is a real,
-  separate field that usually tracks the art set.
+  **csv 15 selects the TERRAIN IMPACT SOUND.** Entity_SpawnDebris @ 0x00461874
+  reads it as rec[18] off this table, indexed by the current stage, and picks
+  which sound the debris burst plays:
 
-  It is NOT the music. The obvious guess is a MIDI index, and the form
-  resource's AutoLoadMidis settles it against: index 4 there is 'itemget', a
-  short jingle, and 13 rows carry csv 15 = 4. Indices 10..14 are never used
-  either. Recorded here so the guess is not made again.
+      rec[18] = 3  ->  sound 31, water01.wav
+      rec[18] = 4  ->  sound 40, water02.wav
+      anything else -> silent for that debris kind
+
+  Ten stages carry 3 and thirteen carry 4, and both groups use the matching art
+  set. So it is a terrain or area id that happens to track the art set, not a
+  copy of it.
+
+  That also explains the one row where the two differ - row 58, art set 7 but
+  terrain 6. It looks like area 7 and sounds like area 6. Value 7 appears in
+  csv 0 only on that row and never in csv 15 at all.
+
+  It is NOT the music, which was the obvious first guess. The form resource's
+  AutoLoadMidis settles that: index 4 there is 'itemget', a short jingle, yet 13
+  rows carry csv 15 = 4, and indices 10..14 are never used. Recorded so the
+  guess is not made again.
 
   Only rec[2] has its meaning from the code (Load_Stage_Assets builds the map
   filename from it). rec[0] and rec[1] are from the code too. Everything else
@@ -93,7 +105,7 @@ type
     function GetSurfaceSet(Index: Integer): Integer;
     function GetSpriteSet(Index: Integer): Integer;
     function GetLayer(StageIndex, Layer: Integer): Integer;
-    function GetThemeId(Index: Integer): Integer;
+    function GetTerrainId(Index: Integer): Integer;
   public
     function Load(const ADataDir: string): Integer;
 
@@ -105,9 +117,9 @@ type
     property SpriteSet[Index: Integer]: Integer read GetSpriteSet;
     property Layer[StageIndex, LayerIndex: Integer]: Integer read GetLayer;
 
-    { csv 15 / rec[18]. Named for its shape, not its meaning - see the header.
-      It equals SurfaceSet everywhere except stage 58. }
-    property ThemeId[Index: Integer]: Integer read GetThemeId;
+    { csv 15 / rec[18]: the terrain id Entity_SpawnDebris reads to choose the
+      impact sound. Equals SurfaceSet everywhere except stage 58. }
+    property TerrainId[Index: Integer]: Integer read GetTerrainId;
   end;
 
 implementation
@@ -147,7 +159,7 @@ begin
   Result := GetRecord(StageIndex).Raw[2 + Layer];
 end;
 
-function TStageTable.GetThemeId(Index: Integer): Integer;
+function TStageTable.GetTerrainId(Index: Integer): Integer;
 begin
   Result := GetRecord(Index).Raw[18];
 end;

@@ -73,7 +73,7 @@
 004615a8  Entity_UpdateDying
 00461738  Entity_SteerToPlayer
 004617fc  FUN_004617fc
-00461874  FUN_00461874
+00461874  Entity_SpawnDebris
 00461a0c  FUN_00461a0c
 00461a44  GameOver_Update
 00461ba8  HUD_Draw

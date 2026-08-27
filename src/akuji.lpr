@@ -1077,7 +1077,7 @@ var
   T: TStageTable;
   R: TStageRecord;
   I, C, N: Integer;
-  SurfEqSpr, MapEqRow, ThemeEqSurf, MapsPresent: Integer;
+  SurfEqSpr, MapEqRow, ThemeEqSurf, MapsPresent, Terrain3, Terrain4: Integer;
   DeadOK: Boolean;
   Anomalies: string;
 begin
@@ -1099,6 +1099,7 @@ begin
     end;
 
     SurfEqSpr := 0; MapEqRow := 0; ThemeEqSurf := 0; MapsPresent := 0;
+    Terrain3 := 0; Terrain4 := 0;
     DeadOK := True;
     Anomalies := '';
 
@@ -1106,6 +1107,8 @@ begin
     begin
       R := T[I];
       if R.Raw[0] = R.Raw[1] then Inc(SurfEqSpr);
+      if R.Raw[18] = 3 then Inc(Terrain3);
+      if R.Raw[18] = 4 then Inc(Terrain4);
       if R.Raw[18] = R.Raw[0] then Inc(ThemeEqSurf)
       else
         Anomalies := Anomalies + Format(' row %d (art %d, theme %d)',
@@ -1140,6 +1143,10 @@ begin
     Log.Add(Format('csv2 = row number (row 0 = no map):     %d of %d', [MapEqRow, N]));
     Log.Add(Format('map file present for rows 1..65:        %d of %d', [MapsPresent, N - 1]));
     Log.Add(Format('csv15 = csv0:                           %d of %d', [ThemeEqSurf, N]));
+    { The two terrain values Entity_SpawnDebris actually branches on. If these
+      counts move, the reading of csv 15 as a terrain id needs revisiting. }
+    Log.Add(Format('terrain 3 (water01) / terrain 4 (water02): %d / %d stages',
+      [Terrain3, Terrain4]));
     if Anomalies <> '' then
       Log.Add('  differing:' + Anomalies);
     Log.Add(Format('csv3/4/6/7 all -1 and csv8..14 all 0:   %s',
@@ -1165,6 +1172,12 @@ begin
     { 65 of 66, the exception being row 58. Pinned exactly: if this ever became
       66 the field would be redundant, and if it dropped further the reading of
       it as a near-shadow of the art set would be wrong. }
+    if (Terrain3 <> 10) or (Terrain4 <> 13) then
+    begin
+      Log.Add(Format('FAILED: expected 10 stages of terrain 3 and 13 of terrain 4,'
+        + ' got %d and %d', [Terrain3, Terrain4]));
+      Inc(Result);
+    end;
     if ThemeEqSurf <> 65 then
     begin
       Log.Add(Format('FAILED: expected csv15 to equal csv0 on exactly 65 rows, got %d',
