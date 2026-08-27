@@ -106,7 +106,7 @@ begin
 
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
-  GameStateValue := GS_STAGE_INIT;
+  GameStateValue := GS_TITLE_INIT;
 
   { The original: Application.FOnIdle := TFrm_main_AppIdle (+0xD8/+0xDC). }
   Application.OnIdle := AppIdle;
@@ -158,20 +158,21 @@ end;
 procedure TFrm_main.DispatchState;
 begin
   case GameStateValue of
-    GS_STAGE_INIT:
-      { Placeholder: the original's Stage_Init (0x0046214C) loads a stage.
-        Until that is translated, prove the asset pipeline by drawing the real
-        title screen out of bmp.qda. }
+    GS_TITLE_INIT:
+      { Placeholder. The original's Title_Init (0x0046214C) resets state, loads
+        asset set 0, starts the music and sets all 57 sound channel volumes,
+        then moves to GS_TITLE_MENU. Until that is translated, prove the asset
+        pipeline by drawing the real title screen out of bmp.qda. }
       if Assigned(FTitle) then
         DDDD1.Canvas.Draw(0, 0, FTitle);
-    GS_STATE_20:    ;  { TODO FUN_00462330 }
+    GS_TITLE_MENU:  ;  { TODO Title_MainMenu       0x00462330 }
     GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
     GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
     GS_PLAY,
     GS_PLAY_ALT,
     GS_STATE_140:   ;  { TODO gameplay + HUD_Draw   0x00461BA8 }
     GS_PAUSE:       ;  { TODO PauseMenu_Update      0x00461EE4 }
-    GS_STATE_150:   ;  { TODO FUN_00463624 }
+    GS_OPENING:     ;  { TODO Opening_Update       0x00463154 }
     GS_QUIT:
       begin
         { Original nils FOnIdle then terminates - same shape. }

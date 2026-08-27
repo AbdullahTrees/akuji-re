@@ -17,20 +17,20 @@ interface
 const
   { p_GameState @ 0x0046D06C. The frame loop dispatches on this; values step
     by 10. Handlers are named where identified. }
-  GS_STAGE_INIT  = 10;    // Stage_Init            0x0046214C
-  GS_STATE_20    = 20;    // FUN_00462330          unidentified
+  GS_TITLE_INIT  = 10;    // Title_Init            0x0046214C  boot into title
+  GS_TITLE_MENU  = 20;    // Title_MainMenu        0x00462330  NEW GAME/CONTINUE/OPTION/EXIT
   GS_STAGE_BEGIN = 30;    // Stage_Begin           0x00462210 -> sets GS_PLAY
   GS_PLAYER_INIT = 40;    // Game_Init_PlayerState 0x00462F40
   GS_PLAY        = 60;    // FUN_00454790 + HUD_Draw
   GS_PLAY_ALT    = 100;   // FUN_00461A44 + HUD_Draw
   GS_PAUSE       = 130;   // PauseMenu_Update      0x00461EE4
   GS_STATE_140   = 140;   // FUN_00454790, FUN_00455210, HUD_Draw
-  GS_STATE_150   = 150;   // FUN_00463624          unidentified
+  GS_OPENING     = 150;   // Opening_Update        0x00463154  intro cutscene
   GS_QUIT        = 999;   // clears OnIdle, terminates
 
   { PauseMenu_Update selection, p_PauseMenuIndex @ 0x0046CF88 }
   PAUSE_CONTINUE = 0;     // restores p_SavedGameState
-  PAUSE_RESTART  = 1;     // -> GS_STAGE_INIT
+  PAUSE_RESTART  = 1;     // -> GS_TITLE_INIT
   PAUSE_QUIT     = 2;     // -> GS_QUIT
 
   SCREEN_W = 320;
@@ -60,7 +60,7 @@ type
 
 var
   { Globals matching the original's. Names follow the p_* labels now in Ghidra. }
-  GameStateValue: Integer = GS_STAGE_INIT;  // p_GameState       0x0046D06C
+  GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       0x0046D06C
   SavedGameState: Integer = 0;              // p_SavedGameState  0x0046CBBC
   PauseMenuIndex: Integer = 0;              // p_PauseMenuIndex  0x0046CF88
   Input: TInputState;                       // p_InputState      0x0046CC58

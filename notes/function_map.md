@@ -347,3 +347,45 @@ Globals: `p_PauseMenuIndex` `0x46cf88` (0..2), `p_SavedGameState` `0x46cbbc`.
 More `p_PlayerState` fields, from `Stage_Begin`:
 `+0x11A4`/`+0x11A8` spawn tile X/Y, `+0x11AC`/`+0x11B0` scroll X/Y, `+0x11D8`
 passed to the spawned entity.
+
+## Name audit of the Load_* / Stage_* pass (2026-08-27)
+
+Every remaining name from the original unverified pass was checked against the
+filename its function actually builds. Method: disassemble the entry, resolve
+pushed pointers as Delphi string literals (length at -4).
+
+| Address | Old name | Verdict |
+|---|---|---|
+| `465e9c` | `Load_Surface_Textures` | ✅ builds `data\surf%.03d.dat` |
+| `4660b8` | `Load_Sprite_Sheets` | ✅ builds `data\spr%.03d.dat` |
+| `465b50` | `Load_Event_Scripts` | ✅ builds `data\ev%.03d.dat` |
+| `466340` | ~~`Load_Tile_Data`~~ | ❌ → **`Load_Map`**, builds `map\%.03d.map` |
+| `46214c` | ~~`Stage_Init`~~ | ❌ → **`Title_Init`**; resets, loads asset set 0, starts music, sets 57 channel volumes, → state 20 |
+| `462330` | `FUN_00462330` | → **`Title_MainMenu`**; owns "NEW GAME"/"CONTINUE"/" OPTION "/"  EXIT  " |
+| `463154` | ~~`Game_CheckSaveExists`~~ | ❌ → **`Opening_Update`**, the intro cutscene |
+
+**Caution on the method:** scanning a fixed window past the entry overruns into
+neighbouring functions and picks up their literals. That produced a false claim
+that `Title_Init` owned the menu strings; the string xref showed they belong to
+`Title_MainMenu`. Confirm ownership with an xref, not proximity.
+
+### `Opening_Update` @ `0x463154` — the intro cutscene
+
+10 slides. Per slide: load `op%.3d.bmp` from `bmp.qda` (or `bmp\op%.3d.bmp`
+when `p_UseArchive` is 0), draw at (0x28, 8) sized 240x180, then two lines of
+`Game_DrawTextOutlined` at y=200 and y=216. Slide duration is
+`p_OpeningDurations[slide] * 60` frames. Music cues at slides 1, 8 and 9.
+`Input_ConfirmPressed` skips.
+
+Globals: `p_OpeningSlide` `0x46d298`, `p_OpeningTimer` `0x46d174`,
+`p_OpeningImageIds` `0x46ce68`, `p_TextTable` `0x46cce4` (subtitle strings,
+indexed via `0x46ce88`).
+
+### Author
+
+`"CREATED BY E.HASHIMOTO"` at `0x462dc4`, drawn by `Title_MainMenu`.
+
+### Settings field confirmed
+
+`p_Settings+0x24` (default 10) is **volume** — `Title_Init` applies it to all 57
+sound channels as `(10 - value) * -0x1C2`.
