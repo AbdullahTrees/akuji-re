@@ -291,8 +291,15 @@ const
     Entity_Spawn zeroes ints $08..$11 and $12..$1B, ten each. Reading two
     handlers shows what the split is:
 
-      Block A ($08..$11)  PARAMETERS, set once when the entity is placed
+      Block A ($08..$11)  mostly PARAMETERS, set when the entity is placed
       Block B ($12..$1B)  RUNTIME COUNTERS, ticked by the handler
+
+    With one correction, recorded because the first reading was too tidy:
+    A[0] itself is NOT a parameter. Three separate places use it as per-type
+    runtime state - EntityUpdate_Type36_FallingItem as a "has landed" flag,
+    Entity_SpawnDebris writing kind+1 into it on each particle, and
+    Entity_UpdateAll testing it against 3 for type $44. So the clean split
+    holds from A[1] upward, and A[0] is a general per-type state slot.
 
     EntityUpdate_Type32_Emitter @ 0x0045A5D4 is the clearest case. It is an
     invisible spawner - type 32 is one of the three rows with no sprite - and it
@@ -308,6 +315,35 @@ const
     from the other handlers: block A is the stage author's configuration and
     block B is the handler's scratch. }
   EF_BLOCK_LEN = 10;
+  EF_STATE     = $08;   { block A[0]: per-type state, not a parameter }
+
+  { --- Gravity, from EntityUpdate_Type36_FallingItem @ 0x0045A7BC -----------
+
+    Type 36 is what Entity_MaybeDropItem drops, and its handler is the whole
+    falling-and-landing pattern in one place:
+
+        if Raw[EF_STATE] = 0 then           // still in the air
+        begin
+          Inc(Raw[EF_VEL_Y], GRAVITY);
+          if Raw[EF_VEL_Y] > TERMINAL_VELOCITY then
+            Raw[EF_VEL_Y] := TERMINAL_VELOCITY;
+        end;
+        Tile := Entity_TileCollideY(e, 0, Raw[EF_VEL_Y], 0, False);
+        if (Tile >= SolidTileMin) and (Raw[EF_VEL_Y] > 0) then
+        begin
+          Raw[EF_VEL_Y] := Entity_TileEdgeDistY(e, Raw[EF_VEL_Y]);
+          Raw[EF_STATE] := 1;               // landed
+        end;
+        Inc(Raw[EF_POS_Y], Raw[EF_VEL_Y]);
+
+    That is worth having for its own sake, but it also settles two earlier
+    names. Entity_TileCollideY is used exactly as "what tile would I hit moving
+    this far", compared against the terrain's solid threshold; and
+    Entity_TileEdgeDistY is used exactly as "how far may I actually move", to
+    land flush on the tile boundary instead of overlapping it. Both were named
+    from their internals alone, before any caller had been read. }
+  GRAVITY           = 8;      { added to EF_VEL_Y each frame, in 1/32 pixel }
+  TERMINAL_VELOCITY = $200;   { 512, i.e. 16 pixels per frame }
 
   { --- Touching the player, from Entity_PlayerTouch @ 0x00457880 ------------
 

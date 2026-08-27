@@ -35,7 +35,7 @@
 00459e7c  FUN_00459e7c
 0045a5d4  EntityUpdate_Type32_Emitter
 0045a698  EntityUpdate_Type33_Explosion
-0045a7bc  FUN_0045a7bc
+0045a7bc  EntityUpdate_Type36_FallingItem
 0045a848  FUN_0045a848
 0045aa60  FUN_0045aa60
 0045aa78  FUN_0045aa78
