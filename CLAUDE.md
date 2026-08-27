@@ -200,7 +200,8 @@ that was wrong).
 | `spr000..009.dat` | CSV | `0,	8,8,	1,1,	0,0` — sprite metadata |
 | `surf000..009.dat` | CSV | `title.bmp,		320,	240` — **name, width, height**, referencing entries in `bmp.qda` |
 | `ev000..065.dat` | CSV | `9,0000,1001,0019,0008,0014-*,1001` — event scripts |
-| `tk000..065.dat` | ASCII | tile maps, one char per tile (`tk000.dat` is `aaaaaaaa`) |
+| `tk000..065.dat` | text | **game dialogue**, with escape codes `
+` newline, `\e` end, `\k` wait-for-key, `\w`. Not tile data |
 | `system.dat` | binary | the 56-byte settings struct, section 7 |
 | `save.dat` | binary | 4580 bytes — **not yet decoded** |
 | `bmp.qda` | QDA0 archive | 9.1 MB, 44 uncompressed 24-bit BMPs |
@@ -233,6 +234,36 @@ reference extractor `tools/extract_qda.py` across all 44 entries
 **Names are case-inconsistent** — the archive holds `title.BMP` and `sys.BMP`
 while the `.dat` metadata says `title.bmp`. Lookups must be case-insensitive;
 matching exactly silently fails on roughly a third of the archive.
+
+### `map/*.map` — level tilemaps, solved
+
+Loaded by `Load_Map` `0x466340` as `map\%.03d.map`. 65 files, **all validate**:
+
+```
+int32  MapWidth, MapHeight      tiles
+int32  TileWidth, TileHeight    pixels
+int32  SheetCols, SheetRows     tileset layout
+uint16 [MapWidth * MapHeight]   tile indices, row-major
+```
+
+`001.map` is 30x24 tiles of 32x32 = a 960x768 level from a 10x10 tileset.
+Size is always exactly `24 + MapWidth*MapHeight*2`.
+
+Globals: `p_TileMaps` `0x46cdec` (per-layer tilemap objects), `p_LayerInfo`
+`0x46d144` (0x20-byte records: `+0x10` tileW, `+0x14` tileH, `+0x18` mapW,
+`+0x1C` mapH), `p_Surfaces` `0x46d344` (32 slots), `p_UseArchive` `0x46ccb4`
+(set to 1 by `DDDD1Init`, selects `bmp.qda` over loose files).
+
+### CAUTION: `Load_Tile_Data` was a bad name
+
+`0x466340` was listed as `Load_Tile_Data` reading `data	k\`. Both halves were
+wrong: it reads `map\*.map`, and `tk*.dat` is dialogue text. The name came from
+the original unverified pass and was believed on sight during this session,
+costing a wrong hypothesis and a failed validation run.
+
+The `Load_*` names in section 8's table are from that same pass. **Verify the
+filename each one actually builds before trusting it** — the string literals sit
+right next to the `%.03d` format in the disassembly.
 
 ### Remaining asset work
 

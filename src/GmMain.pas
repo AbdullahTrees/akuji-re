@@ -42,6 +42,7 @@ type
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
     procedure DispatchState;
+    procedure FormPaint(Sender: TObject);
   end;
 
 var
@@ -94,6 +95,14 @@ begin
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
     FTitle := FArchive.LoadBitmapByName('title.bmp');   { stored as title.BMP }
   end;
+
+  { Present() blits straight to the form canvas for speed, which is fine while
+    the frame loop is running but leaves stale pixels wherever Windows repaints
+    the window itself (resize, occlusion, restore). Handling OnPaint from the
+    same offscreen surface covers those. Without this a partial repaint shows
+    as a lighter rectangle in whatever region Windows invalidated. }
+  OnPaint := FormPaint;
+  DoubleBuffered := True;
 
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
@@ -170,6 +179,11 @@ begin
         Application.Terminate;
       end;
   end;
+end;
+
+procedure TFrm_main.FormPaint(Sender: TObject);
+begin
+  DDDD1.Present;
 end;
 
 { FormKeyDown @ 0x004665C8. The original's first test is VK_ESCAPE. }
