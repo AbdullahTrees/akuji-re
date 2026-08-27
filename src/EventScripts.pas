@@ -118,9 +118,34 @@
   what triggers them: 0 on touch, 1 on touch plus a button, 6 on being shot,
   7 from Entity_Destroy.
 
-  Opcode 9 is still not decoded and is deliberately left unnamed. It is the
-  second most common - 231 records - and its ParamB is a bare id or '*', the
-  same shape opcode 5 has, so whatever reads it reads a single number. }
+      9   A COLLECTIBLE. Nothing branches on the opcode itself; what reads
+          this record's ParamB is the TOUCH HANDLER of the entity it places.
+          Entity_PlayerTouch switches on EF_TOUCH_KIND, and kinds 2 and 5 both
+          do the same thing opcode 5 does - Progress[Copy(ParamB,1,4)] := 1 -
+          on top of their own effect:
+
+            kind 2  a pickup. Entity int 6 (which ParamA's 'A' letter sets)
+                    picks the value: 0 adds 1 to the counter, 1 adds 10. When
+                    the counter reaches the target for the current
+                    TargetIndex, TargetIndex and MaxLives both go up and Lives
+                    is refilled - this is the Mana Stone that tk001.dat talks
+                    about, read out of the code rather than inferred from the
+                    save.
+            kind 5  a full heal: Lives := MaxLives, sound 0x14.
+
+          The partition is exact and has no exceptions. All 231 opcode-9
+          records split 127 with an id and 104 with '*', and
+
+            * every one of the 127 places a type whose touch kind is 2 or 5
+              (122 and 5 respectively)
+            * every one of the 104 places a type whose touch kind is 0, 1, 3,
+              6 or 7 - never 2 or 5
+
+          which is what it has to look like: StrToInt('*') would raise. And as
+          with opcode 5, the id equals the record's own csv 2 in all 127 cases,
+          so collecting the thing is what stops it coming back.
+
+  Every opcode is now accounted for. }
 
 unit EventScripts;
 

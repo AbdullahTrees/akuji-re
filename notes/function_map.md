@@ -140,7 +140,10 @@ which is why every number in the data is zero-padded.
 | `0x456E0C` | `Entity_SolidCollideY` | read | the mirror, plus the **riding** path: landing within 8 px of a solid's top sets `0x484FB4` and the solid's `EF_RIDDEN`, and publishes the platform's X so the player can be carried |
 | `0x451354` | `Rect_Overlap` | read | four ints `(L,T,R,B)` per box with a per-axis shrink, written as separation-versus-width |
 | `0x4580BC` | `Entity_IsOffScreen` | corroborated | compares against `0x140 × 0xF0` — the DFM's 320×240 |
-| `0x457880` | `Entity_PlayerTouch` | read | builds the player's box and this entity's; starts event opcodes 0 and 1 |
+| `0x457880` | `Entity_PlayerTouch` | read | builds the player's box and this entity's; starts event opcodes 0 and 1 — opcode 1 needs the player standing (`EF_VEL_Y = 0`) and **Up** pressed on the edge. Then switches on `EF_TOUCH_KIND` into seven handlers |
+| `0x458274` | `Entity_TouchPickup` | read | touch kind 2, the **Mana Stone**: counter += 1 or 10 by entity int 6; on reaching the target, `TargetIndex` and `MaxLives` rise and `Lives` refills. Sets `Progress[Copy(ParamB,1,4)]` |
+| `0x458490` | `Entity_TouchHeal` | read | touch kind 5: `Lives := MaxLives`, sound `0x14`, same flag write |
+| `0x4576B4` | `Entity_CheckKillTiles` | read | called by every vertical move. Scans the entity's whole tile box for the terrain's **kill tile** and sets `EF_STATE` to 10, the fall-death state. The `-0x80` on both tile coordinates is the two `0x10000` position biases removed: `0x800 + 0x800` pixels over a 32-px tile |
 | `0x457AB4` | `Entity_TakeProjectileHits` | corroborated | scans slots `1..$20`; plays sound 17 = `hit01.wav` when the target survives. **This is what proved `+0x90` is hit points, not hit-stun** |
 
 **Two different inset pairs**: `+0xA0/+0xA4` for tile collision,

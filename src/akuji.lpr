@@ -660,6 +660,7 @@ var
   S: TEventScript;
   I, J, Total, Lines, Empty, Flags, Idx: Integer;
   SelfBlock, AlwaysOK, Always, BadCond, MaxTileX, MaxTileY: Integer;
+  Pickup, PickupNoId, PlainWithId, TouchKind, TypeId: Integer;
   Ev: TEventRecord;
   ByOpcode: array[0..15] of Integer;
   ByDifficulty: array[0..2] of Integer;
@@ -674,6 +675,7 @@ begin
     ByOpcode[I] := 0;
   Total := 0; Lines := 0; Empty := 0; Flags := 0;
   SelfBlock := 0; AlwaysOK := 0; Always := 0; BadCond := 0;
+  Pickup := 0; PickupNoId := 0; PlainWithId := 0;
   MaxTileX := 0; MaxTileY := 0;
   for I := 0 to 2 do ByDifficulty[I] := 0;
 
@@ -735,6 +737,26 @@ begin
         if Ev.NeedsFlag = 5  then Inc(ByDifficulty[1]);
         if Ev.NeedsFlag = 6  then Inc(ByDifficulty[2]);
 
+        { Opcode 9's ParamB is read by the touch handler of the entity it
+          places, not by anything that looks at the opcode. Kinds 2 and 5 parse
+          it as a progress flag; every other kind never touches it - and would
+          raise on '*' if it did. So the partition has to be exact. }
+        if Ev.Opcode = 9 then
+        begin
+          TypeId := StrToIntDef(Copy(Ev.ParamA, 1, 4), -1);
+          TouchKind := -1;
+          if (TypeId >= 0) and (TypeId < ENTITY_TYPE_COUNT) then
+            TouchKind := ENTITY_TYPES[TypeId].Raw[3];
+          if (TouchKind = 2) or (TouchKind = 5) then
+          begin
+            Inc(Pickup);
+            if ClassifyParamB(Ev.ParamB) <> pbId then
+              Inc(PickupNoId);
+          end
+          else if ClassifyParamB(Ev.ParamB) = pbId then
+            Inc(PlainWithId);
+        end;
+
         if Ev.TileX > MaxTileX then MaxTileX := Ev.TileX;
         if Ev.TileY > MaxTileY then MaxTileY := Ev.TileY;
       end;
@@ -759,6 +781,9 @@ begin
   Log.Add(Format('records gated on difficulty 0 / 1 / 2:  %d / %d / %d',
     [ByDifficulty[0], ByDifficulty[1], ByDifficulty[2]]));
   Log.Add(Format('largest event tile: %d, %d', [MaxTileX, MaxTileY]));
+  Log.Add(Format('opcode 9 placing a touch-kind 2 or 5 type: %d, of which %d'
+    + ' carry no flag id', [Pickup, PickupNoId]));
+  Log.Add(Format('opcode 9 carrying a flag id for any other kind: %d', [PlainWithId]));
   Log.Add(Format('progress block: %d bytes from offset %d',
     [PROGRESS_LENGTH, PROGRESS_START]));
   Inc(Result, BadCond);
@@ -793,6 +818,15 @@ begin
   begin
     Log.Add(Format('FAILED: expected 9 opcode-4 events all of the documented'
       + ' shape, got %d of which %d match', [Always, AlwaysOK]));
+    Inc(Result);
+  end;
+  { A collectible with no flag would raise on StrToInt('*'); a non-collectible
+    with one would mean something else reads it. Neither happens. }
+  if (Pickup <> 127) or (PickupNoId <> 0) or (PlainWithId <> 0) then
+  begin
+    Log.Add(Format('FAILED: expected 127 opcode-9 collectibles all carrying a'
+      + ' flag and nothing else carrying one, got %d / %d missing / %d extra',
+      [Pickup, PickupNoId, PlainWithId]));
     Inc(Result);
   end;
   if (ByDifficulty[0] <> 5) or (ByDifficulty[1] <> 23) or (ByDifficulty[2] <> 40) then
@@ -1216,7 +1250,9 @@ var
   GameDir: string;
   T: TStageTable;
   R: TStageRecord;
-  I, C, N: Integer;
+  M: TTileMap;
+  I, C, N, MaxTile, With29, Safe29, Terr, Tile, TX, TY, Bad: Integer;
+  Has29: Boolean;
   SurfEqSpr, MapEqRow, ThemeEqSurf, MapsPresent, Terrain3, Terrain4: Integer;
   LayerBad: Integer;
   DeadOK: Boolean;
@@ -1351,6 +1387,83 @@ begin
       Log.Add('FAILED: a column documented as constant is not');
       Inc(Result);
     end;
+
+  { --- The terrain tables, against every shipped map ------------------------
+
+    Terrain_Configure sets two globals per terrain: the solid-tile threshold
+    and the kill tile. Three things follow, and all three are properties of the
+    DATA, so they can fail:
+
+      * every tile id in every map is inside the tileset, 0..99 - which is what
+        makes the terrain-9 kill tile of 1000 mean "no instant death" rather
+        than "tile 1000"
+      * 29 is below every threshold, so the kill tile is always walk-into. It
+        has to be, or nothing could reach it
+      * tile 29 appears in exactly 7 maps, and the one where it is NOT lethal
+        is the one terrain-9 stage }
+  Bad := 0; MaxTile := -1; With29 := 0; Safe29 := 0;
+  M := TTileMap.Create;
+  try
+    for I := 1 to 65 do
+    begin
+      if not M.Load(GameDir, I) then
+        Continue;
+      Has29 := False;
+      for TY := 0 to M.MapHeight - 1 do
+        for TX := 0 to M.MapWidth - 1 do
+        begin
+          Tile := M[TX, TY];
+          if Tile > MaxTile then MaxTile := Tile;
+          if Tile >= M.SheetCols * M.SheetRows then
+          begin
+            Inc(Bad);
+            if Bad <= 3 then
+              Log.Add(Format('  map %.3d: tile %d at %d,%d is outside the %dx%d sheet',
+                [I, Tile, TX, TY, M.SheetCols, M.SheetRows]));
+          end;
+          if Tile = KILL_TILE then Has29 := True;
+        end;
+      if Has29 then
+      begin
+        Inc(With29);
+        Terr := T[I].Raw[18];
+        if (Terr >= 0) and (Terr <= TERRAIN_MAX) and
+           (TERRAIN_KILL_TILE[Terr] <> KILL_TILE) then
+          Inc(Safe29);
+      end;
+    end;
+  finally
+    M.Free;
+  end;
+
+  Log.Add('');
+  Log.Add(Format('largest tile id in any map: %d  (tilesets are %d tiles)',
+    [MaxTile, TILESET_IDS]));
+  Log.Add(Format('tiles outside their own tileset:        %d', [Bad]));
+  Log.Add(Format('maps containing the kill tile %d:       %d, of which %d are'
+    + ' in a terrain where it is harmless', [KILL_TILE, With29, Safe29]));
+  Inc(Result, Bad);
+
+  if MaxTile >= KILL_TILE_NONE then
+  begin
+    Log.Add(Format('FAILED: a tile id of %d exists, so terrain 9''s kill tile'
+      + ' of %d is not out of range after all', [MaxTile, KILL_TILE_NONE]));
+    Inc(Result);
+  end;
+  for I := 1 to TERRAIN_MAX do
+    if KILL_TILE >= TERRAIN_SOLID_THRESHOLD[I] then
+    begin
+      Log.Add(Format('FAILED: terrain %d makes tile %d solid, so nothing could'
+        + ' ever walk into it', [I, KILL_TILE]));
+      Inc(Result);
+    end;
+  if (With29 <> 7) or (Safe29 <> 1) then
+  begin
+    Log.Add(Format('FAILED: expected the kill tile in 7 maps with exactly 1'
+      + ' harmless, got %d and %d', [With29, Safe29]));
+    Inc(Result);
+  end;
+
   finally
     T.Free;
   end;

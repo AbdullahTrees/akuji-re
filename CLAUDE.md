@@ -39,10 +39,8 @@ self-tests, three reference implementations, a records check and a negative
 control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
 
-**Next:** the ~105 entity-type handlers, which are now individually
-addressable. Also open: event opcode 9 (231 records, the second most common),
-and `0x4576B4`, which every movement step calls to refresh an entity's tile
-indices.
+**Next:** the ~100 entity-type handlers, which are now individually
+addressable. The event system has no open questions left.
 
 ## 2. The three layers — most important section
 
@@ -503,8 +501,19 @@ records require exactly those. No script ever guards on them, which is why they
 looked dead until this function was read.
 
 Opcodes **2 and 3** exist in the code — push against a solid holding a direction,
-or pressing confirm — and appear in **no** shipped record. Opcode 9, 231 records,
-is still undecoded.
+or pressing confirm — and appear in **no** shipped record.
+
+**Opcode 9 is a collectible**, and nothing branches on the opcode: what reads its
+ParamB is the *touch handler* of the entity it places. `EF_TOUCH_KIND` 2 and 5
+both set `Progress[Copy(ParamB,1,4)]`, exactly as opcode 5 does. Kind 2 is the
+**Mana Stone** — the counter climbs, and on reaching the target for the current
+`TargetIndex` both `TargetIndex` and `MaxLives` go up and `Lives` refills, which
+is what `tk001.dat` describes. Kind 5 is a full heal.
+
+The partition is exact: of the 231 records, the 127 carrying an id are precisely
+those placing a touch-kind 2 or 5 type, and the 104 carrying `*` are precisely
+the rest. It has to be — `StrToInt('*')` would raise. **Every opcode is now
+accounted for.**
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 

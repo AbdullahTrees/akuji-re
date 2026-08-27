@@ -108,6 +108,27 @@
   placeholder, carries it. So the terrain id does not merely pick a sound - it
   decides which tiles are solid.
 
+  It also picks the KILL TILE. Terrain_Configure writes a second global right
+  beside the threshold, and Entity_CheckKillTiles @ 0x004576B4 - which every
+  vertical movement step calls - scans the whole of an entity's tile box for
+  it. One match sets EF_STATE to 10, the fall-death state.
+
+      terrain 1..8   kill tile 29
+      terrain 9      kill tile 1000
+
+  Every tileset in the game is 10 x 10, and the largest tile id in any of the
+  65 maps is 99, so 1000 can never match: terrain 9 has no instant death. That
+  is not an inference about intent - 1000 is simply outside the id space, and
+  --selftest-stages checks that it still is.
+
+  Two more things hold across the shipped data and are checked there:
+
+    * 29 is below every threshold (the smallest is $32 = 50), so the kill tile
+      is always a tile you can walk INTO. It has to be, or nothing could ever
+      touch it.
+    * tile 29 appears in only 7 of the 65 maps, and the single map where it
+      appears without being lethal is the single terrain-9 stage.
+
   Terrains 1..4 additionally build an animated background entity; 5..9 do not.
 
   With that, every column of stage.dat is accounted for. rec[0], rec[1],
@@ -128,6 +149,19 @@ const
   STAGE_RECORD  = 19;   { ints per record, stride 0x4C }
   STAGE_LAYERS  = 3;    { rec[2..4] maps, rec[5..7] their tilesets }
   STAGE_TILESET = 5;    { rec[5 + layer] }
+
+  { From Terrain_Configure @ 0x004645B0. Index is the terrain id 1..9; entry 0
+    is the placeholder row, which the original leaves alone. }
+  TERRAIN_MAX = 9;
+  TERRAIN_SOLID_THRESHOLD: array[0..TERRAIN_MAX] of Integer =
+    (0, $32, $32, $3C, $32, $46, $3C, $3C, $3C, $50);
+  TERRAIN_KILL_TILE: array[0..TERRAIN_MAX] of Integer =
+    (0, 29, 29, 29, 29, 29, 29, 29, 29, 1000);
+
+  { 10 x 10 tilesets throughout, so a valid id is 0..99. }
+  TILESET_IDS  = 100;
+  KILL_TILE    = 29;
+  KILL_TILE_NONE = 1000;   { outside the id space - terrain 9 }
   LAYER_NONE    = -1;
 
 type
