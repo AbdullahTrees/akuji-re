@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages;
+  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps;
 
 type
   TFrm_main = class(TForm)
@@ -43,6 +43,7 @@ type
     FSurfaces: TSurfaceSet;
     FSprites: TSpriteSet;
     FStages: TStageTable;
+    FMap: TTileMap;
     FDataDir: string;
     FMoveY: Integer;
     FMoveX: Integer;
@@ -116,6 +117,7 @@ begin
       Load_Stage_Assets then indexes it per stage. }
     FStages := TStageTable.Create;
     FStages.Load(DataDir);
+    FMap := TTileMap.Create;
 
     Sheet := FSurfaces[0];
     if Sheet <> nil then
@@ -256,6 +258,7 @@ begin
   Application.OnIdle := nil;
   FFont.Free;
   FTitleScreen.Free;
+  FMap.Free;
   FStages.Free;
   FSprites.Free;
   FSurfaces.Free;   { owns FTitle }

@@ -317,6 +317,21 @@ leaves with the layer.
 Other notes: `notes/function_map.md` (detailed annotations), `notes/Frm_main.dfm`
 (archival, do not edit), `src/README.md` (file-by-file status).
 
+## 11a. Gotcha: unit names can shadow LazUtils and break LCL
+
+A unit called `Maps.pas` broke the build with
+
+    lclintf.ppu: Fatal: Can't find unit LCLIntf used by Themes
+
+which points at LCL, not at the new unit. LazUtils ships its own `Maps` unit
+(`TMap`), LCL's `Themes` -> `LCLIntf` chain uses it, and a project unit of the
+same name shadows it. Renamed to `TileMaps`.
+
+Two things worth knowing: the error names an LCL unit rather than yours, and
+after renaming you must `rm -rf src/lib` — the stale `.ppu` keeps the failure
+alive and makes the fix look ineffective. Check new unit names against LazUtils
+and LCL before adding them.
+
 ## 12. Tooling
 
 Ghidra 12.0.4 + GhidraMCP on `127.0.0.1:8081/sse` (`.mcp.json` at `devel/source`).
