@@ -199,6 +199,89 @@ const
   EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
   EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
 
+  { --- The type table's 18 columns, from Entity_Spawn @ 0x004610C4 ----------
+
+    Entity_Spawn copies the type's row into the new entity field by field, so
+    the destination of every column is now known. This is the mapping; what
+    most of them MEAN is still open, but knowing where a column lands is what
+    lets a later function name it.
+
+        col  type+   entity int      col  type+   entity int
+        ---  -----   ----------      ---  -----   ----------
+         0   +0x00   [$05]            9   +0x24   [$38]
+         1   +0x04   [$24]           10   +0x28   [$39]
+         2   +0x08   [$23]           11   +0x2C   [$3A]
+         3   +0x0C   [$32]           12   +0x30   [$3B]
+         4   +0x10   [$33]           13   +0x34   [$3C]
+         5   +0x14   [$34]           14   +0x38   [$3D]
+         6   +0x18   [$35]           15   +0x3C   [$3E]
+         7   +0x1C   NOT COPIED      16   +0x40   [$3F]
+         8   +0x20   [$37]           17   +0x44   [$40]
+
+    Note columns 1 and 2 cross over - col 1 goes to [$24] and col 2 to [$23].
+    That is in the original, not a transcription slip.
+
+    Column 7 is never copied at all, and an earlier survey of the shipped table
+    found +0x1C to be zero for all 81 types. Those two facts explain each other:
+    it is a dead column, not a field whose use has yet to be found.
+
+    Two of the columns are now decoded outright, both booleans, and both agree
+    with the survey's finding that they only ever hold 0 or 1:
+
+      col 5  -> [$34]  Entity_UpdateAll adds the layer scroll to the position
+                       only when this is 0, so 1 means SCREEN-SPACE - the entity
+                       does not scroll with the map. The survey found it set
+                       only for types 0..13, which are the ones spawned by code
+                       rather than placed in a stage.
+      col 10 -> [$39]  when 1, Entity_UpdateAll destroys the entity once
+                       Entity_IsOffScreen(e, 4) is true. So it is CULL WHEN
+                       OFF SCREEN.
+
+    Columns 16 and 17 land on EF_TILE_OFS_X/Y above, which is why those two are
+    zero throughout the table - they are runtime offsets starting at 0. }
+  TYPE_COL_SCREEN_SPACE = 5;    { -> [$34] }
+  TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
+  TYPE_COL_UNUSED = 7;          { never copied, zero for all 81 types }
+
+  EF_SCREEN_SPACE   = $34;
+  EF_CULL_OFFSCREEN = $39;
+  CULL_MARGIN       = 4;        { Entity_IsOffScreen's argument in the update loop }
+
+  { --- The update loop, from Entity_UpdateAll @ 0x004608BC ------------------
+
+    One switch on EF_TYPE with 80 arms, types 1..80, each its own handler. That
+    is the shape of the whole 0x456000-0x45FFFF block: it is one update
+    procedure per entity type.
+
+    Types 0, 18 and 20 have NO arm. Cross-checking against the type table, 18
+    and 20 are also two of the three rows whose column 0 is -1, i.e. that need
+    no sprite object - so they are inert markers. The third such row, type 32,
+    DOES have an arm: it updates but draws nothing. The two facts nearly
+    coincide but not exactly, which is worth stating plainly rather than
+    rounding off.
+
+    Entities.Alive is a BYTE at +0x08, read as such both here and in
+    Entity_Spawn - it is not an integer.
+
+    Slots above SLOT_ACTOR_LAST get two extra calls per frame (0x00457880 and
+    0x00457AB4) that the player and the actors do not, which is independent
+    confirmation of where that boundary sits. }
+
+  { --- A real asymmetry in the original, reproduced ------------------------
+
+    Entity_Spawn allocates across three ranges: slot 0 for kind 0, 1..$20 for
+    kind 1, and $21..$120 for kind 2. So the pool genuinely is ENTITY_COUNT
+    slots and SLOT_MINOR_LAST is right.
+
+    But Entity_UpdateAll iterates slots 0..$FF only - it returns after 256
+    iterations. Slots $100..$120 can therefore be spawned into and will never
+    be updated, drawn or culled.
+
+    That is not a misreading and it is not corrected here. Entity_Spawn's own
+    sprite search also stops at 256, so an entity in one of those slots could
+    not obtain a sprite either; the 33 extra slots are vestigial. }
+  ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
+
   { Two things fall out of where these land.
 
     EF_TILE_OFS_Y at int 64 is exactly the final slot of the 65-int record - an

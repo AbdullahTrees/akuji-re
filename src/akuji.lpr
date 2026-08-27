@@ -493,7 +493,8 @@ end;
 function SelfTestDirections(Log: TStrings): Integer;
 var
   E: TEntity;
-  PosBad, Expect: Integer;
+  T: TEntityType;
+  PosBad, Expect, ColBad: Integer;
   I, D, Got, Bad, RoundTrips: Integer;
   Expected: Integer;
   X, Y: Integer;
@@ -548,6 +549,43 @@ begin
   { The record size is checked in Entities' initialization section rather than
     here: comparing SizeOf against a constant is folded at compile time, so the
     compiler proves it and then warns that the failure branch is unreachable. }
+  { --- the type table's decoded columns -------------------------------------
+
+    Entity_Spawn copies column 5 to EF_SCREEN_SPACE and column 10 to
+    EF_CULL_OFFSCREEN, and Entity_UpdateAll uses both as booleans - one gates
+    adding the layer scroll, the other gates off-screen culling. If either ever
+    held a value other than 0 or 1 the reading would be wrong, so check it.
+
+    Column 7 is never copied by Entity_Spawn at all. It is zero throughout the
+    shipped table, and those two facts are what make it a dead column rather
+    than an undiscovered field. }
+  ColBad := 0;
+  for I := 0 to ENTITY_TYPE_COUNT - 1 do
+  begin
+    T := EntityType(I);
+    if (T.Raw[TYPE_COL_SCREEN_SPACE] < 0) or (T.Raw[TYPE_COL_SCREEN_SPACE] > 1) then
+    begin
+      Log.Add(Format('  type %d: column 5 is %d, expected a boolean',
+        [I, T.Raw[TYPE_COL_SCREEN_SPACE]]));
+      Inc(ColBad);
+    end;
+    if (T.Raw[TYPE_COL_CULL_OFFSCREEN] < 0) or (T.Raw[TYPE_COL_CULL_OFFSCREEN] > 1) then
+    begin
+      Log.Add(Format('  type %d: column 10 is %d, expected a boolean',
+        [I, T.Raw[TYPE_COL_CULL_OFFSCREEN]]));
+      Inc(ColBad);
+    end;
+    if T.Raw[TYPE_COL_UNUSED] <> 0 then
+    begin
+      Log.Add(Format('  type %d: column 7 is %d, but nothing ever reads it',
+        [I, T.Raw[TYPE_COL_UNUSED]]));
+      Inc(ColBad);
+    end;
+  end;
+  Log.Add(Format('type table: cols 5 and 10 boolean, col 7 dead - %d violations over %d types',
+    [ColBad, ENTITY_TYPE_COUNT]));
+  Inc(Result, ColBad);
+
   { --- the position -> pixel conversion -------------------------------------
 
     Entity_IsOffScreen @ 0x004580BC removes POSITION_BIAS and shifts right by
