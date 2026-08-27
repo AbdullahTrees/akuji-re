@@ -40,6 +40,10 @@ type
     FOnInit: TNotifyEvent;
     FSurface: TBitmap;
     function GetSurfaceCanvas: TCanvas;
+  protected
+    { Streaming calls this once the .lfm has been applied - the original's
+      component fired its OnInit at the equivalent point. }
+    procedure Loaded; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -92,6 +96,12 @@ begin
   inherited Destroy;
 end;
 
+procedure TDDDD.Loaded;
+begin
+  inherited Loaded;
+  Initialize;
+end;
+
 function TDDDD.GetSurfaceCanvas: TCanvas;
 begin
   Result := FSurface.Canvas;
@@ -119,7 +129,7 @@ begin
   { The original branched on a fullscreen flag at +0x3C: DirectDraw Flip when
     set, otherwise Blt to the window's screen origin. Windowed is the shipped
     configuration (system.ini fullscreen=off), so that is the path to build. }
-  if Owner is TWinControl then
+  if (Owner is TCustomForm) and TCustomForm(Owner).HandleAllocated then
     TCustomForm(Owner).Canvas.Draw(0, 0, FSurface);
 end;
 

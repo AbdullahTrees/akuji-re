@@ -332,3 +332,18 @@ D3DRM dependency leaves with it. This closes the largest open risk in the port.
 | `+0x11BC` | elapsed seconds — HUD renders it as `h:mm:ss` |
 | `+0x11C4` | counter shown as `%3d/%-3d` |
 | `+0x11DC` | index into the table at `0x0046d2b4` |
+
+## State handlers (2026-08-27, cont.)
+
+| Address | Name | Evidence |
+|---|---|---|
+| `00461ee4` | `PauseMenu_Update` | dims 320x240, 3 options; confirm branches to saved state / 10 / 999 |
+| `00462210` | `Stage_Begin` | `GameState_Reset`, `Load_Stage_Assets`, spawns player, sets state 60 |
+| `00466e4c` | `Input_ConfirmPressed` | returns 1 on confirm; same use in title and pause menus |
+| `00450fd8` | `TDDSD_PlaySound` | called as `(MainForm.DDSD1, id, 1)` — confirms `+0x2DC` |
+
+Globals: `p_PauseMenuIndex` `0x46cf88` (0..2), `p_SavedGameState` `0x46cbbc`.
+
+More `p_PlayerState` fields, from `Stage_Begin`:
+`+0x11A4`/`+0x11A8` spawn tile X/Y, `+0x11AC`/`+0x11B0` scroll X/Y, `+0x11D8`
+passed to the spawned entity.
