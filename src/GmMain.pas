@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps;
+  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState;
 
 type
   TFrm_main = class(TForm)
@@ -45,12 +45,14 @@ type
     FStages: TStageTable;
     FMap: TTileMap;
     FStageLoaded: Integer;
+    FPlayer: TPlayerState;
     FDataDir: string;
     FMoveY: Integer;
     FMoveX: Integer;
     FConfirm: Boolean;
     function FindGameData: string;
     procedure LoadStage(StageIndex: Integer);
+    procedure DrawHud;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
     procedure DispatchState;
@@ -220,6 +222,23 @@ begin
   FStageLoaded := StageIndex;
 end;
 
+{ HUD_Draw @ 0x00461BA8: a "%3d/%-3d" counter, an h:mm:ss timer, and a row of
+  life icons - filled up to Lives, empty out to MaxLives. Icon graphics are not
+  wired yet, so the count is shown as text. }
+procedure TFrm_main.DrawHud;
+var
+  Secs: Integer;
+begin
+  if FFont = nil then Exit;
+  Secs := FPlayer.ElapsedSec;
+  FFont.TextOut(DDDD1.Canvas, 0, 8,
+    Format('%3d/%-3d', [FPlayer.Counter, FPlayer.Field11DC]), 0);
+  FFont.TextOut(DDDD1.Canvas, $F8, $E0,
+    Format('%.2d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]), 0);
+  FFont.TextOut(DDDD1.Canvas, 8, $18,
+    Format('LIFE %d/%d', [FPlayer.Lives, FPlayer.MaxLives]), 0);
+end;
+
 { Step 5: the state machine. Values and handler addresses in GameState.pas. }
 procedure TFrm_main.DispatchState;
 begin
@@ -252,10 +271,21 @@ begin
       end;
     GS_PLAYER_INIT:
       begin
-        { TODO Game_Init_PlayerState 0x00462F40. For now fall through to the
-          stage so the map pipeline can be exercised end to end. }
-        if Settings.CurrentStage <= 0 then
+        { Game_StartOrLoad 0x00462F40. Sub-mode 0 is NEW GAME, 1 is CONTINUE.
+          The original also runs the opening cutscene here on a new game and
+          only proceeds once it finishes; that is not translated yet. }
+        if FTitleScreen.SubMode = 1 then
+        begin
+          if LoadSave(FPlayer, FDataDir + 'data' + PathDelim + 'save.dat') then
+            Settings.CurrentStage := FPlayer.SavedStage
+          else
+            InitNewGame(FPlayer, Settings.GameLevel);
+        end
+        else
+        begin
+          InitNewGame(FPlayer, Settings.GameLevel);
           Settings.CurrentStage := 1;
+        end;
         GameStateValue := GS_STAGE_BEGIN;
       end;
     GS_PLAY,
@@ -264,8 +294,10 @@ begin
       begin
         { TODO the real update. Rendering the map proves the stage pipeline:
           stage.dat -> surface set -> map layer -> tiles on screen. }
+        { Scroll position comes from the player state, as in the original. }
         FMap.Draw(DDDD1.Canvas, FSurfaces, FStages.SurfaceSet[Settings.CurrentStage],
-                  0, 0, SCREEN_W, SCREEN_H);
+                  FPlayer.ScrollX, FPlayer.ScrollY, SCREEN_W, SCREEN_H);
+        DrawHud;
       end;
     GS_PAUSE:       ;  { TODO PauseMenu_Update      0x00461EE4 }
     GS_OPENING:     ;  { TODO Opening_Update       0x00463154 }

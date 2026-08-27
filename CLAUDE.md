@@ -206,7 +206,7 @@ that was wrong).
 | `tk000..065.dat` | text | **game dialogue**, with escape codes `
 ` newline, `\e` end, `\k` wait-for-key, `\w`. Not tile data |
 | `system.dat` | binary | the 56-byte settings struct, section 7 |
-| `save.dat` | binary | 4580 bytes — **not yet decoded** |
+| `save.dat` | binary | **the player state struct, raw** — `FileRead(h, p_PlayerState, 0x11E4)`; 0x11E4 = 4580 = the file size exactly. No header, no checksum, no version |
 | `bmp.qda` | QDA0 archive | 9.1 MB, 44 uncompressed 24-bit BMPs |
 
 ### QDA0 archive — solved and implemented
@@ -274,8 +274,8 @@ Solved and implemented in Pascal: `bmp.qda` (`QdaArchive.pas`), `map/*.map`,
 `surf*.dat` (`Surfaces.pas`), `spr*.dat` (`Sprites.pas`), the 9x9 font
 (`GameFont.pas`).
 
-Still open: `save.dat` (4580 bytes, binary), `stage.dat` column meanings, and
-`ev*.dat` event-script opcodes. `tk*.dat` is dialogue text whose escape codes
+Still open: `ev*.dat` event-script opcodes, `stage.dat` columns 5..15, and the
+0x1195-byte progress-flag block inside the player state. `tk*.dat` is dialogue text whose escape codes
 (`
 `, `\e`, `\k`, `\w`) are identified but whose consumer is not yet traced.
 

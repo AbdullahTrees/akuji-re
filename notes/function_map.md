@@ -480,3 +480,43 @@ and `064.map` exists). `rec[5]` is 6 on every line but the first; meaning
 untraced. `rec[6..7]` and `rec[11..18]` untraced.
 
 Global: `p_StageTable` `0x46cfb4`.
+
+## `Game_StartOrLoad` @ `0x00462F40` (was `Game_Init_PlayerState`)
+
+Runs on state 40. Branches on `p_TitleSubMode`: 0 = NEW GAME (plays the opening
+cutscene first, returning early until `Opening_Update` reports done), 1 =
+CONTINUE (loads the save). Ends by setting state 30 (`GS_STAGE_BEGIN`).
+
+### `data\save.dat` is the player state struct, raw
+
+```c
+Delphi_FileRead(handle, p_PlayerState, 0x11E4);
+Settings.CurrentStage := p_PlayerState[0x11A0];
+```
+
+`0x11E4` = 4580 = the exact size of the shipped `save.dat`. No header, no
+checksum, no versioning — it is a memory image, so any layout change breaks
+save compatibility.
+
+Decoding the shipped save gives a coherent mid-game state, which is good
+independent evidence the offsets are right:
+
+| Offset | Field | Shipped value |
+|---|---|---|
+| `+0x11A0` | SavedStage | 13 |
+| `+0x11A4/A8` | spawn tile X/Y | 143, 121 |
+| `+0x11AC/B0` | scroll X/Y | 373, 762 |
+| `+0x11B4/B8` | lives / max | 2 / 4 |
+| `+0x11BC` | elapsed seconds | 550 (9:10) |
+| `+0x11C4` | HUD counter | 24 |
+| `+0x11D4` | music track | 1 |
+| `+0x11E0` | difficulty | 0 |
+
+MaxLives being 4 rather than the initial 3 matches the `tk001.dat` dialogue
+about Mana Stones increasing LIFE — two independent sources agreeing.
+
+New-game defaults: lives 3/3, spawn tile (0x60, 0x73), scroll (0, 0x1C0),
+`+0x11C8` = 300, `+0x11D0` = 0x68, music track 1, difficulty from settings.
+
+Offsets 10..0x119F are cleared as one 0x1195-byte block — per-world progress
+flags. Bits 0x4AB and 0x4B4 are set from settings bytes `+0x1C`/`+0x1D`.
