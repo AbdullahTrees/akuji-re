@@ -32,7 +32,7 @@ uses
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
-  KbgmPlayer, Classes, SysUtils;
+  KbgmPlayer, Directions, Entities, Classes, SysUtils;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
@@ -473,6 +473,88 @@ begin
     Log.Add('OK');
 end;
 
+{ --selftest-dir : the 64-step direction system. Needs no game data.
+
+  Checks three things about Directions.pas that the binary lets us assert:
+
+    1. DIR_COS is exactly trunc(32 * cos(i * 2*Pi / 64)) for all 64 entries.
+       That closed form was derived from the shipped table, so this catches a
+       transcription slip in either direction.
+    2. The Y table really is the X table rotated a quarter turn, which is the
+       identity that let the second 64-int table at 0x00468C14 be dropped.
+    3. AngleBetween round-trips: stepping away from the origin along direction
+       d and asking for the angle back gives d again. This is the real test of
+       the integer atan2 - it exercises all four quadrant branches and the
+       sixteen sub-steps, with no floating point anywhere. }
+function SelfTestDirections(Log: TStrings): Integer;
+var
+  I, D, Got, Bad, RoundTrips: Integer;
+  Expected: Integer;
+  X, Y: Integer;
+begin
+  Result := 0;
+  Bad := 0;
+
+  Log.Add('DIR_COS vs trunc(32 * cos(i * 2Pi / 64)):');
+  for I := 0 to DIR_COUNT - 1 do
+  begin
+    Expected := Trunc(32.0 * Cos(I * 2.0 * Pi / DIR_COUNT));
+    if DIR_COS[I] <> Expected then
+    begin
+      Log.Add(Format('  i=%2d table=%3d closed form=%3d', [I, DIR_COS[I], Expected]));
+      Inc(Bad);
+    end;
+  end;
+  Log.Add(Format('  %d mismatches', [Bad]));
+
+  Log.Add('');
+  Log.Add('DirVelY(d) = DIR_COS[(d + 16) mod 64]:');
+  I := 0;
+  for D := 0 to DIR_COUNT - 1 do
+    if DirVelY(D) <> DIR_COS[(D + DIR_QUARTER) and DIR_MASK] then
+      Inc(I);
+  Log.Add(Format('  %d mismatches', [I]));
+  Inc(Bad, I);
+
+  Log.Add('');
+  Log.Add('AngleBetween round-trip (origin -> a point along each direction):');
+  RoundTrips := 0;
+  I := 0;
+  for D := 0 to DIR_COUNT - 1 do
+  begin
+    { Scaled up so truncation in the table does not move the point into the
+      neighbouring sub-step. }
+    X := DirVelX(D) * 64;
+    Y := DirVelY(D) * 64;
+    Got := AngleBetween(0, 0, X, Y);
+    Inc(RoundTrips);
+    if Got <> D then
+    begin
+      Log.Add(Format('  dir %2d -> (%6d,%6d) -> %2d', [D, X, Y, Got]));
+      Inc(I);
+    end;
+  end;
+  Log.Add(Format('  %d of %d directions round-tripped exactly',
+    [RoundTrips - I, RoundTrips]));
+  Inc(Bad, I);
+
+  Log.Add('');
+  { The record size is checked in Entities' initialization section rather than
+    here: comparing SizeOf against a constant is folded at compile time, so the
+    compiler proves it and then warns that the failure branch is unreachable. }
+  Log.Add(Format('entity pool: %d slots of %d bytes (SizeOf(TEntity) = %d), %d types',
+    [ENTITY_COUNT, ENTITY_BYTES, SizeOf(TEntity), ENTITY_TYPE_COUNT]));
+
+  Log.Add('');
+  if Bad > 0 then
+  begin
+    Log.Add(Format('FAILED: %d problems', [Bad]));
+    Result := 1;
+  end
+  else
+    Log.Add('OK');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -489,6 +571,8 @@ begin
         Result := PlayTest(Log)
       else if ParamStr(1) = '--mixdump' then
         Result := MixDump(Log)
+      else if ParamStr(1) = '--selftest-dir' then
+        Result := SelfTestDirections(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -507,7 +591,7 @@ end;
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
-     (ParamStr(1) = '--mixdump') then
+     (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') then
   begin
     ExitCode := RunSelfTest;
     Exit;

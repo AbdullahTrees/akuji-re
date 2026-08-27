@@ -55,7 +55,7 @@ unit Entities;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, Directions;
 
 const
   ENTITY_INTS   = $41;      { 65 ints = 0x104 bytes, the array stride }
@@ -84,12 +84,17 @@ const
   EF_SPRITE      = $04;   { sprite-pool handle, -1 when the type has no sprite }
   EF_FLAG1C      = $07;   { set to 0 or 1 by FUN_004617FC }
   EF_BLOCK_A     = $08;   { 10 ints, zeroed on spawn }
-  EF_BLOCK_B     = $12;   { 10 ints, zeroed on spawn - contiguous with A }
+  { Block B is a bank of 10 COUNTDOWN TIMERS. Steer (0x00461738) decrements one
+    of them and only acts when it reaches zero, then reloads it - which is how
+    the original rate-limits per-entity behaviour without a scheduler. }
+  EF_BLOCK_B     = $12;   { 10 ints at +0x48, contiguous with A }
+  EF_TIMER_COUNT = 10;
   EF_TIMER       = $1C;   { FUN_004617FC seeds this with 30 }
   EF_POS_X       = $1E;   { biased; use PosX }
   EF_POS_Y       = $1F;
   EF_VEL_X       = $20;   { zeroed on spawn, written as -96 by FUN_004617FC }
   EF_VEL_Y       = $21;
+  EF_FACING      = $22;   { direction 0..63, see Directions.pas }
   EF_TYPEF_08    = $23;   { <- type table +0x08 }
   EF_TYPEF_04    = $24;   { <- type table +0x04 }
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
@@ -133,6 +138,16 @@ type
     procedure SetField(Slot, IntIndex, Value: Integer);
 
     function LiveCount: Integer;
+
+    { Steer @ 0x00461738. Ticks timer TimerSlot; when it runs out, reloads it
+      with Reload, turns one step toward the PLAYER, and rewrites the velocity
+      from the direction table. Velocity is rewritten on every call, not only
+      on the tick, so an entity keeps moving between turns.
+
+      This is what establishes that slot 0 is the player: the original homes on
+      p_Entities[0] with no indirection at all, reading +0x78/+0x7C straight
+      off the array's base pointer. }
+    procedure Steer(Slot, TimerSlot, Reload: Integer);
 
     property Alive[Index: Integer]: Boolean read GetAlive;
   end;
@@ -302,6 +317,35 @@ begin
   SetField(Slot, EF_ALIVE, 0);
 end;
 
+procedure TEntityPool.Steer(Slot, TimerSlot, Reload: Integer);
+var
+  E: PEntity;
+  Facing, Target: Integer;
+begin
+  if (Slot < 0) or (Slot >= ENTITY_COUNT) then
+    Exit;
+  if (TimerSlot < 0) or (TimerSlot >= EF_TIMER_COUNT) then
+    Exit;
+  E := @FSlots[Slot];
+
+  Dec(E^.Raw[EF_BLOCK_B + TimerSlot]);
+  if E^.Raw[EF_BLOCK_B + TimerSlot] < 1 then
+  begin
+    E^.Raw[EF_BLOCK_B + TimerSlot] := Reload;
+    { Both positions are read in their BIASED form. The bias is identical on
+      each, so it cancels in the subtraction inside AngleBetween - which is why
+      the original can pass the raw fields straight through. }
+    Target := AngleBetween(E^.Raw[EF_POS_X], E^.Raw[EF_POS_Y],
+                           FSlots[0].Raw[EF_POS_X], FSlots[0].Raw[EF_POS_Y]);
+    Facing := E^.Raw[EF_FACING];
+    TurnToward(Facing, Target);
+    E^.Raw[EF_FACING] := Facing;
+  end;
+
+  E^.Raw[EF_VEL_X] := DirVelX(E^.Raw[EF_FACING]);
+  E^.Raw[EF_VEL_Y] := DirVelY(E^.Raw[EF_FACING]);
+end;
+
 function TEntityPool.Spawn(Kind, TypeId, X, Y: Integer): Integer;
 var
   First, Last, Slot, I: Integer;
@@ -357,7 +401,7 @@ begin
   E^.Raw[EF_VEL_Y]     := 0;
   E^.Raw[EF_TYPEF_08]  := 1;
   E^.Raw[EF_TYPEF_04]  := 1;
-  E^.Raw[$22]          := 0;
+  E^.Raw[EF_FACING]    := 0;
   E^.Raw[EF_BYTE94]    := 1;
   E^.Raw[EF_TIMER]     := 0;
   E^.Raw[$1D]          := 0;
@@ -385,5 +429,15 @@ begin
 
   Result := Slot;
 end;
+
+initialization
+  { The stride is not a design choice, it is what the original's
+    `base + index * 0x104` requires. A layout slip here silently misaligns
+    every slot after the first, so fail loudly at startup - the same guard
+    TPlayerState uses against save.dat drifting. }
+  Assert(SizeOf(TEntity) = ENTITY_BYTES,
+         'TEntity must be exactly 0x104 bytes to match the original stride');
+  Assert(SizeOf(TEntityType) = $48,
+         'TEntityType must be exactly 0x48 bytes to match the type table');
 
 end.
