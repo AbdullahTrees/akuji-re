@@ -62,7 +62,7 @@ type
   { data\system.dat, 56 bytes. Field meanings recovered from Title_Init,
     DDDD1Init and the options screen. Offsets are the original's. }
   TGameSettings = record
-    Field00: Integer;        // +0x00  unknown
+    CurrentStage: Integer;   // +0x00  Stage_Begin passes this to Load_Stage_Assets
     GameLevel: Integer;      // +0x04  0..2
     KeyMap: array[0..2] of Integer;  // +0x08..+0x10  jump, fire, pause
     Field14: Integer;        // +0x14  (third key slot end / unknown)

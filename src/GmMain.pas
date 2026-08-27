@@ -44,11 +44,13 @@ type
     FSprites: TSpriteSet;
     FStages: TStageTable;
     FMap: TTileMap;
+    FStageLoaded: Integer;
     FDataDir: string;
     FMoveY: Integer;
     FMoveX: Integer;
     FConfirm: Boolean;
     function FindGameData: string;
+    procedure LoadStage(StageIndex: Integer);
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
     procedure DispatchState;
@@ -118,6 +120,7 @@ begin
     FStages := TStageTable.Create;
     FStages.Load(DataDir);
     FMap := TTileMap.Create;
+    FStageLoaded := -1;
 
     Sheet := FSurfaces[0];
     if Sheet <> nil then
@@ -185,6 +188,38 @@ begin
   Joy.Update;
 end;
 
+{ Load_Stage_Assets @ 0x00465A1C. The record's rec[0] selects the surface set,
+  rec[1] the sprite set, and rec[2..4] up to three map layers with -1 meaning
+  none. The original skips a reload when the set is already current; the same
+  guard is kept here via FStageLoaded. }
+procedure TFrm_main.LoadStage(StageIndex: Integer);
+var
+  SurfSet, SprSet, MapId: Integer;
+begin
+  if StageIndex = FStageLoaded then Exit;
+  if (FStages = nil) or (StageIndex < 0) or (StageIndex >= FStages.Count) then Exit;
+
+  SurfSet := FStages.SurfaceSet[StageIndex];
+  SprSet  := FStages.SpriteSet[StageIndex];
+  MapId   := FStages.Layer[StageIndex, 0];
+
+  if SurfSet >= 0 then
+  begin
+    FSurfaces.LoadSet(FDataDir, SurfSet);
+    { The font lives in slot 0 of whichever set is current, so it is rebuilt
+      when the set changes. }
+    FreeAndNil(FFont);
+    if FSurfaces[0] <> nil then
+      FFont := TGameFont.Create(FSurfaces[0]);
+  end;
+  if SprSet >= 0 then
+    FSprites.LoadSet(FDataDir, SprSet);
+  if MapId <> LAYER_NONE then
+    FMap.Load(FDataDir, MapId);
+
+  FStageLoaded := StageIndex;
+end;
+
 { Step 5: the state machine. Values and handler addresses in GameState.pas. }
 procedure TFrm_main.DispatchState;
 begin
@@ -208,11 +243,30 @@ begin
         FConfirm := False;
         FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
       end;
-    GS_STAGE_BEGIN: ;  { TODO Stage_Begin           0x00462210 }
-    GS_PLAYER_INIT: ;  { TODO Game_Init_PlayerState 0x00462F40 }
+    GS_STAGE_BEGIN:
+      begin
+        { Original: GameState_Reset, Load_Stage_Assets(Settings.CurrentStage),
+          spawn the player, then move to GS_PLAY. }
+        LoadStage(Settings.CurrentStage);
+        GameStateValue := GS_PLAY;
+      end;
+    GS_PLAYER_INIT:
+      begin
+        { TODO Game_Init_PlayerState 0x00462F40. For now fall through to the
+          stage so the map pipeline can be exercised end to end. }
+        if Settings.CurrentStage <= 0 then
+          Settings.CurrentStage := 1;
+        GameStateValue := GS_STAGE_BEGIN;
+      end;
     GS_PLAY,
     GS_PLAY_ALT,
-    GS_STATE_140:   ;  { TODO gameplay + HUD_Draw   0x00461BA8 }
+    GS_STATE_140:
+      begin
+        { TODO the real update. Rendering the map proves the stage pipeline:
+          stage.dat -> surface set -> map layer -> tiles on screen. }
+        FMap.Draw(DDDD1.Canvas, FSurfaces, FStages.SurfaceSet[Settings.CurrentStage],
+                  0, 0, SCREEN_W, SCREEN_H);
+      end;
     GS_PAUSE:       ;  { TODO PauseMenu_Update      0x00461EE4 }
     GS_OPENING:     ;  { TODO Opening_Update       0x00463154 }
     GS_QUIT:
