@@ -32,7 +32,8 @@ uses
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
-  KbgmPlayer, Directions, Entities, Classes, SysUtils;
+  KbgmPlayer, Directions, Entities, EventScripts, PlayerState,
+  Classes, SysUtils;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
@@ -555,6 +556,85 @@ begin
     Log.Add('OK');
 end;
 
+{ --selftest-events <gamedir> : the per-stage event tables and dialogue.
+
+  Load_Event_Scripts reads two files per stage, so this walks all 66 stages and
+  reports what came back. Every line in the shipped data has exactly seven
+  fields, so any line the loader skips is a decode failure rather than a quirk
+  of the data. Opcode-5 events are additionally required to resolve to an index
+  inside the progress block - if that ever fails, the reading of Entity_Destroy
+  is wrong. }
+function SelfTestEvents(Log: TStrings): Integer;
+var
+  GameDir: string;
+  S: TEventScript;
+  I, J, Total, Lines, Empty, Flags, Idx: Integer;
+  Ev: TEventRecord;
+  ByOpcode: array[0..15] of Integer;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+  Log.Add('stage  events  dialogue');
+
+  for I := 0 to High(ByOpcode) do
+    ByOpcode[I] := 0;
+  Total := 0; Lines := 0; Empty := 0; Flags := 0;
+
+  S := TEventScript.Create;
+  try
+    for I := 0 to 65 do
+    begin
+      if S.Load(GameDir, I) = 0 then
+        Inc(Empty);
+      Inc(Total, S.Count);
+      Inc(Lines, S.LineCount);
+      Log.Add(Format('%5d  %6d  %8d', [I, S.Count, S.LineCount]));
+
+      for J := 0 to S.Count - 1 do
+      begin
+        Ev := S[J];
+        if (Ev.Opcode >= 0) and (Ev.Opcode <= High(ByOpcode)) then
+          Inc(ByOpcode[Ev.Opcode]);
+        if Ev.Opcode = EVOP_SET_PROGRESS then
+        begin
+          Idx := ProgressIndexOf(Ev.ParamB);
+          if (Idx < 0) or (Idx >= PROGRESS_LENGTH) then
+          begin
+            Log.Add(Format('  stage %d event %d: opcode 5, ParamB=%s -> %d OUT OF RANGE',
+              [I, J, Ev.ParamB, Idx]));
+            Inc(Result);
+          end
+          else
+            Inc(Flags);
+        end;
+      end;
+    end;
+  finally
+    S.Free;
+  end;
+
+  Log.Add('');
+  Log.Add(Format('%d events across 66 stages, %d dialogue lines, %d stages with none',
+    [Total, Lines, Empty]));
+  Log.Add('');
+  Log.Add('opcode histogram:');
+  for I := 0 to High(ByOpcode) do
+    if ByOpcode[I] > 0 then
+      Log.Add(Format('  %2d  x%d', [I, ByOpcode[I]]));
+  Log.Add('');
+  Log.Add(Format('opcode 5 events resolving to a valid progress flag: %d', [Flags]));
+  Log.Add(Format('progress block: %d bytes from offset %d',
+    [PROGRESS_LENGTH, PROGRESS_START]));
+
+  Log.Add('');
+  if Result > 0 then
+    Log.Add(Format('FAILED: %d bad progress indices', [Result]))
+  else
+    Log.Add('OK');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -573,6 +653,8 @@ begin
         Result := MixDump(Log)
       else if ParamStr(1) = '--selftest-dir' then
         Result := SelfTestDirections(Log)
+      else if ParamStr(1) = '--selftest-events' then
+        Result := SelfTestEvents(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -591,7 +673,8 @@ end;
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
-     (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') then
+     (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') or
+     (ParamStr(1) = '--selftest-events') then
   begin
     ExitCode := RunSelfTest;
     Exit;

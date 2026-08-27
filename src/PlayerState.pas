@@ -15,9 +15,21 @@
   which is independent corroboration that these offsets are right.
 
   Most of the struct - offsets 10 through 0x119F, which Game_StartOrLoad clears
-  as a single 0x1195-byte block - is per-world progress flags. Individual bits
-  are not decoded; two known ones are 0x4AB and 0x4B4, set from settings bytes
-  +0x1C and +0x1D. }
+  as a single 0x1195-byte block - is per-world progress flags. Two known ones
+  are 0x4AB and 0x4B4, set from settings bytes +0x1C and +0x1D.
+
+  HOW THE FLAGS ARE SET is decoded. Entity_Destroy @ 0x00461400, on an entity
+  carrying an event whose opcode is 5, does
+
+      Progress[StrToInt(Copy(event.ParamB, 1, 4))] := 1
+
+  - one BYTE per flag, not one bit, indexed by the first four characters of the
+  event's second string parameter. See EventScripts.pas.
+
+  That reading is corroborated by the data rather than only by the code: all
+  154 opcode-5 events across the 66 shipped event files resolve to an index
+  inside this block, which a wrong interpretation of the parameter would not
+  do. Run `akuji.exe --selftest-events <gamedir>`. }
 
 unit PlayerState;
 

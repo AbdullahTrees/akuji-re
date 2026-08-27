@@ -207,7 +207,7 @@ that was wrong).
 | `stage.dat` | CSV | 66 rows x **16 fields**, filling a **19-int** record (stride `0x4C`). `rec[0]` surface set, `rec[1]` sprite set, `rec[2..4]` map layers (`-1` = none). Columns 8..15 land at `rec[11..18]`; `rec[8..10]` are runtime scratch |
 | `spr000..009.dat` | CSV | **7 fields**: surfaceIdx, frameW, frameH, cols, rows, originX, originY — expands to cols*rows frames, numbered sequentially across the file |
 | `surf000..009.dat` | CSV | **3 fields**: bitmap name, width, height — 32 slots, bitmaps pulled from `bmp.qda`. Slot 0 is the font, 1 the title background, 2 the options background |
-| `ev000..065.dat` | CSV | `9,0000,1001,0019,0008,0014-*,1001` — event scripts |
+| `ev000..065.dat` | CSV | **solved** - 7 fields, 692 lines over 66 files, none irregular. `Load_Event_Scripts` `0x465B50` scatters them into a 0x24-byte record: csv 0 to +0x00 opcode, 1 to +0x1C, 2 to +0x20, 3 to +0x10, 4 to +0x14, 5 to +0x0C str, 6 to +0x18 str. It also loads `tk*.dat` |
 | `tk000..065.dat` | text | **game dialogue**, with escape codes `
 ` newline, `\e` end, `\k` wait-for-key, `\w`. Not tile data |
 | `system.dat` | binary | the 56-byte settings struct, section 7 |
@@ -277,12 +277,16 @@ right next to the `%.03d` format in the disassembly.
 
 Solved and implemented in Pascal: `bmp.qda` (`QdaArchive.pas`), `map/*.map`,
 `surf*.dat` (`Surfaces.pas`), `spr*.dat` (`Sprites.pas`), the 9x9 font
-(`GameFont.pas`).
+(`GameFont.pas`), `ev*.dat` and `tk*.dat` (`EventScripts.pas`), the 57 sound
+names and 15 MIDI names (`SoundTable.pas`, the form resource), the 81-entry
+entity type table and the 64-step direction table (`Entities.pas`,
+`Directions.pas`).
 
-Still open: `ev*.dat` event-script opcodes, `stage.dat` columns 5..15, and the
-0x1195-byte progress-flag block inside the player state. `tk*.dat` is dialogue text whose escape codes
-(`
-`, `\e`, `\k`, `\w`) are identified but whose consumer is not yet traced.
+Still open: most `ev*.dat` opcodes (0, 1, 4, 6, 9 - 5 and 7 are decoded) and
+`stage.dat` columns 5..15. The progress-flag block is no longer a mystery: an
+opcode-5 event sets `Progress[StrToInt(Copy(ParamB, 1, 4))] := 1`, one byte per
+flag, and all 154 such events in the shipped data resolve inside the block.
+`tk*.dat` is the dialogue those events refer to; its escape codes are identified.
 
 ## 9. Input map (from `DirectInput_Init` `0x453bdc`)
 
