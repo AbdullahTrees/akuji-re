@@ -1,5 +1,27 @@
 ## 🎯 SDL Porting Strategy — Akuji the Demon
 
+> # 🛑 STOP — parts of this plan target the wrong functions
+>
+> A 2026-08-03 audit found that several functions this plan is built around are
+> **Borland VCL library code, not the game's**. See `notes/function_map.md` for
+> the evidence. Affected sections, and what's actually true:
+>
+> | This plan says | Reality |
+> |---|---|
+> | `GDI_Blit_Sprite` (`0x00417fd4`) is "the core sprite blitter" — §Rendering, lines ~37, 80–89, 191 | It's `Graphics.pas`'s transparent-blit helper. **The game's real blitter has not been found.** The whole rendering section targets Borland's code |
+> | `VCL_Message_Loop` (`0x004038f4`) is the `PeekMessage`/`DispatchMessage` pump — line ~141 | It's `System._Halt0`, the **shutdown** path. It has no message-pump calls. The real pump is `TApplication_ProcessMessage` at `0x00442760` |
+> | `Create_Main_Form` → `SDL_CreateWindow` — line ~136 | It's the generic `TApplication.CreateForm`, not the game's window setup |
+> | `Game_Tick` → `SDL_GetMouseState` — line ~118 | It's `TApplication.HintTimerExpired` — tooltip code |
+>
+> Line ~261 actually corroborates this: it notes `DDraw_Check_HRESULT` calls
+> `VCL_Message_Loop` **"(fatal abort)"**. A message loop invoked as a fatal abort
+> makes no sense; `_Halt0` does. The evidence was already in the document.
+>
+> **Do not start Phase "Rendering" from this plan.** Find the game's own
+> rendering code first — it will be above `0x444000`, per the address-range rule
+> in `function_map.md`. Sections on Audio, Input, File I/O, and the general
+> Delphi-porting challenges were not implicated and still look sound.
+
 ### Architecture Overview
 
 The game is a **Borland Delphi** application using the VCL framework. The porting strategy is to keep all game logic intact and replace platform-specific API calls with SDL2 equivalents. Here's the complete mapping:
