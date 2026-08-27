@@ -22,7 +22,8 @@ uses
   Interfaces,   // LCL widgetset - must come first
   Forms,
   GmMain in 'GmMain.pas' {Frm_main},
-  QdaArchive, SoundTable, WaveFile, AudioMixer, MidiFile, Classes, SysUtils;
+  QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
+  KbgmPlayer, Classes, SysUtils;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
@@ -223,6 +224,246 @@ begin
     Log.Add('OK');
 end;
 
+{ --playtest <gamedir> [seconds] : make actual noise.
+
+  The other self-tests prove the decoders agree with an independent reader, but
+  they never open a device, so they cannot tell you whether anything is audible.
+  This one opens both devices, plays a handful of effects with gaps, then plays
+  a real music track, and records exactly what each step reported. If it is
+  silent, selftest.log says which stage failed rather than leaving you guessing.
+
+  Note that midi/init.mid is a GM Reset and two Roland GS writes with no notes
+  in it at all, so playing track 0 is correctly silent. main01 is used here. }
+function PlayTest(Log: TStrings): Integer;
+const
+  { A spread of formats: 8-bit and 16-bit, 11025 and 22050. }
+  DEMO: array[0..5] of Integer = (
+    SND_PI, SND_OK, SND_NG, SND_JUMP, SND_BELL, SND_POWER01);
+var
+  GameDir: string;
+  Mixer: TAudioMixer;
+  Device: TAudioOut;
+  Music: TKbgmPlayer;
+  I, Secs: Integer;
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  Secs := 20;
+  if ParamCount >= 3 then
+    Secs := StrToIntDef(ParamStr(3), 20);
+
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+
+  Mixer := TAudioMixer.Create;
+  Device := TAudioOut.Create(Mixer);
+  Music := TKbgmPlayer.Create(nil);
+  try
+    Log.Add(Format('effects loaded: %d of %d',
+      [Mixer.LoadAll(GameDir), SOUND_COUNT]));
+
+    if not Device.Start then
+    begin
+      Log.Add('AUDIO DEVICE FAILED: ' + Device.LastError);
+      Result := 1;
+    end
+    else
+    begin
+      Log.Add('audio device: open');
+      Mixer.Volume := VOLUME_MAX;
+      for I := Low(DEMO) to High(DEMO) do
+      begin
+        Log.Add(Format('  playing %2d  %s', [DEMO[I], SoundNames[DEMO[I]]]));
+        Mixer.Play(DEMO[I]);
+        Sleep(900);
+      end;
+      { All at once, to prove the mixer really mixes rather than cutting to the
+        newest sound. }
+      Log.Add('  playing all six together');
+      for I := Low(DEMO) to High(DEMO) do
+        Mixer.Play(DEMO[I]);
+      Sleep(2000);
+    end;
+
+    { The playlist normally arrives by streaming the form; there is no form
+      here, so fill it the same way the .lfm does. }
+    Music.AutoLoadMidis.Add('midi\main01');
+    if not Music.Open(GameDir) then
+      Log.Add('MIDI DEVICE FAILED: opened=' + BoolToStr(Music.Opened, True))
+    else
+    begin
+      Log.Add('midi device: open');
+      Music.Volume := KBGM_VOLUME_MAX;
+      Music.Play(0, True);
+      Log.Add(Format('  playing midi\main01 for %d seconds', [Secs]));
+      Sleep(Secs * 1000);
+      Music.FadeOut(1500);
+      Sleep(2000);
+      Log.Add('  faded out');
+    end;
+  finally
+    Music.Free;
+    Device.Free;
+    Mixer.Free;
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK');
+end;
+
+{ --mixdump <gamedir> <out.wav> : render the mixer to a file, no device.
+
+  This splits "the decoder and mixer produce sound" from "the machine plays
+  sound", which --playtest cannot: waveOut reports success whether or not
+  anything reaches your speakers. If the WAV this writes sounds right in any
+  player, everything up to AudioOut is correct and the problem is the device,
+  the default output, or the volume. If it is silent, the fault is ours.
+
+  Peak and RMS are reported too, so the log answers the question even without
+  listening to the file. }
+function MixDump(Log: TStrings): Integer;
+const
+  DEMO: array[0..5] of Integer = (
+    SND_PI, SND_OK, SND_NG, SND_JUMP, SND_BELL, SND_POWER01);
+  BLOCK = 1024;                 { frames per mix call }
+  TOTAL_SECS = 8;
+var
+  GameDir, OutName: string;
+  Mixer: TAudioMixer;
+  Buf: array of SmallInt;
+  F: TFileStream;
+  TotalFrames, Done, Next, I, Peak, V, Clipped: Integer;
+  Sum: Int64;
+  DataBytes: LongWord;
+  W: LongWord;
+  H: Word;
+
+  procedure W32(X: LongWord);
+  begin
+    F.WriteBuffer(X, 4);
+  end;
+
+  procedure W16(X: Word);
+  begin
+    F.WriteBuffer(X, 2);
+  end;
+
+  procedure WTag(const S: string);
+  var
+    B: array[0..3] of AnsiChar;
+  begin
+    B[0] := S[1]; B[1] := S[2]; B[2] := S[3]; B[3] := S[4];
+    F.WriteBuffer(B, 4);
+  end;
+
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  OutName := ParamStr(3);
+  if OutName = '' then
+    OutName := ExtractFilePath(ParamStr(0)) + 'mixdump.wav';
+
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add(Format('writing:  %s', [OutName]));
+  Log.Add('');
+
+  Mixer := TAudioMixer.Create;
+  try
+    Log.Add(Format('effects loaded: %d of %d',
+      [Mixer.LoadAll(GameDir), SOUND_COUNT]));
+    Mixer.Volume := VOLUME_MAX;
+
+    { Rounded up to a whole number of mix blocks, because the render loop below
+      writes whole blocks. Declaring 22050*8 frames and then writing 177152
+      leaves the RIFF size fields disagreeing with the file, which some players
+      accept and others truncate. }
+    TotalFrames := ((MIX_RATE * TOTAL_SECS + BLOCK - 1) div BLOCK) * BLOCK;
+    DataBytes := LongWord(TotalFrames) * MIX_CHANNELS * 2;
+    SetLength(Buf, BLOCK * MIX_CHANNELS);
+
+    F := TFileStream.Create(OutName, fmCreate);
+    try
+      { Canonical 44-byte RIFF/WAVE header, 22050 Hz 16-bit stereo. }
+      WTag('RIFF');  W32(36 + DataBytes);  WTag('WAVE');
+      WTag('fmt ');  W32(16);
+      H := 1;              W16(H);                    { PCM }
+      H := MIX_CHANNELS;   W16(H);
+      W := MIX_RATE;       W32(W);
+      W := MIX_RATE * MIX_CHANNELS * 2; W32(W);       { byte rate }
+      H := MIX_CHANNELS * 2; W16(H);                  { block align }
+      H := 16;             W16(H);                    { bits }
+      WTag('data');  W32(DataBytes);
+
+      Peak := 0;
+      Sum := 0;
+      Done := 0;
+      Next := 0;
+      Clipped := 0;
+      while Done < TotalFrames do
+      begin
+        { Trigger one effect per second, then all six together at the end. }
+        if Done >= Next then
+        begin
+          I := Next div MIX_RATE;
+          if I <= High(DEMO) then
+            Mixer.Play(DEMO[I])
+          else
+            for I := Low(DEMO) to High(DEMO) do
+              Mixer.Play(DEMO[I]);
+          Inc(Next, MIX_RATE);
+        end;
+
+        Mixer.MixInto(@Buf[0], BLOCK);
+        F.WriteBuffer(Buf[0], BLOCK * MIX_CHANNELS * 2);
+
+        for I := 0 to BLOCK - 1 do
+        begin
+          V := Buf[I * MIX_CHANNELS];
+          { -32768 has no positive counterpart, so Abs would overflow and
+            report 32768 - a peak one above full scale, which looks like a bug
+            in the mixer rather than in the meter. Negate the other way. }
+          if V < 0 then
+            V := -(V + 1);
+          if V > Peak then
+            Peak := V;
+          Sum := Sum + Int64(Buf[I * MIX_CHANNELS]) * Buf[I * MIX_CHANNELS];
+          if (Buf[I * MIX_CHANNELS] >= 32767) or
+             (Buf[I * MIX_CHANNELS] <= -32768) then
+            Inc(Clipped);
+        end;
+        Inc(Done, BLOCK);
+      end;
+    finally
+      F.Free;
+    end;
+
+    Log.Add('');
+    Log.Add(Format('rendered %d frames (%.2f s), peak %d of 32767, RMS %.1f',
+      [TotalFrames, TotalFrames / MIX_RATE, Peak, Sqrt(Sum / Done)]));
+    { Six effects at full volume will sum past full scale. The original summed
+      in DirectSound and clipped too, so this is faithful rather than a defect -
+      but it should be visible rather than silently absorbed. }
+    Log.Add(Format('clipped samples: %d of %d (%.2f%%)',
+      [Clipped, Done, (Clipped * 100.0) / Done]));
+    if Peak = 0 then
+    begin
+      Log.Add('SILENT - the fault is in the decoder or mixer, not the device.');
+      Result := 1;
+    end
+    else
+    begin
+      Log.Add('Non-silent. Play the file above to confirm it sounds right;');
+      Log.Add('if it does, decoding and mixing are fine and the device is not.');
+    end;
+  finally
+    Mixer.Free;
+  end;
+
+  if Result = 0 then
+    Log.Add('OK');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -235,6 +476,10 @@ begin
         Result := SelfTestAudio(Log)
       else if ParamStr(1) = '--selftest-midi' then
         Result := SelfTestMidi(Log)
+      else if ParamStr(1) = '--playtest' then
+        Result := PlayTest(Log)
+      else if ParamStr(1) = '--mixdump' then
+        Result := MixDump(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -252,7 +497,8 @@ end;
 
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
-     (ParamStr(1) = '--selftest-midi') then
+     (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
+     (ParamStr(1) = '--mixdump') then
   begin
     ExitCode := RunSelfTest;
     Exit;

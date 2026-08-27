@@ -33,6 +33,7 @@ type
     procedure FormDestroy(Sender: TObject);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure DDDD1Init(Sender: TObject);
+    procedure TitleSound(Index: Integer);
   private
     FLastFrame: QWord;     // p_LastFrameTime 0x0046D1E0
     FLimitFrames: Boolean; // flag at 0x0046CE60
@@ -150,6 +151,9 @@ begin
   DoubleBuffered := True;
 
   FTitleScreen := TTitleScreen.Create;
+  { The original calls MainForm.DDSD1.Play straight from the title function;
+    routing it through a callback keeps Title.pas off the component layer. }
+  FTitleScreen.OnSound := TitleSound;
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
   GameStateValue := GS_TITLE_INIT;
@@ -247,6 +251,13 @@ begin
     Format('%.2d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]), 0);
   FFont.TextOut(DDDD1.Canvas, 8, $18,
     Format('LIFE %d/%d', [FPlayer.Lives, FPlayer.MaxLives]), 0);
+end;
+
+{ Sound requests from the title screen. See notes/audio_map.md for which index
+  is which. }
+procedure TFrm_main.TitleSound(Index: Integer);
+begin
+  DDSD1.Play(Index);
 end;
 
 { Step 5: the state machine. Values and handler addresses in GameState.pas. }

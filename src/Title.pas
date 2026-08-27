@@ -25,7 +25,7 @@ unit Title;
 interface
 
 uses
-  Classes, SysUtils, Graphics, GameState, GameFont;
+  Classes, SysUtils, Graphics, GameState, GameFont, SoundTable;
 
 const
   { Sub-modes, p_TitleSubMode @ 0x0046CEF8 }
@@ -82,10 +82,16 @@ type
   TOptionRow = (orLevel, orToggle1, orKey0, orKey1, orKey2,
                 orToggle2, orFrameLimit, orVolume, orOmake, orExit);
 
+  { Fired where the original calls DDSD1.Play. Kept as a callback so this unit
+    stays independent of the component layer; GmMain hooks it up. }
+  TSoundEvent = procedure(Index: Integer) of object;
+
   TTitleScreen = class
   private
     FSubMode: Integer;
     FIndex: Integer;          // p_MenuIndex 0x0046CF88, shared with the pause menu
+    FOnSound: TSoundEvent;
+    procedure PlaySound(Index: Integer);
     procedure MenuConfirm;
     procedure OptionsConfirm;
     procedure DrawValues(C: TCanvas; F: TGameFont);
@@ -100,6 +106,7 @@ type
 
     property SubMode: Integer read FSubMode;
     property Index: Integer read FIndex;
+    property OnSound: TSoundEvent read FOnSound write FOnSound;
   end;
 
 implementation
@@ -114,6 +121,12 @@ procedure TTitleScreen.Reset;
 begin
   FSubMode := TSM_MENU;
   FIndex := 0;
+end;
+
+procedure TTitleScreen.PlaySound(Index: Integer);
+begin
+  if Assigned(FOnSound) then
+    FOnSound(Index);
 end;
 
 procedure TTitleScreen.MenuConfirm;
@@ -208,12 +221,18 @@ begin
       begin
         if MoveY <> 0 then
         begin
+          { 0x0046245A: the cursor blip fires on any non-zero vertical input,
+            BEFORE the index is wrapped, so it sounds even on the move that
+            wraps around the ends. }
+          PlaySound(SND_PI);
           FIndex := FIndex + MoveY;
           if FIndex < 0 then FIndex := High(MENU_ITEMS);
           if FIndex > High(MENU_ITEMS) then FIndex := 0;
         end;
         if Confirm then
         begin
+          { 0x004624D7 and 0x0046253A - both branches of the confirm. }
+          PlaySound(SND_OK);
           MenuConfirm;
           Result := GameStateValue <> GS_TITLE_MENU;
         end;
@@ -226,13 +245,21 @@ begin
           an axis - the original scans 16 buttons and swaps if already bound. }
         if MoveY <> 0 then
         begin
+          { INFERRED, not individually traced: the options screen has its own
+            call sites using the same two indices in the same roles
+            (0x0046290F, 0x00462B1A for SND_PI; 0x00462996 onward for SND_OK),
+            but which branch each sits on has not been read out. }
+          PlaySound(SND_PI);
           Limit := Ord(High(TOptionRow));
           FIndex := FIndex + MoveY;
           if FIndex < 0 then FIndex := Limit;
           if FIndex > Limit then FIndex := 0;
         end;
         if Confirm then
+        begin
+          PlaySound(SND_OK);
           OptionsConfirm;
+        end;
       end;
 
     TSM_OMAKE:
