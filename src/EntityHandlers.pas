@@ -22,6 +22,7 @@
       0x00458138  Player_TakeDamage
       0x00457880  Entity_PlayerTouch - the dispatcher over all seven kinds
       0x00457AB4  Entity_TakeProjectileHits
+      0x0045A5D4  type 32  the invisible emitter
 
   And the dispatcher they hang off:
 
@@ -207,6 +208,35 @@ const
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
 
+  { --- Type 32, the emitter @ 0x0045A5D4 --------------------------------
+    An invisible spawner - one of the three types with no sprite - that reads
+    its whole configuration out of block A and keeps its state in block B.
+    Every one of those seven slots is now confirmed by the code:
+
+      A[1] $09  frames between spawns    B[0] $12  countdown to the next
+      A[2] $0A  how many in all          B[1] $13  how many so far
+      A[3] $0B  scatter radius           B[2] $14  countdown to the next sound
+      A[4] $0C  frames between sounds
+
+    It spawns type 33 explosions scattered by Random(r * 16) - r * 8 PIXELS on
+    each axis, so plus or minus r * 8 - quarter tiles, not tiles.
+
+    Entity_UpdateDying seeds it two ways, which is how one emitter type gives
+    two different deaths: class 1 gets 8, 2, 1, 2 - a small pair close in - and
+    class 2 gets 4, 32, 4, 1 - a long wide barrage with a sound every frame.
+
+    The exhaustion test is `A[2] < B[1]` AFTER the increment, so an emitter
+    configured for N spawns N + 1 times. Reproduced. }
+  EMIT_EVERY       = $09;   { A[1] }
+  EMIT_TOTAL       = $0A;   { A[2] }
+  EMIT_RADIUS      = $0B;   { A[3] }
+  EMIT_SOUND_EVERY = $0C;   { A[4] }
+  EMIT_NEXT        = $12;   { B[0] }
+  EMIT_COUNT       = $13;   { B[1] }
+  EMIT_SOUND_NEXT  = $14;   { B[2] }
+  EMIT_SPAWN_TYPE  = $21;   { 33, the explosion }
+  EMIT_RADIUS_SHIFT = 4;    { Random(r shl 4), centred by r * 8 }
+
   { --- Entity_TakeProjectileHits @ 0x00457AB4 ---------------------------
     A wide switch on the TARGET's EF_VULN_KIND, and the projectile's own
     EF_STATE is its POWER. Three of the arms do something other than damage:
@@ -345,6 +375,11 @@ procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
   which only variant 8 has. }
 procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
+
+{ 0x0045A5D4. The invisible emitter. See EMIT_EVERY above for the block-A
+  configuration it runs off. }
+procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
+                                      World: TEntityWorld);
 
 { 0x0045A4F0. One table lookup. It takes no game state because it does not read
   any - it is the only handler that runs identically whatever the game is doing. }
@@ -905,6 +940,41 @@ begin
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
 end;
 
+procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
+                                      World: TEntityWorld);
+var
+  Radius, OffX, OffY: Integer;
+begin
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { The countdown ticks only during play, and the rest happens only on the
+    frame it goes below zero. }
+  Dec(E.Raw[EMIT_NEXT]);
+  if E.Raw[EMIT_NEXT] >= 0 then
+    Exit;
+
+  Dec(E.Raw[EMIT_SOUND_NEXT]);
+  if E.Raw[EMIT_SOUND_NEXT] < 0 then
+  begin
+    E.Raw[EMIT_SOUND_NEXT] := E.Raw[EMIT_SOUND_EVERY];
+    World.PlaySound(SND_BOM01);
+  end;
+
+  { Scatter in PIXELS: plus or minus radius * 8. }
+  Radius := E.Raw[EMIT_RADIUS];
+  OffX := World.RandomBelow(Radius shl EMIT_RADIUS_SHIFT) - Radius * 8;
+  OffY := World.RandomBelow(Radius shl EMIT_RADIUS_SHIFT) - Radius * 8;
+  World.Spawn(EKIND_MINOR, EMIT_SPAWN_TYPE,
+              E.Raw[EF_POS_X] - POSITION_BIAS + OffX * 32,
+              E.Raw[EF_POS_Y] - POSITION_BIAS + OffY * 32);
+
+  E.Raw[EMIT_NEXT] := E.Raw[EMIT_EVERY];
+  Inc(E.Raw[EMIT_COUNT]);
+  if E.Raw[EMIT_TOTAL] < E.Raw[EMIT_COUNT] then
+    World.DestroyEntity(E, True);
+end;
+
 procedure EntityUpdate_Type27(var E: TEntity; AGameState: Integer);
 var
   Frame: Integer;
@@ -1097,7 +1167,8 @@ begin
       24: EntityUpdate_Type24(E^, AGameState, World);
       25: EntityUpdate_Type25(E^);
       27: EntityUpdate_Type27(E^, AGameState);
-      { the other 73 arms are in HANDLER_ADDR, untranslated }
+      32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
+      { the other 72 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
