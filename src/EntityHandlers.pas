@@ -59,6 +59,7 @@
       0x0045B3EC  type 40  a springboard - the first thing that writes to the
                            PLAYER
       0x0045B62C  type 41  a hopper
+      0x0045B7C4  type 42  a boss - six states, five difficulty tables
 
   And the dispatcher they hang off:
 
@@ -757,6 +758,65 @@ const
   T41_GRAVITY = 4;
   T41_TERMINAL = $200;
 
+  { --- Type 42, a boss --------------------------------------------------
+    The largest handler so far, and the first whose timings scale with its own
+    HP as well as with the difficulty - so a boss that has taken damage acts
+    faster, which is a difficulty curve inside a single fight.
+
+      0  spawn: add an HP bonus of 0, 20 or 40 by difficulty, drop 8 px and
+         start moving right at 0x20
+      1  patrol: bounce off walls by negating its speed, and bob vertically by
+         stepping one heading every four frames and taking the Y component as
+         the velocity. Leaves after HP * 10 + 120 frames with sound 0x23
+      2  rise: step the heading every frame - so it climbs in a tightening
+         curve - for 120, 60 or 30 frames by difficulty, then drop
+      3  fall: gravity 4 to a terminal 0x200. On landing, sound 4, snap flush,
+         and FIRE A FAN of shots: count + 1 type-44s, each taking its heading
+         from a shared angle table (-1, 1, -2, 2, -3, 3) shifted left five.
+         The count is 1, 3 or 5 by difficulty, so easy gets two shots and hard
+         gets six
+      4  recover: hold, re-snapping to the floor each frame, and go back up
+         after (HP / 10) * (1, 3 or 5) + 30 frames. Every third recovery it
+         goes to state 5 instead
+      5  retreat: rise 1 px a frame for 60 frames, then back to patrol
+
+    EF_CHILD_B is a free-running frame counter that every state resets, and
+    EF_SHOTS - normally an owner's live-shot count - is reused here as the
+    recovery counter. }
+  T42_FRAMES = 4;  T42_TICKS = 8;
+  T42_TABLE_ADDR = $0046C010;
+  T42_SPRITES: array[0..6] of Integer = (500, 501, 502, 501, 502, 503, 504);
+  T42_HP_BONUS_ADDR = $0046C004;
+  T42_HP_BONUS: array[0..2] of Integer = (0, 20, 40);
+  T42_RISE_LEN_ADDR = $0046BFE0;
+  T42_RISE_LEN: array[0..2] of Integer = (120, 60, 30);
+  T42_SHOTS_ADDR = $0046BFF8;
+  T42_SHOTS: array[0..2] of Integer = (1, 3, 5);   { plus one - so 2, 4 or 6 }
+  T42_ANGLES_ADDR = $0046C05C;
+  T42_ANGLES: array[0..5] of Integer = (-1, 1, -2, 2, -3, 3);
+  T42_RECOVER_ADDR = $0046BFEC;
+  T42_RECOVER: array[0..2] of Integer = (30, 20, 10);
+  T42_DROP = $100;
+  T42_SPEED = $20;
+  T42_BOB_EVERY = 4;
+  T42_PATROL_BASE = $78;      { HP * 10 + this }
+  T42_PATROL_SOUND = $23;
+  T42_LAND_SOUND = 4;
+  T42_RISE_VY = -$C0;
+  T42_RETREAT_VY = -$A0;
+  T42_GRAVITY = 4;
+  T42_TERMINAL = $200;
+  T42_SHOT_TYPE = $2C;        { 44 }
+  T42_SHOT_LIFT = $400;
+  T42_ANGLE_SHIFT = 5;
+  T42_FALL_FRAME = 4;
+  T42_LAND_FRAME = 5;
+  T42_LAND_LAST  = 6;
+  T42_RECOVER_BASE = $1E;
+  T42_RECOVERIES = 2;         { every third one retreats }
+  T42_RETREAT_STEP = $20;
+  T42_RETREAT_LEN = $3C;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1011,6 +1071,11 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045B7C4. A boss. Six states, and its timings scale with its own HP as
+  well as with the difficulty - see the T42_ block. }
+procedure EntityUpdate_Type42(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045B62C. A hopper. See the T41_ block. }
 procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
@@ -1750,6 +1815,190 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type42(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, I, N, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T42_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T42_SPRITES[Frame];
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_HP], T42_HP_BONUS[D]);
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T42_DROP);
+    E.Raw[EF_VEL_X] := T42_SPEED;
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  { Free-running, and every state reset clears it. }
+  Inc(E.Raw[EF_CHILD_B]);
+
+  { States 1 and 5 share the slow four-frame loop. }
+  if (E.Raw[EF_STATE] = 1) or (E.Raw[EF_STATE] = 5) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T42_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T42_FRAMES;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+
+    { The bob: one heading step every four frames, and the Y component of that
+      heading becomes the vertical velocity. }
+    Dec(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] < 1 then
+    begin
+      E.Raw[EF_CHILD_A] := T42_BOB_EVERY;
+      E.Raw[EF_VEL_Y] := DirVelY(E.Raw[EF_FACING]);
+      E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+    end;
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    { Scales with its OWN HP, so a damaged boss patrols for less time. }
+    if E.Raw[EF_CHILD_B] > E.Raw[EF_HP] * 10 + T42_PATROL_BASE then
+    begin
+      World.PlaySound(T42_PATROL_SOUND);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_FACING] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { A heading step EVERY frame now, so the climb tightens. }
+    Dec(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] < 1 then
+    begin
+      E.Raw[EF_CHILD_A] := 1;
+      E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+      E.Raw[EF_VEL_Y] := DirVelY(E.Raw[EF_FACING]);
+    end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > 2 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T42_FRAMES;
+    end;
+
+    if E.Raw[EF_CHILD_B] > T42_RISE_LEN[D] then
+    begin
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_VEL_Y] := T42_RISE_VY;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    E.Raw[EF_FLAG1C] := T42_FALL_FRAME;
+    Inc(E.Raw[EF_VEL_Y], T42_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T42_TERMINAL then
+      E.Raw[EF_VEL_Y] := T42_TERMINAL;
+
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      World.PlaySound(T42_LAND_SOUND);
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+      E.Raw[EF_STATE] := 4;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_FLAG1C] := T42_LAND_FRAME;
+
+      { The fan. Count + 1 shots, each off the shared angle table. }
+      N := T42_SHOTS[D];
+      if N >= 0 then
+        for I := 0 to N do
+        begin
+          Slot := World.Spawn(EKIND_MINOR, T42_SHOT_TYPE,
+                              E.Raw[EF_POS_X] - POSITION_BIAS
+                                - World.Layer.DeltaX,
+                              E.Raw[EF_POS_Y] - World.Layer.DeltaY
+                                - POSITION_BIAS + T42_SHOT_LIFT);
+          if I <= High(T42_ANGLES) then
+            World.SetSpawnField(Slot, EF_VEL_X,
+                                T42_ANGLES[I] shl T42_ANGLE_SHIFT);
+        end;
+    end;
+
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    { Re-snaps to the floor every frame it is down. }
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      World.PlaySound(T42_LAND_SOUND);
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    end;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T42_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T42_LAND_LAST then
+        E.Raw[EF_FLAG1C] := T42_LAND_FRAME;
+    end;
+
+    if E.Raw[EF_CHILD_B] >
+       (E.Raw[EF_HP] div 10) * T42_RECOVER[D] + T42_RECOVER_BASE then
+    begin
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+      E.Raw[EF_VEL_Y] := T42_RETREAT_VY;
+      { Every third recovery it retreats instead of attacking again. }
+      Inc(E.Raw[EF_SHOTS]);
+      if E.Raw[EF_SHOTS] > T42_RECOVERIES then
+      begin
+        E.Raw[EF_SHOTS] := 0;
+        E.Raw[EF_STATE] := 5;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    Dec(E.Raw[EF_POS_Y], T42_RETREAT_STEP);
+    if E.Raw[EF_CHILD_B] > T42_RETREAT_LEN then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_FACING] := 0;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
@@ -3341,11 +3590,12 @@ begin
       39: EntityUpdate_Type39(E^, AGameState, World);
       40: EntityUpdate_Type40(E^, AGameState, Inp, World);
       41: EntityUpdate_Type41(E^, AGameState, World);
+      42: EntityUpdate_Type42(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 39 arms are in HANDLER_ADDR, untranslated }
+      { the other 38 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
