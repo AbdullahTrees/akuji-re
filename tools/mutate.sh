@@ -47,6 +47,10 @@ GAME="${2:-$REPO/English Translated Version 1.1 (D)}"
 LAZBUILD="${LAZBUILD:-/e/lazarus/lazbuild.exe}"
 TEST_TIMEOUT="${TEST_TIMEOUT:-120}"
 SELFTEST="${SELFTEST:---selftest-entities}"
+# A full command to run instead of the built-in self-test. Some defects are
+# only visible to the DIFFERENTIAL test - a wrong RNG reproduces itself, so
+# anything comparing the reconstruction against itself passes.
+CHECK_CMD="${CHECK_CMD:-}"
 SPEC="${1:-}"
 
 if [ -z "$SPEC" ] || [ ! -f "$SPEC" ]; then
@@ -142,7 +146,11 @@ run_one() {  # name file old new
         printf '  %-46s killed (build)\n' "$name"
         pass=$((pass + 1))
     else
-        timeout "$TEST_TIMEOUT" "$REPO/src/akuji.exe" "$SELFTEST" "$GAME" > /dev/null 2>&1
+        if [ -n "$CHECK_CMD" ]; then
+            ( cd "$REPO" && timeout "$TEST_TIMEOUT" $CHECK_CMD ) > /dev/null 2>&1
+        else
+            timeout "$TEST_TIMEOUT" "$REPO/src/akuji.exe" "$SELFTEST" "$GAME"                 > /dev/null 2>&1
+        fi
         rc=$?
         if [ "$rc" -eq 0 ]; then
             printf '  %-46s SURVIVED\n' "$name"
@@ -184,7 +192,13 @@ for rec in text.split('\n===\n'):
         continue
     head, _, body = rec.partition('\n---\n')
     old, _, new = body.partition('\n--->\n')
-    lines = head.strip().split('\n')
+    # Drop comment lines so a file-level header block is not mistaken for a
+    # record - it produced a mutation whose "file" was '#', which then tripped
+    # the restore guard and aborted the run.
+    lines = [l for l in head.strip().split('\n')
+             if not l.lstrip().startswith('#')]
+    if len(lines) < 2:
+        continue
     print(' '.join(enc(v) for v in (lines[0].strip(), lines[1].strip(), old, new)))
 PY
 

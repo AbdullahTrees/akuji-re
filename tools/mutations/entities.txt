@@ -283,3 +283,43 @@ src/EntityHandlers.pas
       27: EntityUpdate_Type27(E^, AGameState);
 --->
       27: EntityUpdate_Type14(E^, AGameState);
+===
+the debris fan uses the wrong lift
+src/Entities.pas
+---
+    SetSpawnField(Slot, EF_VEL_Y, (I + 4) * -DEBRIS_LIFT);
+--->
+    SetSpawnField(Slot, EF_VEL_Y, (I + 3) * -DEBRIS_LIFT);
+===
+debris carries the kind without the +1
+src/Entities.pas
+---
+    SetSpawnField(Slot, EF_STATE, Kind + 1);
+--->
+    SetSpawnField(Slot, EF_STATE, Kind);
+===
+the layer delta is not taken back out at spawn
+src/Entities.pas
+---
+                  E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
+--->
+                  E.Raw[EF_POS_X] - POSITION_BIAS,
+===
+a shatter randomises its frames instead of numbering them
+src/Entities.pas
+---
+    else if Kind = DEBRIS_SHATTER then
+      SetSpawnField(Slot, EF_FLAG1C, I);
+--->
+    else if Kind = DEBRIS_SHATTER then
+      SetSpawnField(Slot, EF_FLAG1C, 0);
+===
+every terrain splashes, not just water
+src/Entities.pas
+---
+    if TerrainId = TERRAIN_WATER_A then
+      PlaySound(SND_WATER01)
+    else if TerrainId = TERRAIN_WATER_B then
+      PlaySound(SND_WATER02);
+--->
+    PlaySound(SND_WATER01);

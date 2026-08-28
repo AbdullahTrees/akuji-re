@@ -113,6 +113,35 @@ const
   TILE_BIAS_TILES = $80;   { 128 }
 
   TILE_NONE = -1;          { Entity_TileCollide*'s "nothing solid that way" }
+
+  { --- Delphi's Random, from 0x00402AC4 ---------------------------------
+    Two instructions and a multiply:
+
+        RandSeed := RandSeed * $08088405 + 1
+        Result   := (N * RandSeed) shr 32
+
+    a linear congruential generator whose high bits are scaled into 0..N-1
+    without a division. It matters far more than an RTL detail normally would:
+    the game's debris, its scatter and its item drops all run off it, so
+    reproducing it exactly is what makes any of that replayable. The seed lives
+    at 0x0046E040. }
+  RANDOM_MULT = $08088405;
+  RANDOM_SEED_ADDR = $0046E040;
+
+  { --- Entity_SpawnDebris @ 0x00461874 ----------------------------------
+    Five particles of type 13, fanned upward at fixed speeds and scattered
+    horizontally at random. The impact sound depends on the KIND, and kind 0
+    asks the terrain - which is where terrain 3 and 4 turn out to mean water. }
+  DEBRIS_SPLASH   = 0;    { the sound comes from the terrain }
+  DEBRIS_IMPACT   = 1;
+  DEBRIS_SHATTER  = 2;
+  DEBRIS_LIFT     = 8;    { particle i leaves at (i + 4) * -8 }
+  DEBRIS_DEPTH    = 6;
+  DEBRIS_SPEED_MAX = 3;   { RandomBelow(3) + 1, so 1..3 }
+  TERRAIN_WATER_A = 3;
+  TERRAIN_WATER_B = 4;
+  SND_WATER01 = 31;  SND_WATER02 = 40;
+  SND_BOM02   = 22;  SND_BOM04   = 48;
   SCREEN_W       = $140;      { 320 }
   SCREEN_H       = $F0;       { 240 }
 
@@ -662,6 +691,12 @@ type
     SolidThreshold: Integer;     { 0x00484EF4, set per terrain }
     Fading: Boolean;             { suppresses the soft landing sound }
 
+    { The layer the entities live on, and the stage's terrain id. Both are
+      globals in the original - p_LayerInfo and the stage record's last int -
+      and both are read by code that has no other way to reach them. }
+    Layer: TLayerInfo;
+    TerrainId: Integer;
+
     { Scrolling is an INPUT to the tile query, not just a consequence of it:
       Entity_TileCollideX/Y take it as their fifth argument, because when the
       layer moves instead of the entity the tile under the entity differs. }
@@ -680,9 +715,12 @@ type
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; virtual; abstract;
     procedure Destroy(var E: TEntity; DropLoot: Boolean); virtual; abstract;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
-    procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual; abstract;
+    { 0x00461874. Real, not abstract: this is the whole function. }
+    procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual;
     procedure PlaySound(Id: Integer); virtual; abstract;
-    function RandomBelow(N: Integer): Integer; virtual; abstract;
+    { Delphi's Random(N), which the original's behaviour genuinely depends
+      on. Overridable only so a test can make a trace repeatable. }
+    function RandomBelow(N: Integer): Integer; virtual;
   end;
 
 type
@@ -944,7 +982,14 @@ function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
   over and must halve it identically. }
 function HalfExtent(V: Integer): Integer;
 
+{ 0x00402AC4. Delphi's Random(N) - the generator the game's behaviour
+  actually depends on, reproduced exactly so a run can be replayed. }
+function DelphiRandom(N: Integer): Integer;
+
 var
+  { 0x0046E040. Delphi's RandSeed. Set it to replay a sequence. }
+  RandomSeed: Cardinal = 0;
+
   { 0x0046D20C and 0x0046D210. Entity_UpdateAll clears both at the top and
     counts as it goes: every live slot, and every live slot that also holds a
     sprite. Nothing inside the update loop reads them back. }
@@ -1145,6 +1190,73 @@ begin
     if Tile >= SolidThreshold then
       Exit(Tile);
     Inc(Col);
+  end;
+end;
+
+{ 0x00402AC4. Delphi's Random(N). }
+function DelphiRandom(N: Integer): Integer;
+begin
+  RandomSeed := Cardinal(RandomSeed * RANDOM_MULT + 1);
+  Result := Integer(Cardinal((UInt64(Cardinal(N)) * UInt64(RandomSeed)) shr 32));
+end;
+
+function TEntityWorld.RandomBelow(N: Integer): Integer;
+begin
+  Result := DelphiRandom(N);
+end;
+
+{ Entity_SpawnDebris @ 0x00461874. }
+procedure TEntityWorld.SpawnDebris(const E: TEntity; Kind: Integer);
+var
+  I, Slot, Dir, Speed: Integer;
+begin
+  { The sound. Only kind 0 consults the terrain, and only two terrains say
+    anything - which is what identifies 3 and 4 as the water areas. }
+  if Kind = DEBRIS_SPLASH then
+  begin
+    if TerrainId = TERRAIN_WATER_A then
+      PlaySound(SND_WATER01)
+    else if TerrainId = TERRAIN_WATER_B then
+      PlaySound(SND_WATER02);
+  end
+  else if Kind = DEBRIS_IMPACT then
+    PlaySound(SND_BOM02)
+  else if Kind = DEBRIS_SHATTER then
+    PlaySound(SND_BOM04);
+
+  for I := 0 to EF_DEBRIS_SPEEDS - 1 do
+  begin
+    { The layer delta is SUBTRACTED from the spawn position. The particle is
+      created after this frame's scroll has been applied to its parent but
+      before Entity_UpdateAll carries it along too, so taking the delta back
+      out is what stops it being scrolled twice on its first frame. }
+    Slot := Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
+                  E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
+                  E.Raw[EF_POS_Y] - POSITION_BIAS - Layer.DeltaY);
+
+    { The original does NOT check this. On a full pool Entity_Spawn returns -1
+      and it writes the five particles at Entities[-1], i.e. over whatever sits
+      before the pool. Not reproduced - there is nothing to reproduce it INTO -
+      and the difference only shows on a pool that is already full. }
+    if Slot = SLOT_NONE then
+      Continue;
+
+    SetSpawnField(Slot, EF_STATE, Kind + 1);
+
+    Dir := HalfExtent(DirVelX(RandomBelow(DIR_COUNT)));
+    Speed := RandomBelow(DEBRIS_SPEED_MAX) + 1;
+    SetSpawnField(Slot, EF_VEL_X, Dir * Speed);
+    SetSpawnField(Slot, EF_VEL_Y, (I + 4) * -DEBRIS_LIFT);
+
+    SetSpawnField(Slot, EF_SCREEN_SPACE, 0);
+    SetSpawnField(Slot, EF_DEPTH, DEBRIS_DEPTH);
+
+    { The two effect kinds pick their frame differently: one at random, one
+      by position in the burst, so a shatter fans through its frames in order. }
+    if Kind = DEBRIS_IMPACT then
+      SetSpawnField(Slot, EF_FLAG1C, RandomBelow(2))
+    else if Kind = DEBRIS_SHATTER then
+      SetSpawnField(Slot, EF_FLAG1C, I);
   end;
 end;
 

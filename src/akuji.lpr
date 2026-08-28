@@ -2458,6 +2458,11 @@ type
     Killed: Integer;
     Sounds: Integer;
     LastSound: Integer;
+    { A real pool, so Spawn actually allocates and SpawnDebris can be watched
+      doing its work. It deliberately does NOT override SpawnDebris or
+      RandomBelow any more - those are implemented on TEntityWorld now, and
+      overriding them would test the double instead of the code. }
+    Pool: TEntityPool;
     function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
@@ -2467,9 +2472,7 @@ type
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
     procedure Destroy(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
-    procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
     procedure PlaySound(Id: Integer); override;
-    function RandomBelow(N: Integer): Integer; override;
   end;
 
 function TMapTiles.TileAt(TileX, TileY: Integer): Integer;
@@ -2513,21 +2516,23 @@ begin Result := False; end;
 function TCountingWorld.SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
 begin Result := False; end;
 function TCountingWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
-begin Result := SLOT_NONE; end;
+begin
+  if Pool = nil then
+    Exit(SLOT_NONE);
+  Result := Pool.Spawn(Kind, TypeId, X, Y);
+end;
 procedure TCountingWorld.Destroy(var E: TEntity; DropLoot: Boolean);
 begin Inc(Killed); E.Raw[EF_ALIVE] := 0; end;
 procedure TCountingWorld.SetSpawnField(Slot, IntIndex, Value: Integer);
-begin end;
-procedure TCountingWorld.SpawnDebris(const E: TEntity; Kind: Integer);
-begin end;
+begin
+  if Pool <> nil then
+    Pool.SetField(Slot, IntIndex, Value);
+end;
 procedure TCountingWorld.PlaySound(Id: Integer);
 begin
   Inc(Sounds);
   LastSound := Id;
 end;
-function TCountingWorld.RandomBelow(N: Integer): Integer;
-begin Result := 0; end;
-
 var
   { The dispatcher's two hooks are plain procedures, so their bookkeeping has to
     be global. TouchAbortAt is how the mid-loop abandon is provoked: the touch
@@ -3288,6 +3293,167 @@ begin
   end;
 end;
 
+{ --- Entity_SpawnDebris @ 0x00461874 -------------------------------------
+
+  This one cannot be checked against the original by emulation: it calls
+  PlaySound, which reaches into the DirectSound component, and the emulator
+  models the instruction set rather than the process. So it is checked against
+  its own arithmetic instead, which is weaker and worth saying plainly.
+
+  What IS pinned exactly is the RNG underneath it - Delphi's Random is
+  differential-tested against 0x00402AC4 - so the scatter is reproducible even
+  though the burst as a whole is not emulable. }
+function TestSpawnDebris(Log: TStringList): Integer;
+var
+  W: TCountingWorld;
+  Pool: TEntityPool;
+  E: TEntity;
+  I, N, Slot: Integer;
+  Lifts, Kinds, Frames: string;
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- Entity_SpawnDebris ---');
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  try
+    W.Pool := Pool;
+    W.TerrainId := TERRAIN_WATER_A;
+    W.Layer.DeltaX := 64;
+    W.Layer.DeltaY := -32;
+
+    FillChar(E, SizeOf(E), 0);
+    E.Raw[EF_POS_X] := POSITION_BIAS + 100 * 32;
+    E.Raw[EF_POS_Y] := POSITION_BIAS + 50 * 32;
+
+    RandomSeed := 12345;
+    W.Sounds := 0;
+    W.SpawnDebris(E, DEBRIS_SPLASH);
+
+    N := 0;
+    Lifts := '';
+    Kinds := '';
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = EF_DEBRIS_TYPE) then
+      begin
+        Inc(N);
+        Lifts := Lifts + Format('%d ', [Pool.Field(I, EF_VEL_Y)]);
+        Kinds := Kinds + Format('%d ', [Pool.Field(I, EF_STATE)]);
+      end;
+    Log.Add(Format('kind 0 on water terrain: %d particles, sound %d (%s)',
+      [N, W.LastSound, SoundNames[W.LastSound]]));
+    Log.Add(Format('  lifts %s / states %s', [Trim(Lifts), Trim(Kinds)]));
+
+    if N <> EF_DEBRIS_SPEEDS then
+    begin
+      Log.Add(Format('FAILED: the burst is always %d particles, got %d',
+        [EF_DEBRIS_SPEEDS, N]));
+      Inc(Result);
+    end;
+    if Trim(Lifts) <> '-32 -40 -48 -56 -64' then
+    begin
+      Log.Add('FAILED: the fan should be (i + 4) * -8');
+      Inc(Result);
+    end;
+    if Trim(Kinds) <> '1 1 1 1 1' then
+    begin
+      Log.Add('FAILED: every particle should carry Kind + 1 in EF_STATE');
+      Inc(Result);
+    end;
+    if (W.Sounds <> 1) or (W.LastSound <> SND_WATER01) then
+    begin
+      Log.Add('FAILED: terrain 3 should splash - water01, once');
+      Inc(Result);
+    end;
+
+    { Terrain that is not water says nothing at all for kind 0. }
+    Pool.Clear;
+    W.TerrainId := 1;
+    W.Sounds := 0;
+    W.SpawnDebris(E, DEBRIS_SPLASH);
+    if W.Sounds <> 0 then
+    begin
+      Log.Add('FAILED: only terrains 3 and 4 make a noise on kind 0');
+      Inc(Result);
+    end;
+
+    { Kind 2 numbers its particles' frames in order; kind 1 randomises them. }
+    Pool.Clear;
+    W.Sounds := 0;
+    W.SpawnDebris(E, DEBRIS_SHATTER);
+    Frames := '';
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = EF_DEBRIS_TYPE) then
+        Frames := Frames + Format('%d ', [Pool.Field(I, EF_FLAG1C)]);
+    Log.Add(Format('kind 2 frames: %s, sound %d (%s)',
+      [Trim(Frames), W.LastSound, SoundNames[W.LastSound]]));
+    if Trim(Frames) <> '0 1 2 3 4' then
+    begin
+      Log.Add('FAILED: a shatter should fan through its frames in order');
+      Inc(Result);
+    end;
+    if W.LastSound <> SND_BOM04 then
+    begin
+      Log.Add('FAILED: kind 2 is bom04');
+      Inc(Result);
+    end;
+
+    { The layer delta is taken back out of the spawn position, so a particle
+      does not get scrolled twice on the frame it is born. }
+    Pool.Clear;
+    W.SpawnDebris(E, DEBRIS_SHATTER);
+    Slot := -1;
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = EF_DEBRIS_TYPE) then
+      begin
+        Slot := I;
+        Break;
+      end;
+    if Slot >= 0 then
+    begin
+      Log.Add(Format('spawn x %d (parent %d, layer delta %d)',
+        [Pool.Field(Slot, EF_POS_X) - POSITION_BIAS,
+         E.Raw[EF_POS_X] - POSITION_BIAS, W.Layer.DeltaX]));
+      if Pool.Field(Slot, EF_POS_X) - POSITION_BIAS
+         <> (E.Raw[EF_POS_X] - POSITION_BIAS) - W.Layer.DeltaX then
+      begin
+        Log.Add('FAILED: the layer delta should be subtracted at spawn');
+        Inc(Result);
+      end;
+    end;
+
+    { And the scatter is reproducible, because the RNG is. }
+    Pool.Clear;
+    RandomSeed := 999;
+    W.SpawnDebris(E, DEBRIS_IMPACT);
+    Lifts := '';
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = EF_DEBRIS_TYPE) then
+        Lifts := Lifts + Format('%d ', [Pool.Field(I, EF_VEL_X)]);
+    Pool.Clear;
+    RandomSeed := 999;
+    W.SpawnDebris(E, DEBRIS_IMPACT);
+    Kinds := '';
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = EF_DEBRIS_TYPE) then
+        Kinds := Kinds + Format('%d ', [Pool.Field(I, EF_VEL_X)]);
+    Log.Add(Format('same seed, same scatter: [%s]', [Trim(Lifts)]));
+    if Lifts <> Kinds then
+    begin
+      Log.Add('FAILED: the same seed must give the same burst');
+      Inc(Result);
+    end;
+    if Trim(Lifts) = '0 0 0 0 0' then
+    begin
+      Log.Add('FAILED: every particle got zero horizontal speed');
+      Inc(Result);
+    end;
+  finally
+    W.Free;
+    Pool.Free;
+  end;
+end;
+
 function SelfTestEntities(Log: TStringList): Integer;
 var
   GameDir, ExeName: string;
@@ -3454,6 +3620,7 @@ begin
     EntityPlayerTouch := @CountTouch;
     EntityTakeProjectileHits := @CountHit;
     TouchAbortAt := -1;
+    W.Pool := Pool;
 
     { (a) the scroll is carried, unless the type is screen-space. }
     Pool.Clear;
@@ -3750,6 +3917,7 @@ begin
     Pool.Free;
   end;
 
+  Inc(Result, TestSpawnDebris(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
@@ -3959,6 +4127,11 @@ begin
           begin
             BuildEntityAndLayer;
             Got := TileEdgeDistY(E, L, Key('f.delta', 0));
+          end;
+        $00402AC4:
+          begin
+            RandomSeed := Cardinal(Key('f.seed', 0));
+            Got := DelphiRandom(Key('f.n', 0));
           end;
         $00451354:
           begin

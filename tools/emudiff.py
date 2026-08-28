@@ -45,6 +45,7 @@ GHIDRA = r'C:\Users\Abdullah\Documents\ghidra_12.0.4_PUBLIC\support\analyzeHeadl
 P_LAYERINFO = 0x00483BF4          # the layer array itself, stride 0x20
 ENTITY_AT = 0x60000000            # scratch: somewhere to put a TEntity
 ENTITY_INTS = 0x41
+RANDOM_SEED_ADDR = 0x0046E040   # Delphi's RandSeed, in BSS
 
 
 def ints(vals):
@@ -202,7 +203,31 @@ def cases_boxes():
     return out
 
 
+def cases_random():
+    """Delphi's Random(N) @ 0x402AC4 vs Entities.DelphiRandom.
+
+    Two instructions and a widening multiply, and the game's debris scatter,
+    item drops and effect frames all run off it - so reproducing it exactly is
+    what makes any of that replayable rather than merely plausible.
+
+    The seed is a global in BSS, which a PE does not store, so each case writes
+    it first. That also makes every case independent: the emulator builds a
+    fresh machine per call, so the seed is whatever mem= put there.
+    """
+    out = ["# Delphi Random(N) - N in EAX, seed at 0x0046E040"]
+    seeds = [0, 1, 0xDEADBEEF, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 12345]
+    for sd in seeds:
+        for n in (2, 3, 64, 100, 1000, 0x7FFFFFFF):
+            out.append('CASE rnd_%X_%d 0x402AC4 eax=%d mem=0x%X:%s '
+                       'f.seed=%d f.n=%d'
+                       % (sd, n, n, RANDOM_SEED_ADDR, le([sd if sd < 2**31
+                                                          else sd - 2**32]),
+                          sd if sd < 2**31 else sd - 2**32, n))
+    return out
+
+
 SETS = {
+    'random': cases_random,
     'compare': cases_compare,
     'angle': cases_angle,
     'edgedist': cases_edgedist,
