@@ -56,6 +56,9 @@
       0x0045B0CC  type 38  a turret, and the second thing to use a child as
                            its own state machine
       0x0045B260  type 39  its shot, which charges before it flies
+      0x0045B3EC  type 40  a springboard - the first thing that writes to the
+                           PLAYER
+      0x0045B62C  type 41  a hopper
 
   And the dispatcher they hang off:
 
@@ -668,6 +671,92 @@ const
   T39_PUFF_TYPE = 7;
   T39_PUFF_VARIANT = 1;
 
+  { --- Type 40, the springboard -----------------------------------------
+    Two entities in one, by variant, and the first handler that reaches into
+    the PLAYER'S ENTITY and rewrites it.
+
+    VARIANT 1 is a shooter. It only acts while on screen, counts a cooldown
+    down to zero, and then fires - but only if the player's box overlaps its
+    own at EIGHT times width and two times height, which is a very wide, flat
+    trigger area rather than a touch. The shot is a type 39 with its HP set to
+    1, which is what stops it releasing this parent the way type 38's does -
+    see type 39, where only a zero-HP shot writes to its owner. So the same
+    shot type serves two parents with different lifetimes.
+
+    Its aim is Compare(self.x, player.x) shifted left five - a direction, not
+    an angle - and a zero is corrected to 0x20, so a shot fired at a player
+    standing exactly in line still goes somewhere.
+
+    STATE 2 is the launch, and it is worth reading in full because everything
+    it touches belongs to somebody else:
+
+        player.EF_VEL_Y   := -0xD0
+        player.EF_CHILD_A := abs(player.EF_VEL_X) * input.AxisX, if any
+        player.EF_STATE   := 2
+        player.block A[1] := 1
+        player.EF_RIDDEN  := 0
+        player.block A[8] := 1
+
+    The horizontal one is the interesting line: the player keeps the SPEED it
+    arrived with but takes the DIRECTION from whatever is being held at the
+    moment of the launch, so you can turn round on the spring. With no input
+    the field is left alone entirely.
+
+    Nothing here sets state 2. The touch handler does. }
+  T40_VARIANTS = 2;
+  T40_FRAMES = 4;
+  T40_TABLE_ADDR = $0046BF90;
+  T40_SPRITES: array[0..T40_VARIANTS - 1, 0..T40_FRAMES - 1] of Integer =
+    ((123, 124, 125, 124), (192, 193, 194, 193));
+  T40_COOLDOWN_ADDR = $0046BFB0;
+  T40_COOLDOWN: array[0..2] of Integer = (240, 180, 180);
+  T40_SETTLE = $40;
+  T40_SHOOTER_VARIANT = 1;
+  T40_OFFSCREEN_MARGIN = 2;
+  T40_TRIGGER_SCALE_X = 8;   { a wide, flat trigger - not a touch }
+  T40_TRIGGER_SCALE_Y = 2;
+  T40_SHOT_TYPE = $27;       { 39, but with HP 1 so it never frees this parent }
+  T40_SHOT_LIFT = $A0;
+  T40_AIM_SHIFT = 5;
+  T40_AIM_ZERO = $20;        { a shot straight at the player still goes right }
+  T40_LAUNCH_VY = -$D0;
+  T40_LAUNCH_SOUND = $1A;
+  T40_BOUNCE_FRAMES = 3;  T40_BOUNCE_TICKS = 4;  T40_BOUNCE_CYCLES = 4;
+  T40_BOUNCE_TIMER = $78;
+
+  { --- Type 41, the hopper ----------------------------------------------
+    Crouches, springs, and turns round every so many landings.
+
+      0  settle 1 px, and on HARD ONLY double its speed - the same one-line
+         scaling type 30 has, and the second instance of it
+      1  idle, and ONLY while on screen: a four-frame loop and a countdown of
+         30, 20 or 10 frames by difficulty. At the end, sound 0x21, jump
+         velocity -0x60, and frame 4
+      2  five ticks of anticipation, then frame 5
+      3  airborne: drift by its speed, gravity 4 to a terminal 0x200, and on
+         landing snap flush to the tile edge, go back to 1, and count the
+         landing. After block A[1] landings it reverses
+
+    The turn counter is EF_CHILD_B and the landing test uses the same
+    edge-distance snap the falling item does. Like type 38, the idle counts
+    only while visible - so a hopper off screen is frozen mid-crouch rather
+    than hopping in place. }
+  T41_FRAMES = 4;  T41_TICKS = 6;
+  T41_TABLE_ADDR = $0046BFBC;
+  T41_SPRITES: array[0..5] of Integer = (126, 127, 128, 127, 129, 130);
+  T41_WAIT_ADDR = $0046BFD4;
+  T41_WAIT: array[0..2] of Integer = (30, 20, 10);
+  T41_SETTLE = $20;
+  T41_HARD = 2;
+  T41_OFFSCREEN_MARGIN = 2;
+  T41_JUMP_SOUND = $21;
+  T41_JUMP_VY = -$60;
+  T41_CROUCH_FRAME = 4;
+  T41_AIR_FRAME = 5;
+  T41_CROUCH_TICKS = 4;
+  T41_GRAVITY = 4;
+  T41_TERMINAL = $200;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -917,6 +1006,15 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045B3EC. A springboard, and a shooter, by variant. See the T40_ block -
+  its launch rewrites six fields of the player's entity. }
+procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
+                              var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045B62C. A hopper. See the T41_ block. }
+procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045B0CC. A turret. Waits only while on screen, then fires a type 39. }
 procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
@@ -1652,6 +1750,192 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T41_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T41_SPRITES[Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T41_SETTLE);
+    if World.PlayerDifficulty = T41_HARD then
+      E.Raw[EF_FACING] := E.Raw[EF_FACING] * 2;
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  { Off screen it does not even count - frozen mid-crouch, not hopping in
+    place. Same gate type 38 uses. }
+  if (E.Raw[EF_STATE] = 1) and (not IsOffScreen(E, T41_OFFSCREEN_MARGIN)) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T41_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T41_FRAMES;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T41_WAIT[D] then
+    begin
+      World.PlaySound(T41_JUMP_SOUND);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := T41_CROUCH_FRAME;
+      E.Raw[EF_VEL_Y] := T41_JUMP_VY;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T41_CROUCH_TICKS then
+    begin
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := T41_AIR_FRAME;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
+    Inc(E.Raw[EF_VEL_Y], T41_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T41_TERMINAL then
+      E.Raw[EF_VEL_Y] := T41_TERMINAL;
+
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+      { Turns round after block A[1] landings. }
+      Inc(E.Raw[EF_CHILD_B]);
+      if E.Raw[EF_CHILD_B] > E.Raw[EF_BLOCK_A + 1] then
+      begin
+        E.Raw[EF_CHILD_B] := 0;
+        E.Raw[EF_FACING] := -E.Raw[EF_FACING];
+      end;
+    end;
+
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
+procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
+                              var Inp: TInputState; World: TEntityWorld);
+var
+  Frame, Row, D, Slot, Aim: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T40_FRAMES) then
+    Frame := 0;
+  Row := E.Raw[EF_VARIANT];
+  if (Row < 0) or (Row >= T40_VARIANTS) then
+    Row := 0;
+  E.Raw[EF_ANIM_ID] := T40_SPRITES[Row][Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T40_SETTLE);
+    if E.Raw[EF_VARIANT] = T40_SHOOTER_VARIANT then
+    begin
+      E.Raw[EF_VULN_KIND] := 1;
+      E.Raw[EF_CULL_OFFSCREEN] := 0;
+    end;
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if (E.Raw[EF_STATE] = 1) and (E.Raw[EF_VARIANT] = T40_SHOOTER_VARIANT)
+     and (not IsOffScreen(E, T40_OFFSCREEN_MARGIN)) and (World.Pool <> nil) then
+  begin
+    if E.Raw[EF_CHILD_B] > 0 then
+      Dec(E.Raw[EF_CHILD_B]);
+    if E.Raw[EF_CHILD_B] = 0 then
+    begin
+      Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+      if EntitiesOverlap(E, Player^, T40_TRIGGER_SCALE_X,
+                         T40_TRIGGER_SCALE_Y) then
+      begin
+        E.Raw[EF_CHILD_B] := T40_COOLDOWN[D];
+        Slot := World.Spawn(EKIND_MINOR, T40_SHOT_TYPE,
+                            E.Raw[EF_POS_X] - POSITION_BIAS
+                              - World.Layer.DeltaX,
+                            E.Raw[EF_POS_Y] - World.Layer.DeltaY
+                              - POSITION_BIAS + T40_SHOT_LIFT);
+        World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+        { HP 1 - so this shot never writes back to its parent. }
+        World.SetSpawnField(Slot, EF_HP, 1);
+        Aim := Compare(E.Raw[EF_POS_X], Player^.Raw[EF_POS_X]) shl T40_AIM_SHIFT;
+        if Aim = 0 then
+          Aim := T40_AIM_ZERO;
+        World.SetSpawnField(Slot, EF_VEL_X, Aim);
+      end;
+    end;
+  end;
+
+  { The launch. Nothing here sets state 2 - the touch handler does. }
+  if (E.Raw[EF_STATE] = 2) and (World.Pool <> nil) then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_CHILD_A] := 0;
+    E.Raw[EF_TIMER] := T40_BOUNCE_TIMER;
+    E.Raw[EF_FLAG1C] := 0;
+
+    Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+    Player^.Raw[EF_VEL_Y] := T40_LAUNCH_VY;
+    { Keeps the SPEED it arrived with, takes the DIRECTION from what is held
+      now - so you can turn round on the spring. With no input, untouched. }
+    if Inp.AxisX <> 0 then
+      Player^.Raw[EF_CHILD_A] := Abs(Player^.Raw[EF_VEL_X]) * Inp.AxisX;
+    Player^.Raw[EF_STATE] := 2;
+    Player^.Raw[EF_BLOCK_A + 1] := 1;
+    Player^.Raw[EF_RIDDEN] := 0;
+    Player^.Raw[EF_BLOCK_A + 8] := 1;
+    World.PlaySound(T40_LAUNCH_SOUND);
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T40_BOUNCE_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T40_BOUNCE_FRAMES - 1 then
+      begin
+        E.Raw[EF_FLAG1C] := 0;
+        Inc(E.Raw[EF_CHILD_A]);
+        if E.Raw[EF_CHILD_A] > T40_BOUNCE_CYCLES then
+          E.Raw[EF_STATE] := 1;
+      end;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
@@ -3055,11 +3339,13 @@ begin
       37: EntityUpdate_Type37(E^, AGameState, World);
       38: EntityUpdate_Type38(E^, AGameState, World);
       39: EntityUpdate_Type39(E^, AGameState, World);
+      40: EntityUpdate_Type40(E^, AGameState, Inp, World);
+      41: EntityUpdate_Type41(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 41 arms are in HANDLER_ADDR, untranslated }
+      { the other 39 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
