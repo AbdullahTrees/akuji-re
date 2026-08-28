@@ -60,6 +60,8 @@
                            PLAYER
       0x0045B62C  type 41  a hopper
       0x0045B7C4  type 42  a boss - six states, five difficulty tables
+      0x0045BBD8  type 43  armour, chosen by variant
+      0x0045BC00  type 44  type 42's shot
 
   And the dispatcher they hang off:
 
@@ -817,6 +819,36 @@ const
   T42_RETREAT_STEP = $20;
   T42_RETREAT_LEN = $3C;
 
+  { --- Types 43 and 44 --------------------------------------------------
+    TYPE 43 is four instructions and one of them is the point:
+
+        EF_VULN_KIND := variant + 0x5A
+
+    which lands exactly on the armour block Entity_TakeProjectileHits already
+    knows - VULN_ARMOUR_1 is 0x5A, VULN_ARMOUR_2 0x5B, VULN_IMMUNE_ALT 0x5C
+    and VULN_ONLY_POWER3 0x5D. So one entity type covers all four armours and
+    the placement's variant picks which, which is why those four constants sit
+    contiguously rather than being scattered like the other vulnerability
+    kinds. Written EVERY frame, not once, so nothing can leave it armoured
+    differently.
+
+    TYPE 44 is type 42's shot: an eight-frame loop at three ticks, thrown
+    upward at -0xB0 and pulled down at gravity 2 while drifting by whatever
+    horizontal velocity it was spawned with. It has no Entity_Destroy at all -
+    like types 9, 11 and 12 it relies on being culled off screen. }
+  T43_VARIANTS = 4;
+  T43_TABLE_ADDR = $0046C02C;
+  T43_SPRITES: array[0..T43_VARIANTS - 1] of Integer = (121, 122, 179, 442);
+  T43_VULN_BASE = $5A;      { VULN_ARMOUR_1 - see the block above }
+
+  T44_FRAMES = 8;  T44_TICKS = 2;
+  T44_TABLE_ADDR = $0046C03C;
+  T44_SPRITES: array[0..T44_FRAMES - 1] of Integer =
+    (505, 506, 507, 508, 509, 510, 511, 512);
+  T44_LAUNCH_VY = -$B0;
+  T44_GRAVITY = 2;
+  T44_TERMINAL = $200;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1071,6 +1103,15 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045BBD8. Armour. Its VARIANT selects which of the four armour
+  vulnerability kinds it has - see the T43_ block. }
+procedure EntityUpdate_Type43(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045BC00. Type 42's shot: thrown up, pulled down, culled off screen. }
+procedure EntityUpdate_Type44(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045B7C4. A boss. Six states, and its timings scale with its own HP as
   well as with the difficulty - see the T42_ block. }
@@ -1815,6 +1856,59 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type43(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Variant: Integer;
+begin
+  Variant := E.Raw[EF_VARIANT];
+  if (Variant < 0) or (Variant >= T43_VARIANTS) then
+    Variant := 0;
+  E.Raw[EF_ANIM_ID] := T43_SPRITES[Variant];
+
+  { Every frame, not once - so nothing can leave it armoured differently. }
+  E.Raw[EF_VULN_KIND] := E.Raw[EF_VARIANT] + T43_VULN_BASE;
+
+  { The result is discarded: this type has nothing to do while dying. }
+  EntityUpdateDying(E, AGameState, World);
+end;
+
+procedure EntityUpdate_Type44(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T44_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T44_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T44_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T44_FRAMES;
+  end;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_Y] := T44_LAUNCH_VY;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_VEL_Y], T44_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T44_TERMINAL then
+      E.Raw[EF_VEL_Y] := T44_TERMINAL;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
 end;
 
 procedure EntityUpdate_Type42(var E: TEntity; AGameState: Integer;
@@ -3591,11 +3685,13 @@ begin
       40: EntityUpdate_Type40(E^, AGameState, Inp, World);
       41: EntityUpdate_Type41(E^, AGameState, World);
       42: EntityUpdate_Type42(E^, AGameState, World);
+      43: EntityUpdate_Type43(E^, AGameState, World);
+      44: EntityUpdate_Type44(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 38 arms are in HANDLER_ADDR, untranslated }
+      { the other 36 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
