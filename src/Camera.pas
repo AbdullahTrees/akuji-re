@@ -102,7 +102,22 @@ begin
   Result := Trunc((L.MapTilesY - VIEW_TILES_Y) * L.TileH);
 end;
 
-{ Camera_ShouldScrollX @ 0x00459C1C. }
+{ Camera_ShouldScrollX @ 0x00459C1C.
+
+  The destination is converted with PixelOf, NOT OriginPixel - the original
+  writes `origin + vel - 0x10000`, and `- 0xFFE1` when that goes negative,
+  which is 0x10000 minus 31. That is the bias-subtracting form.
+
+  It was OriginPixel here, which leaves POSITION_BIAS in: 2048 pixels of it.
+  MaxScrollX for a 30-tile map is 640, so the "would this take the view off
+  the map?" test compared 2048-and-up against 640 and refused EVERY scroll.
+  The camera never followed the player at all, and the player simply walked
+  off the right of the screen.
+
+  The two conversions are one character apart in the source and 2048 pixels
+  apart in effect. Nothing caught it because no test moved a camera; the
+  session self-test does now, and it walks the player out of the dead zone
+  and requires the view to follow. }
 function ShouldScrollX(const L: TLayerInfo; PixelX, Vel: Integer): Boolean;
 var
   Dest: Integer;
@@ -111,7 +126,7 @@ begin
   if not (((PixelX < DEADZONE_LEFT) and (Vel < 0)) or
           ((PixelX >= DEADZONE_RIGHT) and (Vel > 0))) then
     Exit;
-  Dest := OriginPixel(L.OriginX + Vel);
+  Dest := PixelOf(L.OriginX + Vel);
   if (Vel < 0) and (Dest < 0) then
     Exit;
   if (Vel > 0) and (Dest > MaxScrollX(L)) then
@@ -128,7 +143,7 @@ begin
   if not (((PixelY < DEADZONE_TOP) and (Vel < 0)) or
           ((PixelY >= DEADZONE_BOTTOM) and (Vel > 0))) then
     Exit;
-  Dest := OriginPixel(L.OriginY + Vel);
+  Dest := PixelOf(L.OriginY + Vel);
   if (Vel < 0) and (Dest < 0) then
     Exit;
   if (Vel > 0) and (Dest > MaxScrollY(L)) then

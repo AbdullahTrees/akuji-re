@@ -409,9 +409,24 @@ end;
 
 procedure TGameSession.Frame(var AGameState: Integer);
 begin
-  { FWorld.Layer is passed straight through as the var parameter, so a scroll
-    applied inside the frame is applied to the same storage the collision
-    queries read. There is no second copy to keep in step. }
+  { THE SCROLL DELTA IS PER-FRAME. TFrm_main_AppIdle @ 0x00464D30 zeroes
+    p_LayerInfo+8 and +0x0C at the top of every frame - twice over, once on
+    entry and again right after TDDDD_Clear - and Camera_ApplyMove* is the
+    only thing that ever sets them.
+
+    That matters because Entity_UpdateAll adds the delta to every non
+    screen-space entity's position, which is how the world carries things
+    along when the view scrolls. Leave it set and the carry never stops: one
+    scroll and every entity drifts in that direction forever. Two mana stones
+    flying steadily upward off the top of the screen is exactly what it looks
+    like.
+
+    FWorld.Layer is passed straight through as the var parameter below, so a
+    scroll applied inside the frame is applied to the same storage the
+    collision queries read. There is no second copy to keep in step. }
+  FWorld.Layer.DeltaX := 0;
+  FWorld.Layer.DeltaY := 0;
+
   FRunner.SpawnNearCamera(FEvents, FPool, FWorld.Layer, CamTileX, CamTileY,
                           Player, AGameState);
 

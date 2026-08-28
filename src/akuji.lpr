@@ -6454,7 +6454,7 @@ var
   Map: TTileMap;
   Frames: TSpriteSet;
   S: TGameSession;
-  GS, I, Bad, StartY, Fell, Moved, StartX: Integer;
+  GS, I, Bad, StartY, Fell, Moved, StartX, Slot: Integer;
   Placed, LiveAfter: Integer;
 
   procedure Want(Cond: Boolean; const What: string);
@@ -6597,6 +6597,94 @@ begin
          Format('walking 60 frames moved %d sub-pixels, want %d - one pixel '
            + 'a frame', [Moved, 60 * (1 shl PLAYER_WALK_SHIFT)]));
 
+    { What is actually on screen at the start of a stage, and where. }
+    Log.Add('');
+    Log.Add('  live entities after the opening frames:');
+    Log.Add('    slot  type  anim  screenX  screenY  spriteW  spriteH  vis');
+    for I := 0 to 63 do
+      if S.Pool.Alive[I] then
+        Log.Add(Format('    %4d  %4d  %4d  %7d  %7d  %7d  %7d  %s',
+          [I, S.Pool.Field(I, EF_TYPE), S.Pool.Field(I, EF_ANIM_ID),
+           PixelOf(S.Pool.Field(I, EF_POS_X)),
+           PixelOf(S.Pool.Field(I, EF_POS_Y)),
+           S.Pool.Field(I, EF_EXTENT_X), S.Pool.Field(I, EF_EXTENT_Y),
+           BoolToStr(S.Sprites.GetVisible(S.Pool.Field(I, EF_SPRITE)), True)]));
+    Log.Add('');
+
+    { --- the camera follows, and only outside the dead zone ---------- }
+    { The layer must not move while the player is inside the dead zone, and
+      must move once it leaves. Rather than assume where the player is, walk
+      a frame at a time and record the screen position at which the camera
+      FIRST moves - that pins DEADZONE_RIGHT from behaviour instead of
+      restating the constant. }
+    StartX := PixelOf(S.Layer.OriginX);
+    Moved := -1;
+    S.Input.AxisX := 1;
+    for I := 1 to 200 do
+    begin
+      S.Frame(GS);
+      if (Moved < 0) and (PixelOf(S.Layer.OriginX) <> StartX) then
+        Moved := PixelOf(S.Pool.Field(0, EF_POS_X));
+    end;
+    S.Input.AxisX := 0;
+    Log.Add(Format('walking right: camera first moved at player x %d, '
+      + 'ended player x %d camera x %d',
+      [Moved, PixelOf(S.Pool.Field(0, EF_POS_X)),
+       PixelOf(S.Layer.OriginX)]));
+
+    Want(Moved >= 0,
+         'the camera never followed - the player walked off the right of the '
+         + 'screen instead of the view scrolling');
+    { 177 written out, not DEADZONE_RIGHT: an expectation phrased in terms of
+      the constant it is checking cannot fail. }
+    Want(Moved >= 177,
+         Format('the camera started scrolling at player x %d, before the '
+           + 'dead zone edge at 177', [Moved]));
+    { Once scrolling, the walk goes into the view and the player stays put. }
+    Want(PixelOf(S.Pool.Field(0, EF_POS_X)) <= 180,
+         Format('the player is at screen x %d - the scroll is not absorbing '
+           + 'the walk', [PixelOf(S.Pool.Field(0, EF_POS_X))]));
+    { How FAR it scrolls depends on the map - the player meets walls and
+      gaps - so the check is that it scrolled at all and that it stopped
+      inside the limit the original computes: (MapTilesX - 10) * TileW, read
+      off Camera_ShouldScrollX at 0x00459C1C. }
+    Want(PixelOf(S.Layer.OriginX) > StartX,
+         Format('the view did not scroll: %d', [PixelOf(S.Layer.OriginX)]));
+    Want(PixelOf(S.Layer.OriginX) <= (Map.MapWidth - 10) * Map.TileWidth,
+         Format('the view scrolled to %d, past the map limit %d',
+           [PixelOf(S.Layer.OriginX),
+            (Map.MapWidth - 10) * Map.TileWidth]));
+
+    { --- the scroll carry stops when the scroll does ------------------ }
+    { Entity_UpdateAll adds LayerInfo.Delta to every non screen-space entity,
+      which is how the world carries things along as the view moves.
+      TFrm_main_AppIdle zeroes the delta at the top of EVERY frame, so the
+      carry lasts exactly one frame. Leave it set and every entity drifts for
+      ever after a single scroll - which looked like items flying off the top
+      of the screen. Find a spawned entity, let go of the controls, and
+      require it to stay where it is. }
+    Slot := -1;
+    for I := 1 to 63 do
+      if S.Pool.Alive[I] then
+        Slot := I;
+    if Slot < 0 then
+      Log.Add('  (nothing but the player is alive; the carry is not tested)')
+    else
+    begin
+      StartX := S.Pool.PosX(Slot);
+      StartY := S.Pool.PosY(Slot);
+      for I := 1 to 60 do
+        S.Frame(GS);
+      Want((S.Pool.PosX(Slot) = StartX) and (S.Pool.PosY(Slot) = StartY),
+           Format('entity %d drifted %d,%d sub-pixels over 60 idle frames '
+             + 'after the view scrolled - the layer delta is not being '
+             + 'cleared each frame',
+             [Slot, S.Pool.PosX(Slot) - StartX, S.Pool.PosY(Slot) - StartY]));
+      Want(S.Layer.DeltaX = 0,
+           Format('the layer delta is still %d at the end of a frame',
+                  [S.Layer.DeltaX]));
+    end;
+
     { --- the event table places entities ----------------------------- }
     { Walk the camera over the whole map and count what gets placed. If the
       spawn walk were not wired, or the camera tile were computed wrongly,
@@ -6611,10 +6699,19 @@ begin
     end;
     LiveAfter := S.Pool.LiveCount;
     Log.Add(Format('camera swept across the map: at most %d entities live at '
-      + 'once, %d at the end', [Placed, LiveAfter]));
+      + 'once, %d at the end, %d sprites held',
+      [Placed, LiveAfter, S.Sprites.LiveCount]));
     Want(Placed > 1,
          'sweeping the camera placed nothing - the event spawn walk is not '
          + 'connected, or the camera tile is wrong');
+
+    { Every entity holds a sprite, and the pool is 256. If sprites were not
+      released the sweep would exhaust it and later spawns would silently
+      fail - which is what a screen slowly filling with stuck sprites looks
+      like. One handle per live entity, exactly. }
+    Want(S.Sprites.LiveCount = LiveAfter,
+         Format('%d entities are holding %d sprites',
+                [LiveAfter, S.Sprites.LiveCount]));
   finally
     S.Free;
     Frames.Free;

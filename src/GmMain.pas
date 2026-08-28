@@ -267,9 +267,15 @@ end;
   stage STARTED at, and reading them here is why the view never scrolled. }
 procedure TFrm_main.DrawScene;
 begin
+  { The TILESET, rec[5 + layer], not the surface SET, rec[0]. The two are
+    different numbers - a set is a file to load, a tileset is a slot inside
+    the set once it is loaded - and passing rec[0] here drew surface slot 1,
+    which is the menu background, so the map came out black. Terrain_Configure
+    settles it: the original hands TMYBGANIME p_Surfaces[rec[5]] for exactly
+    this layer. Stage 1 is set 1, tileset slot 6. }
   if (FMap <> nil) and (FStages <> nil) then
     FMap.Draw(DDDD1.Canvas, FSurfaces,
-              FStages.SurfaceSet[Settings.CurrentStage],
+              FStages.Tileset[Settings.CurrentStage, 0],
               PixelOf(FSession.Layer.OriginX), PixelOf(FSession.Layer.OriginY),
               SCREEN_W, SCREEN_H);
   FSession.Sprites.DrawAll(DDDD1.Canvas, FSurfaces);
