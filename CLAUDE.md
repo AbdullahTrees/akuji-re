@@ -935,10 +935,28 @@ where the next pointer begins — and two of the four are flush with their use i
 both directions (type 24 is placed 16 times with `A` = 0..15, one of each; type
 25 uses 0..2 and has 3 entries).
 
+### Commit each function the moment it is green
+
+**One function, one commit.** Not at the end of a batch, not "once the next one
+is done too" — the moment it builds and its test passes. Everything below is a
+consequence of not doing that.
+
+**Never `git checkout -- <path>` on source.** It is unrecoverable. If a revert
+is genuinely wanted, `git stash push` keeps a copy. `git checkout` has now
+destroyed uncommitted work here **twice**, and both times this file already
+said not to use it — so the rule was never the problem, the habit was. The
+second time it wiped an unfinished `DelphiRandom` and `SpawnDebris`, recoverable
+only because the patch script that generated them happened to still exist. That
+was luck.
+
+The point is not that recovery worked. It is that **committed work cannot be
+lost this way at all**, which makes the whole failure mode unreachable rather
+than survivable.
+
 **Restore mutations by copying a file, never with `git checkout`.** Twice now
-that has misfired: once it reverted a whole file of uncommitted work, and once
-it silently did nothing because the file was untracked, leaving the mutation
-live in a run that then reported PASSED.
+that has misfired the other way too: once it reverted a whole file of
+uncommitted work, and once it silently did nothing because the file was
+untracked, leaving the mutation live in a run that then reported PASSED.
 
 ### `tools/mutate.sh` — use it, do not hand-roll another one
 
