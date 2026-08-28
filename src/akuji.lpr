@@ -2448,6 +2448,8 @@ type
     Killed: Integer;
     Sounds: Integer;
     LastSound: Integer;
+    ProgressSet: string;
+    FlagFor: Integer;
     { NOTE: Pool is NOT redeclared here. It lives on TEntityWorld, and
       declaring it again shadowed the base field - the double's Spawn used
       one and Entity_Destroy used the other, which was nil, so every
@@ -2462,6 +2464,8 @@ type
     procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure PlaySound(Id: Integer); override;
+    function EventProgressIndex(EventId: Integer): Integer; override;
+    procedure SetProgress(Index: Integer); override;
   end;
 
 function TMapTiles.TileAt(TileX, TileY: Integer): Integer;
@@ -2520,6 +2524,20 @@ procedure TCountingWorld.PlaySound(Id: Integer);
 begin
   Inc(Sounds);
   LastSound := Id;
+end;
+
+function TCountingWorld.EventProgressIndex(EventId: Integer): Integer;
+begin
+  { Stands in for looking ParamB up in the event table. -1 means "no event",
+    which is what the base class says when nothing is wired. }
+  if EventId < 0 then
+    Exit(-1);
+  Result := FlagFor;
+end;
+
+procedure TCountingWorld.SetProgress(Index: Integer);
+begin
+  ProgressSet := ProgressSet + Format('%d ', [Index]);
 end;
 var
   { The dispatcher's two hooks are plain procedures, so their bookkeeping has to
@@ -3278,6 +3296,164 @@ begin
     end;
   finally
     W.Free;
+  end;
+end;
+
+{ --- Entity_TouchPickup / Entity_TouchHeal @ 0x00458274 / 0x00458490 -----
+
+  The Mana Stone's own arithmetic. The interesting boundary is that the
+  counter goes up BEFORE the target is compared, so a stone that lands you
+  exactly on the target counts as reaching it - which is the difference
+  between < and <= and is worth a case of its own. }
+function TestTouchHandlers(Log: TStringList): Integer;
+var
+  W: TCountingWorld;
+  Pool: TEntityPool;
+  P: TPlayerState;
+  Slot, Fx: Integer;
+
+  procedure Fresh(Variant, Counter, TargetIdx: Integer);
+  begin
+    Pool.Clear;
+    FillChar(P, SizeOf(P), 0);
+    P.Counter := Counter;
+    P.TargetIndex := TargetIdx;
+    P.Lives := 1;
+    P.MaxLives := 3;
+    Slot := Pool.Spawn(EKIND_MINOR, 5, 0, 0);
+    Pool.SetField(Slot, EF_VARIANT, Variant);
+    Pool.SetField(Slot, EF_SPRITE, SPRITE_NONE);
+    Pool.SetField(Slot, EF_EVENT_ID, 7);
+    W.Sounds := 0;
+    W.LastSound := -1;
+    W.ProgressSet := '';
+    W.FlagFor := 42;
+  end;
+
+  function EffectVariant: Integer;
+  var
+    I: Integer;
+  begin
+    Result := -1;
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = PICKUP_EFFECT_TYPE) then
+        Exit(Pool.Field(I, EF_VARIANT));
+  end;
+
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- Entity_TouchPickup / Entity_TouchHeal ---');
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  try
+    W.Pool := Pool;
+
+    { A small stone is worth one, a large one ten, and neither reaches the
+      first goal of 20 from zero. }
+    Fresh(0, 0, 0);
+    EntityTouchPickup(Pool.Entity(Slot)^, P, W);
+    Fx := EffectVariant;
+    Log.Add(Format('small stone: counter %d, sound %d (%s), effect variant %d, '
+      + 'flags [%s]', [P.Counter, W.LastSound, SoundNames[W.LastSound], Fx,
+      Trim(W.ProgressSet)]));
+    if P.Counter <> MANA_SMALL then
+    begin
+      Log.Add('FAILED: a variant 0 stone is worth one');
+      Inc(Result);
+    end;
+    if W.LastSound <> SND_GET01 then
+    begin
+      Log.Add('FAILED: a small stone is get01');
+      Inc(Result);
+    end;
+    if Fx <> PICKUP_FX_NORMAL then
+    begin
+      Log.Add('FAILED: the effect should be the plain one');
+      Inc(Result);
+    end;
+    if Trim(W.ProgressSet) <> '42' then
+    begin
+      Log.Add('FAILED: the event''s progress flag should be set');
+      Inc(Result);
+    end;
+    if P.MaxLives <> 3 then
+    begin
+      Log.Add('FAILED: no level-up was due');
+      Inc(Result);
+    end;
+
+    Fresh(1, 0, 0);
+    EntityTouchPickup(Pool.Entity(Slot)^, P, W);
+    if (P.Counter <> MANA_LARGE) or (W.LastSound <> SND_GET02) then
+    begin
+      Log.Add('FAILED: a variant 1 stone is worth ten, and is get02');
+      Inc(Result);
+    end;
+
+    { EXACTLY reaching the target counts, because the counter is raised
+      before the comparison. One below it does not. }
+    Fresh(0, MANA_TARGETS[0] - 1, 0);
+    EntityTouchPickup(Pool.Entity(Slot)^, P, W);
+    Log.Add(Format('stone landing exactly on goal %d: lives %d/%d, target now '
+      + '%d, sound %s, effect %d',
+      [MANA_TARGETS[0], P.Lives, P.MaxLives, P.TargetIndex,
+       SoundNames[W.LastSound], EffectVariant]));
+    if (P.TargetIndex <> 1) or (P.MaxLives <> 4) or (P.Lives <> 4) then
+    begin
+      Log.Add('FAILED: reaching the goal raises the maximum and refills');
+      Inc(Result);
+    end;
+    if W.LastSound <> SND_POWER02 then
+    begin
+      Log.Add('FAILED: a level-up is power02');
+      Inc(Result);
+    end;
+    if EffectVariant <> PICKUP_FX_LEVELUP then
+    begin
+      Log.Add('FAILED: the effect should be the level-up one');
+      Inc(Result);
+    end;
+
+    Fresh(0, MANA_TARGETS[0] - 2, 0);
+    EntityTouchPickup(Pool.Entity(Slot)^, P, W);
+    if P.TargetIndex <> 0 then
+    begin
+      Log.Add('FAILED: one short of the goal is not reaching it');
+      Inc(Result);
+    end;
+
+    { The heal refills and does nothing else to the maximum. }
+    Fresh(0, 5, 0);
+    EntityTouchHeal(Pool.Entity(Slot)^, P, W);
+    Log.Add(Format('heal: lives %d/%d, counter %d, sound %s, effect %d',
+      [P.Lives, P.MaxLives, P.Counter, SoundNames[W.LastSound],
+       EffectVariant]));
+    if (P.Lives <> 3) or (P.MaxLives <> 3) then
+    begin
+      Log.Add('FAILED: a heal refills to the maximum and does not raise it');
+      Inc(Result);
+    end;
+    if P.Counter <> 5 then
+    begin
+      Log.Add('FAILED: a heal is not a mana stone');
+      Inc(Result);
+    end;
+    if (W.LastSound <> SND_KACHI02) or (EffectVariant <> PICKUP_FX_HEAL) then
+    begin
+      Log.Add('FAILED: the heal has its own sound and effect variant');
+      Inc(Result);
+    end;
+
+    { Past the end of the goal table nothing can be reached. }
+    if ManaTarget(MANA_TARGET_COUNT) <> MaxInt then
+    begin
+      Log.Add('FAILED: past the table the goal must be unreachable');
+      Inc(Result);
+    end;
+  finally
+    W.Free;
+    Pool.Free;
   end;
 end;
 
@@ -4259,6 +4435,7 @@ begin
   Inc(Result, TestSpawnDebris(Log));
   Inc(Result, TestDestroy(Log));
   Inc(Result, TestSolidCollide(Log));
+  Inc(Result, TestTouchHandlers(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
