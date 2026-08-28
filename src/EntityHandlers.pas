@@ -64,6 +64,8 @@
       0x0045BC00  type 44  type 42's shot
       0x0045BCC4  type 45  a crumbling platform
       0x0045BD9C  type 46  a homing enemy that wakes when you come close
+      0x0045BF58  type 47  a lobber, on a wait-wind-rest cycle
+      0x0045C0F4  type 48  its shot - a ball that bounces four times
 
   And the dispatcher they hang off:
 
@@ -897,6 +899,69 @@ const
   T46_WAKE_SOUND = $1D;
   T46_TURN_TIMER = 1;       { Steer's timer slot }
 
+  { --- Type 47, the lobber ----------------------------------------------
+    Four states on a loop: wait, wind up, fire, rest, and back to wait.
+
+      1  idle, a two-frame loop; leaves after 120, 60 or 60 frames
+      2  wind up, but ONLY while on screen - the same gate types 38 and 41
+         use. Five frames; at the end it throws TWO type-48 shots, taking
+         their headings from the first two entries of an angle table shifted
+         left five and giving both the same upward velocity of -0x40
+      3  rest, on the same two-frame loop as the idle, for 180, 120 or 60
+         frames
+
+    Its two difficulty tables run in OPPOSITE directions and that is the
+    interesting part: the wait before winding up is 120, 60, 60 - shorter on
+    harder - while the rest afterwards is 180, 120, 60. Both make it fire more
+    often, but they were tuned as separate numbers rather than one.
+
+    The angle table it draws from starts with the same (-1, 1, ...) run type
+    42's fan uses, but only the first two entries are read here. }
+  T47_FRAMES = 2;  T47_TICKS = 8;
+  T47_TABLE_ADDR = $0046C0CC;
+  T47_SPRITES: array[0..4] of Integer = (139, 140, 141, 142, 143);
+  T47_WAIT_ADDR = $0046C0E0;
+  T47_REST_ADDR = $0046C0EC;
+  T47_ANGLES_ADDR = $0046C108;
+  T47_WAIT: array[0..2] of Integer = (120, 60, 60);
+  T47_REST: array[0..2] of Integer = (180, 120, 60);
+  T47_ANGLES: array[0..1] of Integer = (-1, 1);
+  T47_WIND_FIRST = 1;
+  T47_WIND_LAST = 3;
+  T47_OFFSCREEN_MARGIN = 2;
+  T47_SHOT_TYPE = $30;      { 48 }
+  T47_SHOT_LIFT = $200;
+  T47_SHOT_VY = -$40;
+  T47_ANGLE_SHIFT = 5;
+  T47_FIRE_SOUND = $1E;
+
+  { --- Type 48, the bouncing shot ---------------------------------------
+    Type 47's throw. Four bounces, and each one is shorter than the last: the
+    rebound velocity is (bounces left + 1) * -0x10, so it goes -0x50, -0x40,
+    -0x30, -0x20 and then stops existing. That is the whole of its arc - there
+    is no separate decay term.
+
+    On the SECOND-TO-LAST bounce it arms EF_DEATH_TIMER to 0xE10, which is
+    3600 frames - a minute at 60fps, and far longer than it can survive its
+    remaining bounce. Entity_UpdateAll uses that field's parity for the damage
+    flicker, so the practical effect is that the ball starts blinking on its
+    last bounce rather than that it times out.
+
+    It also copies field 0x2C into its velocity on any frame that field is
+    non-zero, then clears it - a one-shot handoff slot. Entity_Spawn zeroes
+    0x2C, and type 47 sets EF_VEL_X directly, so nothing in the shipped game
+    ever puts anything there. Reproduced because the read is real. }
+  T48_FRAMES = 4;  T48_TICKS = 8;
+  T48_TABLE_ADDR = $0046C0F8;
+  T48_SPRITES: array[0..T48_FRAMES - 1] of Integer = (237, 238, 239, 238);
+  T48_BOUNCES = 4;
+  T48_GRAVITY = 2;
+  T48_TERMINAL = $200;
+  T48_BOUNCE_SOUND = $21;
+  T48_REBOUND_STEP = -$10;
+  T48_BLINK_TIMER = $E10;   { armed on the second-to-last bounce }
+  T48_HANDOFF = $2C;        { the one-shot velocity slot }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1151,6 +1216,14 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045C0F4. Type 47's shot: four bounces, each shorter than the last. }
+procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045BF58. A lobber: wait, wind up, throw two shots, rest, repeat. }
+procedure EntityUpdate_Type47(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045BCC4. A crumbling platform - the only reader of EF_RIDDEN. }
 procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
@@ -1912,6 +1985,155 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T48_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T48_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_CHILD_A] := T48_BOUNCES;
+  end;
+
+  { A one-shot handoff slot. Nothing in the shipped game writes it - see the
+    T48_ block - but the read is real, so it is here. }
+  if E.Raw[T48_HANDOFF] <> 0 then
+  begin
+    E.Raw[EF_VEL_X] := E.Raw[T48_HANDOFF];
+    E.Raw[T48_HANDOFF] := 0;
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T48_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T48_FRAMES;
+  end;
+
+  if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+    E.Raw[EF_VEL_X] := World.EdgeDistX(E, E.Raw[EF_VEL_X]);
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+  Inc(E.Raw[EF_VEL_Y], T48_GRAVITY);
+  if E.Raw[EF_VEL_Y] > T48_TERMINAL then
+    E.Raw[EF_VEL_Y] := T48_TERMINAL;
+
+  if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+  begin
+    World.PlaySound(T48_BOUNCE_SOUND);
+    Dec(E.Raw[EF_CHILD_A]);
+    { On the second-to-last bounce. Entity_UpdateAll flickers the sprite on
+      this field's parity, so what this really does is start it blinking. }
+    if E.Raw[EF_CHILD_A] = 1 then
+      E.Raw[EF_DEATH_TIMER] := T48_BLINK_TIMER;
+    E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    E.Raw[EF_STATE] := 2;
+  end;
+
+  Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    { Each rebound is shorter than the last, and this is the only decay. }
+    E.Raw[EF_VEL_Y] := (E.Raw[EF_CHILD_A] + 1) * T48_REBOUND_STEP;
+  end;
+
+  if E.Raw[EF_CHILD_A] = 0 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type47(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, I, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T47_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T47_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+    E.Raw[EF_STATE] := 1;
+
+  { The idle and the rest share one two-frame loop. }
+  if (E.Raw[EF_STATE] = 1) or (E.Raw[EF_STATE] = 3) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T47_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T47_FRAMES;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T47_WAIT[D] then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := T47_WIND_FIRST;
+    end;
+  end;
+
+  { The wind-up only advances while visible. }
+  if (E.Raw[EF_STATE] = 2) and (not IsOffScreen(E, T47_OFFSCREEN_MARGIN)) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T47_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T47_WIND_LAST then
+      begin
+        for I := 0 to High(T47_ANGLES) do
+        begin
+          Slot := World.Spawn(EKIND_MINOR, T47_SHOT_TYPE,
+                              E.Raw[EF_POS_X] - POSITION_BIAS
+                                - World.Layer.DeltaX,
+                              E.Raw[EF_POS_Y] - World.Layer.DeltaY
+                                - POSITION_BIAS - T47_SHOT_LIFT);
+          World.SetSpawnField(Slot, EF_VEL_X,
+                              T47_ANGLES[I] shl T47_ANGLE_SHIFT);
+          World.SetSpawnField(Slot, EF_VEL_Y, T47_SHOT_VY);
+        end;
+        World.PlaySound(T47_FIRE_SOUND);
+        E.Raw[EF_STATE] := 3;
+        E.Raw[EF_BLOCK_B] := 0;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T47_REST[D] then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
@@ -3872,11 +4094,13 @@ begin
       44: EntityUpdate_Type44(E^, AGameState, World);
       45: EntityUpdate_Type45(E^, AGameState, World);
       46: EntityUpdate_Type46(E^, AGameState, World);
+      47: EntityUpdate_Type47(E^, AGameState, World);
+      48: EntityUpdate_Type48(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 34 arms are in HANDLER_ADDR, untranslated }
+      { the other 32 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
