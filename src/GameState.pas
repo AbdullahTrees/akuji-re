@@ -73,7 +73,27 @@ type
     WaitOnFlag: Byte;        // +0x19  <- p_WaitOn        0x0046D2E4
     FullScreenFlag: Byte;    // +0x1A  <- p_FullScreenOn  0x0046D268
     DebugLogFlag: Byte;      // +0x1B  <- p_DebugLog      0x0046CDB8
-    Unknown1C: array[0..7] of Byte;  // +0x1C..+0x23
+    { +0x1C and +0x1D are two PERSISTENT unlock flags. Game_StartOrLoad copies
+      each into the progress block at the start of every game - +0x1C into
+      Progress[1185], +0x1D into Progress[1194] - and each gates one half of a
+      locked-door pair in the event data:
+
+          ev001 tile (24,7)   blocked by 1185 / needs 1185
+          ev065 tile (10,7)   blocked by 1194 / needs 1194
+
+      Both pairs are the same construction. While the flag is clear a type-25
+      door of VARIANT 2 stands there and does nothing; once it is set that
+      record retires and a variant-0 door appears in its place carrying
+      sub-op 0 - load stage 65. So these are two entrances to the game's last
+      map, and because they live in system.dat rather than in save.dat they
+      survive starting a new game. That is what makes them extras unlocks
+      rather than progress.
+
+      They are copied INTO the progress block, not read from it, which is why
+      no event ever sets 1185 or 1194: nothing in the game can. }
+    ExtraDoor1: Byte;                // +0x1C  -> Progress[1185]
+    ExtraDoor2: Byte;                // +0x1D  -> Progress[1194]
+    Unknown1E: array[0..5] of Byte;  // +0x1E..+0x23
     Volume: Integer;         // +0x24  0..10, SE VOLUME
     GallerySel: Integer;     // +0x28  0..6
     Unknown2C: array[0..6] of Byte;  // +0x2C..+0x32  gallery unlock flags

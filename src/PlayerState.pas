@@ -38,7 +38,7 @@ unit PlayerState;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, GameState;
 
 { ===========================================================================
   The player controller - Player_Update @ 0x004585A8, the 
@@ -356,6 +356,73 @@ function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
   to have passed 999 first. }
 function ManaTarget(Index: Integer): Integer;
 
+type
+  TStartMode = (smNewGame, smContinue);
+
+  { What Game_StartOrLoad needs from the parts of the game this does not
+    reconstruct. Opening returns True while the cutscene is still running. }
+  TStartHost = class
+  public
+    function Opening: Boolean; virtual;
+    procedure PlayMusic(Track: Integer; Restart: Boolean); virtual;
+  end;
+
+const
+  START_STAGE       = 1;      { Settings.CurrentStage for a new game }
+  START_MUSIC_TRACK = 1;      { and the playlist entry that goes with it }
+
+  { The two persistent unlocks, and where they land. }
+  PROGRESS_EXTRA_DOOR_1 = 1185;
+  PROGRESS_EXTRA_DOOR_2 = 1194;
+
+  { Progress[7..9] are zeroed EXPLICITLY, on top of the bulk clear that has
+    already zeroed them, and before the load rather than after it. The
+    redundancy is the tell that they mean something - 7 and 8 are both used as
+    alternative guards in the shipped scripts - and the placement is the
+    difference that matters: unlike the session flags, a CONTINUE keeps
+    whatever the save holds for them. }
+  PROGRESS_NEWGAME_FIRST = 7;
+  PROGRESS_NEWGAME_LAST  = 9;
+
+{ 0x00462F40. NEW GAME and CONTINUE are one function; the title's sub-mode is
+  the only thing that separates them.
+
+      sub-mode 0   new game. Runs the opening cutscene FIRST, and while it is
+                   still playing does nothing at all and returns - so this is
+                   called every frame until the cutscene ends.
+      sub-mode 1   continue. Everything below happens exactly as for a new
+                   game, and only then is data\save.dat read over the top.
+
+  That ordering is the whole shape of it, and it explains several things that
+  look odd in isolation. Every default is written before the load, so a
+  missing or unreadable save leaves a perfectly good new game rather than a
+  half-initialised one - the original does not check the read at all, only the
+  open. The music track is set to 1 and then the load overwrites it, which is
+  why CONTINUE resumes the saved stage's music. And the session flags are
+  applied AFTER the load, which is what makes difficulty a session fact rather
+  than a saved one.
+
+  The two settings bytes go in before the load too, so they land in the
+  progress block whichever path was taken - see TGameSettings.ExtraDoor1.
+
+  ONE ANOMALY, reproduced. The difficulty is copied from the settings twice:
+  once at the top, and again at the end but only `if not UseArchive`. On the
+  CONTINUE path the load has overwritten it with the SAVED difficulty in
+  between, so with the archive in use a loaded game keeps the difficulty it
+  was saved with, and without it the current setting wins. The archive flag
+  has nothing to do with difficulty; the two are coupled only by where that
+  second write happens to sit. DDDD1Init sets UseArchive to 1, so the shipped
+  game always takes the first branch and the second write is dead - which is
+  presumably why nobody noticed.
+
+  The presentation is left to the caller: Opening and PlayMusic are what the
+  original reaches through the form and the playlist. }
+function GameStartOrLoad(var P: TPlayerState; var ASettings: TGameSettings;
+                         Mode: TStartMode; Host: TStartHost;
+                         UseArchive: Boolean;
+                         const SaveFileName: string;
+                         var AGameState: Integer): Boolean;
+
 implementation
 
 { Game_StartOrLoad runs these AFTER the optional save load, so they apply to a
@@ -444,6 +511,73 @@ begin
   if (Index < 0) or (Index >= MANA_TARGET_COUNT) then
     Exit(MaxInt);
   Result := MANA_TARGETS[Index];
+end;
+
+function TStartHost.Opening: Boolean;
+begin
+  Result := False;
+end;
+
+procedure TStartHost.PlayMusic(Track: Integer; Restart: Boolean);
+begin
+end;
+
+function GameStartOrLoad(var P: TPlayerState; var ASettings: TGameSettings;
+                         Mode: TStartMode; Host: TStartHost;
+                         UseArchive: Boolean;
+                         const SaveFileName: string;
+                         var AGameState: Integer): Boolean;
+var
+  I: Integer;
+begin
+  { The cutscene gates only the new-game path, and while it runs NOTHING below
+    happens - not even the game state changes. }
+  if (Mode = smNewGame) and Host.Opening then
+    Exit(False);
+
+  Result := True;
+  AGameState := GS_STAGE_BEGIN;
+
+  InitNewGame(P, ASettings.GameLevel);
+
+  { Copied in before the load, so they apply to a continued game too. }
+  if ASettings.ExtraDoor1 = 1 then
+    P.Progress[PROGRESS_EXTRA_DOOR_1] := 1;
+  if ASettings.ExtraDoor2 = 1 then
+    P.Progress[PROGRESS_EXTRA_DOOR_2] := 1;
+
+  for I := PROGRESS_NEWGAME_FIRST to PROGRESS_NEWGAME_LAST do
+    P.Progress[I] := 0;
+
+  ASettings.CurrentStage := START_STAGE;
+
+  { The new game's music starts before the track number is even stored - the
+    original hard-codes playlist entry 1 here and only then writes it down. }
+  if Mode = smNewGame then
+    Host.PlayMusic(START_MUSIC_TRACK, True);
+  P.MusicTrack := START_MUSIC_TRACK;
+
+  if Mode = smContinue then
+  begin
+    { A save that will not open leaves the new game standing. The original
+      ignores the READ's result too, which would leave a partly-overwritten
+      record on a short file; LoadSave refuses one instead, and says so. }
+    if LoadSave(P, SaveFileName) then
+      ASettings.CurrentStage := P.SavedStage;
+    Host.PlayMusic(P.MusicTrack, True);
+  end;
+
+  { After the load, so difficulty is a session fact and not a saved one. }
+  ApplySessionFlags(P, P.Difficulty);
+
+  { The second difficulty write. See the header - it is unreachable in the
+    shipped game because DDDD1Init sets UseArchive, and it is here because
+    removing it would be a change rather than a translation. }
+  if not UseArchive then
+  begin
+    P.Difficulty := ASettings.GameLevel;
+    ApplySessionFlags(P, P.Difficulty);
+  end;
 end;
 
 initialization

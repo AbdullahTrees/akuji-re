@@ -1836,6 +1836,213 @@ end;
      right-facing sprite is the left-facing one plus ten.
   --------------------------------------------------------------------------- }
 
+{ Game_StartOrLoad @ 0x00462F40.
+
+  NEW GAME and CONTINUE differ by one branch, so what is worth checking is not
+  each path on its own but what the ORDER of the writes makes true: that a
+  continue is a new game with a file read over the top, that a failed read
+  therefore leaves a playable new game, and that difficulty survives the read
+  because the session flags are applied afterwards. }
+type
+  { Counts the calls the original makes through the form, and can hold the
+    cutscene open. }
+  TStartStub = class(TStartHost)
+  public
+    Busy: Boolean;
+    Tracks: string;
+    function Opening: Boolean; override;
+    procedure PlayMusic(Track: Integer; Restart: Boolean); override;
+  end;
+
+function TStartStub.Opening: Boolean;
+begin
+  Result := Busy;
+end;
+
+procedure TStartStub.PlayMusic(Track: Integer; Restart: Boolean);
+begin
+  Tracks := Tracks + Format('%d ', [Track]);
+end;
+
+function TestGameStart(Log: TStrings; const GameDir: string): Integer;
+var
+  P: TPlayerState;
+  Cfg: TGameSettings;
+  H: TStartStub;
+  GS, Bad, SavedStage, SavedMusic, SavedDiff: Integer;
+  SaveName: string;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+  procedure FreshSettings(Level: Integer);
+  begin
+    FillChar(Cfg, SizeOf(Cfg), 0);
+    Cfg.GameLevel := Level;
+    Cfg.CurrentStage := 999;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- Game_StartOrLoad ---');
+  SaveName := IncludeTrailingPathDelimiter(GameDir) + 'data' + PathDelim
+              + 'save.dat';
+
+  H := TStartStub.Create;
+  try
+    { --- the cutscene holds everything back -------------------------- }
+    FreshSettings(1);
+    FillChar(P, SizeOf(P), $AB);
+    GS := GS_TITLE_MENU;
+    H.Busy := True;
+    Want(not GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS),
+         'the cutscene was running but the game started anyway');
+    Want(GS = GS_TITLE_MENU,
+         'the game state moved on while the cutscene was still running');
+    Want(Cfg.CurrentStage = 999,
+         'the settings were touched while the cutscene was still running');
+    Want(H.Tracks = '', 'music started while the cutscene was still running');
+    Want(P.Progress[0] = $AB,
+         'the player state was written while the cutscene was still running');
+
+    { CONTINUE does not wait for it. That is what says the gate is on the
+      new-game path specifically and not on the function. }
+    H.Busy := True;
+    H.Tracks := '';
+    FreshSettings(1);
+    GS := GS_TITLE_MENU;
+    Want(GameStartOrLoad(P, Cfg, smContinue, H, True, SaveName, GS),
+         'CONTINUE waited for the opening cutscene');
+
+    { --- a new game -------------------------------------------------- }
+    H.Busy := False;
+    H.Tracks := '';
+    FreshSettings(1);
+    GS := GS_TITLE_MENU;
+    Want(GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS),
+         'a new game would not start');
+    Want(GS = GS_STAGE_BEGIN,
+         Format('a new game left the state at %d, want %d',
+                [GS, GS_STAGE_BEGIN]));
+    Want(Cfg.CurrentStage = START_STAGE,
+         Format('a new game starts at stage %d, want %d',
+                [Cfg.CurrentStage, START_STAGE]));
+    Want(P.MusicTrack = START_MUSIC_TRACK,
+         Format('a new game set music track %d, want %d',
+                [P.MusicTrack, START_MUSIC_TRACK]));
+    Want(Trim(H.Tracks) = '1', 'the new game played ' + H.Tracks);
+    Want(P.Lives = DEFAULT_LIVES, 'a new game does not start on three lives');
+    Want(P.SpawnTileX = DEFAULT_SPAWN_X, 'the spawn point is wrong');
+    Want(P.Progress[0] = 1, 'flag 0 is not set, so no 0000 guard would hold');
+    Want(P.Head[ABILITY_DASH] = 0, 'a new game starts with the dash unlocked');
+    { GameLevel 1 publishes itself as flag 5. }
+    Want((P.Progress[5] = 1) and (P.Progress[6] = 0) and (P.Progress[10] = 0),
+         'difficulty 1 did not publish itself as Progress[5]');
+
+    { --- the two persistent unlocks ---------------------------------- }
+    FreshSettings(0);
+    GS := GS_TITLE_MENU;
+    GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS);
+    Want((P.Progress[PROGRESS_EXTRA_DOOR_1] = 0)
+         and (P.Progress[PROGRESS_EXTRA_DOOR_2] = 0),
+         'the extra doors are open without the settings saying so');
+
+    FreshSettings(0);
+    Cfg.ExtraDoor1 := 1;
+    Cfg.ExtraDoor2 := 1;
+    GS := GS_TITLE_MENU;
+    GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS);
+    Want((P.Progress[PROGRESS_EXTRA_DOOR_1] = 1)
+         and (P.Progress[PROGRESS_EXTRA_DOOR_2] = 1),
+         'the settings unlocks did not reach the progress block');
+
+    { --- a continue, against the shipped save ------------------------ }
+    if not LoadSave(P, SaveName) then
+      Log.Add('  (no shipped save.dat - the continue path is not exercised)')
+    else
+    begin
+      SavedStage := P.SavedStage;
+      SavedMusic := P.MusicTrack;
+      SavedDiff  := P.Difficulty;
+      Log.Add(Format('save.dat: stage %d, music %d, difficulty %d',
+        [SavedStage, SavedMusic, SavedDiff]));
+
+      { The settings must disagree with the save, or the two branches of the
+        anomaly below would give the same answer and neither assertion would
+        mean anything. The shipped save is difficulty 2, so ask for 0. }
+      if SavedDiff = 0 then
+      begin
+        Log.Add('  the shipped save is difficulty 0; this test needs one that'
+          + ' is not, and can no longer tell the two writes apart');
+        Inc(Bad);
+      end;
+
+      H.Tracks := '';
+      FreshSettings(0);
+      GS := GS_TITLE_MENU;
+      Want(GameStartOrLoad(P, Cfg, smContinue, H, True, SaveName, GS),
+           'a continue with a readable save returned False');
+      Want(Cfg.CurrentStage = SavedStage,
+           Format('a continue went to stage %d, want the saved %d',
+                  [Cfg.CurrentStage, SavedStage]));
+      Want(P.MusicTrack = SavedMusic,
+           Format('a continue plays track %d, want the saved %d',
+                  [P.MusicTrack, SavedMusic]));
+      Want(Trim(H.Tracks) = IntToStr(SavedMusic),
+           'the continue played ' + H.Tracks);
+      Want(P.Head[ABILITY_DASH] = 1,
+           'the continue did not restore the abilities in the save');
+      Want(P.Progress[0] = 1, 'the continue left flag 0 clear');
+
+      { WITH the archive - which is what the shipped game does - the loaded
+        difficulty stands, even though the settings say 2. }
+      Want(P.Difficulty = SavedDiff,
+           Format('with the archive a continue kept difficulty %d, want the'
+             + ' saved %d and not the settings 0', [P.Difficulty, SavedDiff]));
+
+      { WITHOUT it the second write fires and the settings win. This is the
+        anomaly in the header; it is dead in the shipped game and is asserted
+        so that it stays reproduced rather than quietly dropped. }
+      FreshSettings(0);
+      GS := GS_TITLE_MENU;
+      GameStartOrLoad(P, Cfg, smContinue, H, False, SaveName, GS);
+      Want(P.Difficulty = 0,
+           Format('without the archive a continue kept difficulty %d, want 0'
+             + ' from the settings', [P.Difficulty]));
+      { Difficulty 0 publishes itself as Progress[10], and the saved 2 would
+        have published itself as Progress[6] - so this is what says the
+        session flags were republished and not merely left. }
+      Want((P.Progress[10] = 1) and (P.Progress[6] = 0),
+           'the second difficulty write did not republish the session flags');
+    end;
+
+    { --- a continue with no save at all ------------------------------ }
+    H.Tracks := '';
+    FreshSettings(0);
+    GS := GS_TITLE_MENU;
+    Want(GameStartOrLoad(P, Cfg, smContinue, H, True,
+                         GameDir + PathDelim + 'no-such-save.dat', GS),
+         'a continue with no save file returned False');
+    Want(Cfg.CurrentStage = START_STAGE,
+         Format('a failed load left stage %d, want a clean new game at %d',
+                [Cfg.CurrentStage, START_STAGE]));
+    Want(P.Lives = DEFAULT_LIVES,
+         'a failed load did not leave a playable new game');
+    Want(P.Progress[0] = 1, 'a failed load left flag 0 clear');
+    Want(Trim(H.Tracks) = '1',
+         'a failed load played ' + H.Tracks + ', want the default track');
+  finally
+    H.Free;
+  end;
+
+  Result := Bad;
+  if Result = 0 then
+    Log.Add('OK - a continue is a new game with a file read over the top');
+end;
+
 function SelfTestPlayer(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -2154,6 +2361,8 @@ begin
     Log.Add('FAILED: could not read the shipped save');
     Inc(Result);
   end;
+
+  Inc(Result, TestGameStart(Log, GameDir));
 
   Log.Add('');
   if Result = 0 then
