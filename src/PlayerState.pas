@@ -88,8 +88,9 @@ uses
   three were frameless and had to be created by hand.
 
   6 - GLIDE, entered from the air by pressing UP with no horizontal input,
-      after having jumped. Gravity is 2 instead of 4, holding jump adds -0x20
-      of lift each frame, and steering is +-4 per frame capped at +-0x40 - a
+      after having jumped. Gravity is 2 instead of 4, a fresh jump PRESS adds
+      -0x20 of lift (an edge - the test is Button and not ButtonLatch, so
+      HOLDING does nothing), and steering is +-4 per frame capped at +-0x40 - a
       quarter of walking speed. A four-frame wing flap, A-B-C-B. Touching
       anything ends it: effect, sound 9, back to state 0.
 
@@ -224,7 +225,7 @@ const
 
   { --- The three delegated states ----------------------------------------- }
   GLIDE_GRAVITY     = 2;        { against PLAYER_GRAVITY = 4 }
-  GLIDE_LIFT        = $20;      { subtracted from vy while jump is held }
+  GLIDE_LIFT        = $20;      { subtracted from vy on a fresh jump press }
   GLIDE_ACCEL       = 4;        { per frame, from the horizontal axis }
   GLIDE_MAX_SPEED   = $40;
   GLIDE_FRAME_RISE  = 4;        { frames per animation step while rising }

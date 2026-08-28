@@ -162,7 +162,7 @@ body. Those whose bodies have been read carry a suffix:
 | `0x45A5D4` | `EntityUpdate_Type32_Emitter` | read | invisible spawner; config in block A, state in block B |
 | `0x45A698` | `EntityUpdate_Type33_Explosion` | corroborated | six particles using **both** direction tables at the same index |
 | `0x45A7BC` | `EntityUpdate_Type36_FallingItem` | read | gravity 8 capped at `$200`, then snap-to-edge on landing |
-| `0x4593B0` | `Player_UpdateGlide` | read | state 6. Gravity 2, `-0x20` of lift while jump is held, steering capped at `±0x40`, four-frame flap. Gated on ability byte `Head[7]` |
+| `0x4593B0` | `Player_UpdateGlide` | read | state 6. Gravity 2, `-0x20` of lift on each fresh jump **press** (an edge, not a hold), steering capped at `±0x40`, four-frame flap. Gated on ability byte `Head[7]` |
 | `0x459624` | `Player_UpdateAirDash` | read | state 7. **No gravity term at all**; launched at `dir shl 3` and bled off by `ApproachZero`. Phases through solids whose `EF_VULN_KIND` is `0x5C`. Gated on `Head[6]` |
 | `0x459828` | `Player_UpdateKnockback` | read | state 8. Reads no input. On landing → state 3; if `Lives` is 0 it spawns three souls at headings 0/`0x14`/`0x28` and enters state 9 |
 

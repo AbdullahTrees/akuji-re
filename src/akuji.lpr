@@ -494,7 +494,7 @@ function SelfTestDirections(Log: TStrings): Integer;
 var
   E: TEntity;
   T: TEntityType;
-  PosBad, Expect, ColBad: Integer;
+  PosBad, Expect, ColBad, Kind0, Kind1, Kind2: Integer;
   I, D, Got, Bad, RoundTrips: Integer;
   Expected: Integer;
   X, Y: Integer;
@@ -560,6 +560,7 @@ begin
     shipped table, and those two facts are what make it a dead column rather
     than an undiscovered field. }
   ColBad := 0;
+  Kind0 := 0; Kind1 := 0; Kind2 := 0;
   for I := 0 to ENTITY_TYPE_COUNT - 1 do
   begin
     T := EntityType(I);
@@ -585,6 +586,38 @@ begin
   Log.Add(Format('type table: cols 5 and 10 boolean, col 7 dead - %d violations over %d types',
     [ColBad, ENTITY_TYPE_COUNT]));
   Inc(Result, ColBad);
+
+  { --- column 15 is EF_SOLID ---------------------------------------------
+    Entity_Spawn's mapping puts column 15 at int $3E, and Entity_SolidCollideX
+    and ...Y read that as a solidity KIND: 1 blocks the player in Y only,
+    2 in X only, 3 or more in both. If that reading is right the shipped table
+    should be almost all zeroes with a handful of level furniture, which is
+    exactly what it is - and nothing should be 3 or more, because the game has
+    no entity that blocks both ways. }
+  ColBad := 0;
+  Kind0 := 0; Kind1 := 0; Kind2 := 0;
+  for I := 0 to ENTITY_TYPE_COUNT - 1 do
+  begin
+    T := EntityType(I);
+    case T.Raw[TYPE_COL_SOLID] of
+      0: Inc(Kind0);
+      1: Inc(Kind1);
+      2: Inc(Kind2);
+    else
+      Log.Add(Format('  type %d: solidity kind %d - the game has no such case',
+        [I, T.Raw[TYPE_COL_SOLID]]));
+      Inc(ColBad);
+    end;
+  end;
+  Log.Add(Format('type table col 15 (EF_SOLID): %d inert, %d floor-only, %d wall-only',
+    [Kind0, Kind1, Kind2]));
+  Inc(Result, ColBad);
+  if (Kind0 <> 76) or (Kind1 <> 4) or (Kind2 <> 1) then
+  begin
+    Log.Add(Format('FAILED: expected 76 / 4 / 1, got %d / %d / %d',
+      [Kind0, Kind1, Kind2]));
+    Inc(Result);
+  end;
 
   { --- the position -> pixel conversion -------------------------------------
 

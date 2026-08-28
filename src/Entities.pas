@@ -128,8 +128,21 @@ const
                             fire push-against triggers, and event sub-ops 8 and
                             16 go the other way, from the event to the entity
                             it spawned. -1 on spawn is what named this. }
-  EF_TYPEF_0C    = $32;   { <- type table +0x0C .. +0x18 land at $32..$35 }
-  EF_TYPEF_20    = $37;
+  { --- The type table's 18 columns, exactly as Entity_Spawn copies them -----
+
+        col   0        -> int $05   the drawn sprite id
+        col   1        -> int $24   EF_HP
+        col   2        -> int $23
+        col   3 ..  6  -> int $32 .. $35
+        col   7        -> NOWHERE. Never copied, and zero in all 81 rows.
+        col   8 .. 17  -> int $37 .. $40
+
+    Read straight off Entity_Spawn @ 0x004610C4, so the gap at column 7 is the
+    original's own and not a mis-transcription. Note the crossover: column 1
+    goes to $24 and column 2 to $23, the other way round from the obvious
+    reading. }
+  EF_TYPEF_0C    = $32;   { <- type table col 3, the first of the $32..$35 run }
+  EF_TYPEF_20    = $37;   { <- type table col 8, the first of the $37..$40 run }
 
   { --- The bounding box and its tile-grid offsets ---------------------------
 
@@ -174,7 +187,15 @@ const
     Anything that is not the player is blocked by every kind. }
   EF_HITBOX_INSET_X = $2A;  { +0xA8 }
   EF_HITBOX_INSET_Y = $2B;  { +0xAC }
-  EF_SOLID          = $3E;  { +0xF8, the kind above }
+  EF_SOLID          = $3E;  { +0xF8, the kind above. It comes from TYPE TABLE
+                              COLUMN 15, which the mapping above pins exactly,
+                              and the shipped table corroborates the reading:
+                              76 of 81 types are 0, four are kind 1 (types 17,
+                              19, 21, 45 - platforms, passable sideways) and
+                              exactly one is kind 2 (type 43 - a wall, passable
+                              vertically). NOTHING is 3 or more, so "blocks
+                              both" is a case the code supports and this game
+                              never uses. Pinned by --selftest-dir. }
   EF_RIDDEN         = $0A;  { +0x28, block A[2]. Entity_SolidCollideY sets it
                               on the SOLID when something lands on top of it. }
 
@@ -293,7 +314,8 @@ const
     zero throughout the table - they are runtime offsets starting at 0. }
   TYPE_COL_SCREEN_SPACE = 5;    { -> [$34] }
   TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
-  TYPE_COL_UNUSED = 7;          { never copied, zero for all 81 types }
+  TYPE_COL_UNUSED = 7;   { never copied, zero for all 81 types }
+  TYPE_COL_SOLID  = 15;  { -> int $3E, EF_SOLID }
 
   EF_SCREEN_SPACE   = $34;
   EF_CULL_OFFSCREEN = $39;
