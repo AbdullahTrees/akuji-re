@@ -52,6 +52,7 @@
       0x0045A848  type 37  something that drops, lands and lies there
       0x0045AF2C  type 34  type 31's shot
       0x0045AFA8  type 35  type 31's telegraph - and what moves it to state 4
+      0x00459A0C  type 2   the PLAYER'S SHOT
 
   And the dispatcher they hang off:
 
@@ -562,6 +563,46 @@ const
   T35_OWNER_ATTACK = 4;
   T35_OWNER_IDLE   = 1;
 
+  { --- Type 2, the player's shot ----------------------------------------
+    What Player_Update fires, and the state it carries is the weapon: 0 and 1
+    for the two ordinary shots and 2 for the charge, which is Player.pas's
+    WEAPONS table column ProjState arriving here.
+
+    Its sprite table is three rows of four, and each row is TWO frames going
+    right followed by TWO going left - so the row index is the state and the
+    half is the sign of the velocity, the same two-ifs-no-else shape types 3
+    and 30 have.
+
+    Only the charge does anything extra: it ACCELERATES, adding four in
+    whatever direction it is already going, and it drops a type-7 trail every
+    fifth frame.
+
+    Its lifetime is a countdown in EF_CHILD_B rather than a frame limit, and
+    running out is a soft end - it leaves one last type-7 puff. Hitting a wall
+    is the loud one: SIX type-6 sparks, each with a random heading out of 64
+    and a random speed of one or two half-steps per axis, drawn separately so
+    the scatter is an ellipse. The sparks' block A[1] carries 1 for a charge
+    shot and 0 otherwise, which is what selects between type 6's two sprite
+    rows - so a charged impact throws different-coloured sparks.
+
+    Note the speed multiplier is Random(2) + 1, one or two. The explosion at
+    type 33 uses Random(3) + 1 for the same idiom, so these are not the same
+    burst and the difference is deliberate. }
+  T2_STATES = 3;
+  T2_FRAMES = 2;  T2_TICKS = 4;
+  T2_TABLE_ADDR = $0046BC2C;
+  { [state][0..1] going right, [state][2..3] going left. }
+  T2_SPRITES: array[0..T2_STATES - 1, 0..3] of Integer =
+    ((28, 29, 30, 31), (32, 33, 34, 35), (36, 37, 38, 39));
+  T2_CHARGE_STATE = 2;
+  T2_CHARGE_ACCEL = 4;
+  T2_TRAIL_EVERY  = 4;    { every fifth frame - the test is `> 4` }
+  T2_TRAIL_TYPE   = 7;
+  T2_TRAIL_LIFT   = $80;  { 4 px above the shot }
+  T2_SPARK_TYPE   = 6;
+  T2_SPARKS       = 6;
+  T2_SPARK_SPEED_MAX = 2; { Random(2) + 1, so 1..2 - NOT type 33's 1..3 }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -811,6 +852,10 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x00459A0C. The player's shot. See the T2_ block above. }
+procedure EntityUpdate_Type02(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045AF2C. Type 31's shot. Double speed, difficulty-keyed animation. }
 procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
@@ -1534,6 +1579,87 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type02(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Row, I, Slot, Facing, SparkRow: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T2_FRAMES) then
+    Frame := 0;
+  Row := E.Raw[EF_STATE];
+  if (Row < 0) or (Row >= T2_STATES) then
+    Row := 0;
+  { Right half then left half, by the SIGN, two ifs and no else. }
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T2_SPRITES[Row][Frame];
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T2_SPRITES[Row][Frame + T2_FRAMES];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T2_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+    if E.Raw[EF_FLAG1C] > T2_FRAMES - 1 then
+      E.Raw[EF_FLAG1C] := 0;
+  end;
+
+  SparkRow := 0;
+  if E.Raw[EF_STATE] = T2_CHARGE_STATE then
+  begin
+    SparkRow := 1;
+    { Accelerates along whatever direction it already has - Compare(0, v) is
+      the sign, so this never reverses a shot. }
+    Inc(E.Raw[EF_VEL_X], Compare(0, E.Raw[EF_VEL_X]) * T2_CHARGE_ACCEL);
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T2_TRAIL_EVERY then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      World.Spawn(EKIND_MINOR, T2_TRAIL_TYPE,
+                  E.Raw[EF_POS_X] - POSITION_BIAS,
+                  E.Raw[EF_POS_Y] - POSITION_BIAS - T2_TRAIL_LIFT);
+    end;
+  end;
+
+  if World.TileAtX(E, E.Raw[EF_VEL_X], False) < World.SolidThreshold then
+  begin
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    { The lifetime is a countdown, and running out is the quiet end. }
+    Dec(E.Raw[EF_CHILD_B]);
+    if E.Raw[EF_CHILD_B] < 0 then
+    begin
+      World.Spawn(EKIND_MINOR, T2_TRAIL_TYPE,
+                  E.Raw[EF_POS_X] - POSITION_BIAS,
+                  E.Raw[EF_POS_Y] - POSITION_BIAS - T2_TRAIL_LIFT);
+      World.DestroyEntity(E, False);
+    end;
+  end
+  else
+  begin
+    { A wall. Six sparks, each with its own heading and its own two speeds. }
+    for I := 1 to T2_SPARKS do
+    begin
+      Slot := World.Spawn(EKIND_MINOR, T2_SPARK_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS);
+      { Block A[1] is type 6's sprite ROW, so a charged impact throws a
+        different-coloured burst. }
+      World.SetSpawnField(Slot, EF_BLOCK_A + 1, SparkRow);
+      Facing := World.RandomBelow(DIR_COUNT);
+      World.SetSpawnField(Slot, EF_FACING, Facing);
+      World.SetSpawnField(Slot, EF_VEL_X,
+        (World.RandomBelow(T2_SPARK_SPEED_MAX) + 1) * HalfExtent(DirVelX(Facing)));
+      World.SetSpawnField(Slot, EF_VEL_Y,
+        (World.RandomBelow(T2_SPARK_SPEED_MAX) + 1) * HalfExtent(DirVelY(Facing)));
+    end;
+    World.DestroyEntity(E, False);
+  end;
 end;
 
 procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
@@ -2668,6 +2794,7 @@ begin
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
       33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
+      2:  EntityUpdate_Type02(E^, AGameState, World);
       3:  EntityUpdate_Type03(E^, AGameState, World);
       4:  EntityUpdate_Type04(E^, AGameState, World);
       5:  EntityUpdate_Type05(E^, AGameState, World);
@@ -2695,7 +2822,7 @@ begin
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 44 arms are in HANDLER_ADDR, untranslated }
+      { the other 43 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
