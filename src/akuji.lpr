@@ -1996,8 +1996,6 @@ type
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
-    function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
-    function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
     { Not used by the trace, but left abstract it would be a runtime
       abstract-method error the first time a handler destroyed something. }
@@ -2043,17 +2041,9 @@ begin
   if Result > Delta then Result := Delta;
 end;
 
-function TFlatWorld.SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
-begin
-  Result := False;
-end;
-
-function TFlatWorld.SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
-begin
-  OnTopOfSolid := False;
-  Result := False;
-end;
-
+{ NOTE: TFlatWorld no longer overrides SolidCollideX/Y. Those are implemented
+  on TEntityWorld now, and with no Pool attached the real code finds no solids
+  and returns False - which is exactly what the override used to fake. }
 function TFlatWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
 begin
   Inc(Spawns);
@@ -2468,8 +2458,6 @@ type
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
-    function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
-    function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
     procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
@@ -2512,10 +2500,6 @@ function TCountingWorld.EdgeDistX(const E: TEntity; Delta: Integer): Integer;
 begin Result := 0; end;
 function TCountingWorld.EdgeDistY(const E: TEntity; Delta: Integer): Integer;
 begin Result := 0; end;
-function TCountingWorld.SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
-begin Result := False; end;
-function TCountingWorld.SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
-begin Result := False; end;
 function TCountingWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
 begin
   if Pool = nil then

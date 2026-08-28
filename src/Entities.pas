@@ -187,6 +187,39 @@ const
   EVENT_OPCODE_DESTROY = 7;
   EVENT_OPCODE_FLAG    = 5;
   EVENT_BEGIN_FROM_DESTROY = 4;
+
+  { --- Entity_SolidCollideX/Y @ 0x00456B4C / 0x00456E0C -----------------
+    Entity-versus-entity blocking, and the pair is NOT symmetric.
+
+    SOFTNESS IS PER AXIS. With SkipSoft set, the X sweep ignores EF_SOLID
+    kind 1 and the Y sweep ignores kind 2 - so kind 1 blocks vertically only
+    and kind 2 horizontally only, which is what "EF_SOLID is a kind" meant.
+    With SkipSoft clear both kinds block on both axes.
+
+    Y HAS NO ZERO-DELTA GUARD. The X sweep does nothing when Delta is 0; the
+    Y sweep runs anyway, which is how an entity standing still on a platform
+    keeps being told it is standing on one.
+
+    LANDING ON TOP ALSO SETS PushX. When the subject comes down onto a solid
+    within SOLID_TOP_TOLERANCE, the Y sweep writes the horizontal offset
+    between the two - INCLUDING this frame's layer scroll - into PushX as well
+    as the vertical push. That is the riding mechanic: it is what carries a
+    rider along with a moving platform, and it is the reason PushX is read
+    after a Y collision at all.
+
+    The air dash phases through anything whose EF_VULN_KIND is $5C, which is
+    the same fact Player_UpdateAirDash was written from - the two agree from
+    opposite directions.
+
+    Only slot 0 - the player - can fire the push-against events, opcode 2
+    while holding the axis into the solid and opcode 3 on confirm. The X sweep
+    reads the X axis for that and the Y sweep reads the Y axis. }
+  SOLID_SOFT_IN_X = 1;   { skipped by the X sweep when SkipSoft }
+  SOLID_SOFT_IN_Y = 2;   { skipped by the Y sweep when SkipSoft }
+  SOLID_PHASE_VULN = $5C;    { the air dash goes through these }
+  SOLID_STATE_AIRDASH = 7;
+  EVENT_OPCODE_PUSH = 2;
+  EVENT_OPCODE_PUSH_CONFIRM = 3;
   TERRAIN_WATER_A = 3;
   TERRAIN_WATER_B = 4;
   SND_WATER01 = 31;  SND_WATER02 = 40;
@@ -694,6 +727,10 @@ type
     entities by slot, and the pool is defined further down. }
   TEntityPool = class;
 
+  { A collision box in screen pixels, in the order the original stores it: four
+    consecutive ints passed by pointer to Rect_Overlap. }
+  TBox = record L, T, R, B: Integer; end;
+
   { The tilemap, as the collision code sees it.
 
     TileMap_Get @ 0x0044DB5C is one line - `Data[X + Y * Width]`, a Word, with
@@ -773,10 +810,26 @@ type
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
 
+    { 0x00456B4C / 0x00456E0C. Real, not abstract. AgainstPlayer swaps the
+      scan from the minor slots to slot 0 alone, which is how a moving solid
+      asks whether it would push the player rather than the other way round. }
     function SolidCollideX(const E: TEntity; Delta: Integer;
-                           SkipSoft: Boolean): Boolean; virtual; abstract;
+                           SkipSoft: Boolean;
+                           AgainstPlayer: Boolean = False): Boolean; virtual;
     function SolidCollideY(const E: TEntity; Delta: Integer;
-                           SkipSoft: Boolean): Boolean; virtual; abstract;
+                           SkipSoft: Boolean;
+                           AgainstPlayer: Boolean = False): Boolean; virtual;
+
+    { What the push-against events need. Neutral by default - a world with no
+      input attached simply never fires them. }
+    function FindBlockingSolid(const E: TEntity; const Box: TBox;
+                              SoftKind: Integer; SkipSoft,
+                              AgainstPlayer: Boolean;
+                              out Other: TBox): Integer;
+    procedure MaybePushEvent(Slot, Blocker, Axis: Integer);
+    function AxisX: Integer; virtual;
+    function AxisY: Integer; virtual;
+    function ConfirmPressed: Boolean; virtual;
 
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; virtual; abstract;
     { 0x00461400. Real, not abstract. }
@@ -808,9 +861,6 @@ type
     above so TEntityWorld can hold one, and Pascal requires a forward class and
     its definition to sit in the SAME type block. }
 
-  { A collision box in screen pixels, in the order the original stores it: four
-    consecutive ints passed by pointer to Rect_Overlap. }
-  TBox = record L, T, R, B: Integer; end;
 
 
   TEntityType = record
@@ -1287,6 +1337,169 @@ end;
 function TEntityWorld.RandomBelow(N: Integer): Integer;
 begin
   Result := DelphiRandom(N);
+end;
+
+function TEntityWorld.AxisX: Integer;
+begin
+  Result := 0;
+end;
+
+function TEntityWorld.AxisY: Integer;
+begin
+  Result := 0;
+end;
+
+function TEntityWorld.ConfirmPressed: Boolean;
+begin
+  Result := False;
+end;
+
+{ The scan both sweeps share: the first live, solid, non-self entity whose box
+  overlaps Box. Returns its slot, or SLOT_NONE. }
+function TEntityWorld.FindBlockingSolid(const E: TEntity; const Box: TBox;
+                                        SoftKind: Integer; SkipSoft,
+                                        AgainstPlayer: Boolean;
+                                        out Other: TBox): Integer;
+var
+  First, Last, Slot, Mine: Integer;
+  O: PEntity;
+begin
+  Result := SLOT_NONE;
+  if Pool = nil then
+    Exit;
+  Mine := E.Raw[EF_SLOT];
+  if AgainstPlayer then
+  begin
+    First := 0;
+    Last := 0;
+  end
+  else
+  begin
+    First := SOLID_SCAN_FIRST;
+    Last := SOLID_SCAN_LAST;
+  end;
+
+  for Slot := First to Last do
+  begin
+    if Slot = Mine then
+      Continue;
+    O := Pool.Entity(Slot);
+    if (O^.Raw[EF_ALIVE] and $FF) = 0 then
+      Continue;
+    if O^.Raw[EF_SOLID] = 0 then
+      Continue;
+    { The air dash goes through a particular kind of solid. }
+    if (E.Raw[EF_STATE] = SOLID_STATE_AIRDASH)
+       and (O^.Raw[EF_VULN_KIND] = SOLID_PHASE_VULN) then
+      Continue;
+    if (O^.Raw[EF_SOLID] = SoftKind) and SkipSoft then
+      Continue;
+
+    Other := EntityBox(O^, 1, 1);
+    if RectOverlap(Box, Other, 0, 0) then
+      Exit(Slot);
+  end;
+end;
+
+{ Both sweeps end the same way: only the player fires a push-against event,
+  and each axis reads its own input. }
+procedure TEntityWorld.MaybePushEvent(Slot, Blocker, Axis: Integer);
+var
+  EventId, Op: Integer;
+begin
+  if Slot <> 0 then
+    Exit;
+  EventId := Pool.Entity(Blocker)^.Raw[EF_EVENT_ID];
+  Op := EventOpcode(EventId);
+  if ((Op = EVENT_OPCODE_PUSH) and (Axis <> 0))
+  or ((Op = EVENT_OPCODE_PUSH_CONFIRM) and ConfirmPressed) then
+    BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
+end;
+
+{ Entity_SolidCollideX @ 0x00456B4C. }
+function TEntityWorld.SolidCollideX(const E: TEntity; Delta: Integer;
+                                    SkipSoft: Boolean;
+                                    AgainstPlayer: Boolean): Boolean;
+var
+  Mine, Other: TBox;
+  Moved: TEntity;
+  Blocker: Integer;
+begin
+  Result := False;
+  if ((E.Raw[EF_ALIVE] and $FF) = 0) or (Delta = 0) then
+    Exit;
+
+  { The box is built from the entity as it WOULD be after the move on this
+    axis only; the other axis stays where it is. }
+  Moved := E;
+  Inc(Moved.Raw[EF_POS_X], Delta);
+  Mine := EntityBox(Moved, 1, 1);
+
+  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_X, SkipSoft,
+                               AgainstPlayer, Other);
+  if Blocker = SLOT_NONE then
+    Exit;
+
+  if Mine.L < Other.L then
+    PushX := -Abs(Mine.R - Other.L) shl POSITION_SHIFT
+  else
+    PushX := Abs(Mine.L - Other.R) shl POSITION_SHIFT;
+  Result := True;
+
+  MaybePushEvent(E.Raw[EF_SLOT], Blocker, AxisX);
+end;
+
+{ Entity_SolidCollideY @ 0x00456E0C. }
+function TEntityWorld.SolidCollideY(const E: TEntity; Delta: Integer;
+                                    SkipSoft: Boolean;
+                                    AgainstPlayer: Boolean): Boolean;
+var
+  Mine, Other: TBox;
+  Moved: TEntity;
+  Blocker, Gap: Integer;
+  O: PEntity;
+begin
+  OnTopOfSolid := False;
+  Result := False;
+  { NOTE: no `Delta = 0` guard, unlike the X sweep. That is in the original
+    and it is what keeps an entity resting on a platform aware of it. }
+  if (E.Raw[EF_ALIVE] and $FF) = 0 then
+    Exit;
+
+  Moved := E;
+  Inc(Moved.Raw[EF_POS_Y], Delta);
+  Mine := EntityBox(Moved, 1, 1);
+
+  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_Y, SkipSoft,
+                               AgainstPlayer, Other);
+  if Blocker = SLOT_NONE then
+    Exit;
+
+  if Mine.T < Other.T then
+  begin
+    { Coming down onto it. }
+    Gap := Abs(Mine.B - Other.T);
+    if Gap < SOLID_TOP_TOLERANCE then
+    begin
+      OnTopOfSolid := True;
+      Pool.SetField(Blocker, EF_RIDDEN, 1);
+    end;
+
+    { Riding: the horizontal offset between the two, WITH this frame's layer
+      scroll folded in, so a rider is carried along by a moving platform. }
+    O := Pool.Entity(Blocker);
+    PushX := ((OriginPixel(O^.Raw[EF_POS_X] + Layer.DeltaX)
+               - HalfExtent(O^.Raw[EF_EXTENT_X]))
+              - (OriginPixel(E.Raw[EF_POS_X])
+                 - HalfExtent(E.Raw[EF_EXTENT_X]))) shl POSITION_SHIFT;
+
+    PushY := -Gap shl POSITION_SHIFT;
+  end
+  else
+    PushY := Abs(Mine.T - Other.B) shl POSITION_SHIFT;
+  Result := True;
+
+  MaybePushEvent(E.Raw[EF_SLOT], Blocker, AxisY);
 end;
 
 function TEntityWorld.EventOpcode(EventId: Integer): Integer;
