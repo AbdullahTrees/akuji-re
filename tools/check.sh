@@ -75,6 +75,7 @@ run --selftest-events   "$GAME"
 run --selftest-script   "$GAME"
 run --selftest-stages   "$GAME"
 run --selftest-player   "$GAME"
+run --selftest-trace    "$GAME"
 run --selftest-settings "$GAME" "$SCRATCH"
 
 note ""

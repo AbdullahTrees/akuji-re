@@ -34,13 +34,18 @@ a Pascal counterpart, and 102 of the 149 carry real names. The denominator has
 moved twice - 48 hidden handlers created (section 12), then the game-layer floor
 corrected from `0x455000` to `0x454790`. The work did not grow either time.
 
-**Before committing, run `tools/check.sh`.** One command: build, nine
+**The player controller now RUNS.** `src/Player.pas` is the first piece of game
+behaviour written as executing code rather than described in a comment - the
+whole state machine including the glide, air dash and knockback. Section 14a.
+
+**Before committing, run `tools/check.sh`.** One command: build, ten
 self-tests, three reference implementations, a records check and a negative
 control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
 
-**Next:** the ~100 entity-type handlers, which are now individually
-addressable. The event system has no open questions left.
+**Next:** the ~100 entity-type handlers. Read and write each one together -
+they are the same task, and `Player.pas` now gives them somewhere to plug in.
+The event system has no open questions left.
 
 ## 2. The three layers — most important section
 
@@ -717,3 +722,45 @@ running original, which has not been set up. A cheap way in when it matters:
 `kbgm32.dll` is an ordinary DLL with 13 named exports, so a logging proxy would
 give exact ground truth for the music layer. It needs a 32-bit toolchain, which
 this machine does not currently have.
+
+## 14a. Behaviour, and how far it is checked
+
+`src/Player.pas` translates `Player_Update` and its three delegated states. It
+reaches the tilemap, the entity pool, the sound device and the camera through
+**`TPlayerWorld`**, an abstract class - which keeps the unit honest (what is
+decoded is here; what is not is behind a method that says so) and makes the
+controller deterministic enough to test.
+
+`--selftest-trace` drives it over a scripted input sequence in a single-screen
+room and checks the result against arithmetic done independently of the code:
+walking is `AxisX shl 5` = exactly one pixel a frame, the dash `shl 6` exactly
+two, a jump leaves at `-JumpStrength` and gains `PLAYER_GRAVITY` a frame. It
+also checks the **ability gates actually gate** - the same input with the
+ability locked must do nothing.
+
+**This is not proof the reconstruction matches `akuji.exe`.** Only a
+differential run can be that. What the trace does is fix the controller against
+drift and *be the shape* the differential test needs: same start state, same
+input script, a trace to diff.
+
+Three things the first version of it got wrong, all worth knowing:
+
+* **An entity placed on the ground lands on its first update.** `PF_LANDED`
+  starts at 0, so frame 1 runs the whole just-landed sequence and zeroes the
+  velocity. A jump pressed on frame 1 has its edge eaten. Settle before
+  measuring.
+* **A test world must be single-screen, or model tiles in world space.** On a
+  large map the player hung in mid-air with its velocity climbing, because
+  everything past the dead zone was being applied to the layer while the test's
+  floor stayed in entity-pixel space. A 10x7-tile room makes both max-scroll
+  values non-positive, so nothing scrolls.
+* **The jump apex is a velocity fact, not a pixel one.** Velocity is 1/32
+  pixel, so the pixel minimum arrives several frames before `vy` crosses zero.
+  And it takes `JumpStrength div PLAYER_GRAVITY` **+ 1** frames, because the
+  impulse is applied in the grounded branch and gravity only in the airborne
+  one - the launch frame gets no gravity.
+
+**Restore mutations by copying a file, never with `git checkout`.** Twice now
+that has misfired: once it reverted a whole file of uncommitted work, and once
+it silently did nothing because the file was untracked, leaving the mutation
+live in a run that then reported PASSED.

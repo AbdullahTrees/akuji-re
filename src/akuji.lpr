@@ -33,7 +33,7 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
-  Stages, Camera, TileMaps,
+  Stages, Camera, TileMaps, Player,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -1782,6 +1782,390 @@ begin
     Log.Add('FAILED');
 end;
 
+{ ---------------------------------------------------------------------------
+  --selftest-trace : run the player controller over a scripted input sequence
+  and check the result against numbers derived from the constants.
+
+  This is the first check of BEHAVIOUR rather than of data, and it is worth
+  being clear about what it can and cannot show. It cannot show that the
+  reconstruction matches akuji.exe - only a differential run against the
+  original can do that, and it does not exist yet. What it does is:
+
+    * fix the controller against silent drift, by pinning a trace
+    * check the movement numbers against arithmetic done independently of the
+      code: walking is AxisX shl 5 = 32 sub-pixels = exactly 1 pixel a frame,
+      the dash is shl 6 so exactly 2, a jump leaves at -JumpStrength and gains
+      PLAYER_GRAVITY a frame so its apex is JumpStrength div 4 frames up
+    * and be the SHAPE the differential test needs: same start state, same
+      input script, a trace to diff
+
+  The world is flat and empty: floor at pixel 200, a wall at pixel 300, no
+  solids, no sound. Deterministic - RandomBelow is a counter, not Random - so
+  the trace is reproducible.
+  --------------------------------------------------------------------------- }
+
+type
+  TFlatWorld = class(TPlayerWorld)
+  public
+    FloorY, WallX, Nonce: Integer;
+    Sounds: string;
+    Spawns: Integer;
+    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
+    function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
+    function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
+    function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
+    function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
+    procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
+    procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
+    procedure PlaySound(Id: Integer); override;
+    function RandomBelow(N: Integer): Integer; override;
+  end;
+
+function TFlatWorld.TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+begin
+  if EntityPixelX(E) + Delta div 32 >= WallX then
+    Result := SolidThreshold
+  else
+    Result := 0;
+end;
+
+function TFlatWorld.TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+begin
+  if EntityPixelY(E) + Delta div 32 >= FloorY then
+    Result := SolidThreshold
+  else
+    Result := 0;
+end;
+
+function TFlatWorld.EdgeDistX(const E: TEntity; Delta: Integer): Integer;
+begin
+  Result := (WallX - 1 - EntityPixelX(E)) * 32;
+  if Result < 0 then Result := 0;
+  if Result > Delta then Result := Delta;
+end;
+
+function TFlatWorld.EdgeDistY(const E: TEntity; Delta: Integer): Integer;
+begin
+  Result := (FloorY - 1 - EntityPixelY(E)) * 32;
+  if Result < 0 then Result := 0;
+  if Result > Delta then Result := Delta;
+end;
+
+function TFlatWorld.SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
+begin
+  Result := False;
+end;
+
+function TFlatWorld.SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
+begin
+  OnTopOfSolid := False;
+  Result := False;
+end;
+
+function TFlatWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
+begin
+  Inc(Spawns);
+  Result := 0;
+end;
+
+procedure TFlatWorld.SetSpawnField(Slot, IntIndex, Value: Integer);
+begin
+end;
+
+procedure TFlatWorld.SpawnDebris(const E: TEntity; Kind: Integer);
+begin
+  Inc(Spawns);
+end;
+
+procedure TFlatWorld.PlaySound(Id: Integer);
+begin
+  Sounds := Sounds + IntToStr(Id) + ' ';
+end;
+
+function TFlatWorld.RandomBelow(N: Integer): Integer;
+begin
+  { Not Random: the trace has to be reproducible. }
+  Nonce := (Nonce + 7) mod N;
+  Result := Nonce;
+end;
+
+function SelfTestTrace(Log: TStrings): Integer;
+var
+  W: TFlatWorld;
+  E: TEntity;
+  P: TPlayerState;
+  L: TLayerInfo;
+  Inp: TInputState;
+  Down: array[0..3] of Boolean;
+  I, F, StartX, Apex, ApexFrame, Landed, DashVX, StopFrame: Integer;
+  Trace, Trace2: string;
+
+  procedure Step(AxisX, AxisY: Integer; Jump, Attack: Boolean);
+  begin
+    Inp.AxisX := AxisX;
+    Inp.AxisY := AxisY;
+    Inp.Button[0] := Jump;
+    Inp.Button[1] := Attack;
+    Down[0] := Jump; Down[1] := Attack; Down[2] := False; Down[3] := False;
+    PlayerUpdate(E, P, L, Inp, W);
+    InputEndOfFrame(Inp, Down);
+  end;
+
+  { Reset SETTLES for three frames before handing back, and that is not
+    padding. An entity placed on the ground has PF_LANDED = 0, so its first
+    update runs the whole just-landed sequence: soft landing sound, state 3,
+    velocity zeroed. That is the original's behaviour and it is correct - but
+    it means frame 1 is never a normal frame, and a jump pressed on frame 1 has
+    its edge eaten by a state the controller will not jump out of. Measuring
+    from frame 1 is how the first version of this test produced four wrong
+    failures. }
+  procedure Reset;
+  var
+    K: Integer;
+  begin
+    FillChar(E, SizeOf(E), 0);
+    FillChar(Inp, SizeOf(Inp), 0);
+    E.Raw[EF_ALIVE] := 1;
+    E.Raw[EF_TYPE] := 1;
+    E.Raw[EF_EXTENT_X] := 16;
+    E.Raw[EF_EXTENT_Y] := 16;
+    E.Raw[EF_POS_X] := POSITION_BIAS + 100 * 32;
+    E.Raw[EF_POS_Y] := POSITION_BIAS + 199 * 32;
+    E.Raw[PF_STATE] := PS_GROUND;
+    for K := 1 to 3 do
+      Step(0, 0, False, False);
+    W.Sounds := '';
+    W.Spawns := 0;
+  end;
+
+begin
+  Result := 0;
+  W := TFlatWorld.Create;
+  try
+    W.FloorY := 200;
+    W.WallX := 300;
+    W.SolidThreshold := $32;
+    W.Fading := False;
+
+    FillChar(P, SizeOf(P), 0);
+    P.JumpStrength := DEFAULT_FIELD11D0;      { 0x68 = 104 }
+    P.MaxLives := 3;
+    P.Lives := 3;
+    P.Weapon := 0;
+
+    { A SINGLE-SCREEN room: 10 x 7 tiles. Both max-scroll values then come out
+      at or below zero, so ShouldScroll* can never fire and the entity really
+      moves. That matters more than it sounds - the first version of this test
+      used a 1000-tile map, and the player hung in mid-air at pixel 155 with
+      its velocity climbing, because everything past the dead zone was being
+      applied to the LAYER. The floor here is defined in entity-pixel space,
+      which does not move when the layer does, so it was unreachable.
+
+      A test world is either single-screen, or it has to model tiles in world
+      space. This one is single-screen; 5a below widens it deliberately. }
+    FillChar(L, SizeOf(L), 0);
+    L.TileW := 32; L.TileH := 32;
+    L.MapTilesX := 10; L.MapTilesY := 7;
+
+    { --- 1. standing still ------------------------------------------------ }
+    Reset;
+    for I := 1 to 20 do Step(0, 0, False, False);
+    Log.Add(Format('idle 20 frames:   state %d, x %d, y %d, vy %d',
+      [E.Raw[PF_STATE], EntityPixelX(E), EntityPixelY(E), E.Raw[EF_VEL_Y]]));
+    if (E.Raw[EF_VEL_Y] <> 0) or (EntityPixelX(E) <> 100) then
+    begin
+      Log.Add('FAILED: standing still does not stand still');
+      Inc(Result);
+    end;
+
+    { --- 2. walking: AxisX shl 5 is 32 sub-pixels, exactly one pixel ------- }
+    Reset;
+    StartX := EntityPixelX(E);
+    for I := 1 to 10 do Step(1, 0, False, False);
+    Log.Add(Format('walk right 10:    x %d -> %d  (expected +10)',
+      [StartX, EntityPixelX(E)]));
+    if EntityPixelX(E) - StartX <> 10 then
+    begin
+      Log.Add(Format('FAILED: walking moved %d pixels in 10 frames, expected 10',
+        [EntityPixelX(E) - StartX]));
+      Inc(Result);
+    end;
+
+    { --- 3. the double tap ------------------------------------------------- }
+    Reset;
+    Step(1, 0, False, False);          { first tap opens the window }
+    Step(0, 0, False, False);
+    Step(1, 0, False, False);          { second tap, but the ability is LOCKED }
+    Step(1, 0, False, False);
+    Log.Add(Format('double tap, ability locked:   state %d (expected %d)',
+      [E.Raw[PF_STATE], PS_GROUND]));
+    if E.Raw[PF_STATE] <> PS_GROUND then
+    begin
+      Log.Add('FAILED: dashed without the ability unlocked');
+      Inc(Result);
+    end;
+
+    Reset;
+    P.Head[ABILITY_DASH] := 1;
+    Step(1, 0, False, False);
+    Step(0, 0, False, False);
+    Step(1, 0, False, False);          { the dash STARTS here ... }
+    Step(1, 0, False, False);          { ... and reaches its speed here }
+    DashVX := E.Raw[EF_VEL_X];
+    Log.Add(Format('double tap, ability unlocked: state %d, vx %d (expected %d, %d)',
+      [E.Raw[PF_STATE], DashVX, PS_DASH, 1 shl PLAYER_DASH_SHIFT]));
+    if (E.Raw[PF_STATE] <> PS_DASH) or (DashVX <> 1 shl PLAYER_DASH_SHIFT) then
+    begin
+      Log.Add('FAILED: the double tap did not start a dash at twice walking speed');
+      Inc(Result);
+    end;
+    P.Head[ABILITY_DASH] := 0;
+
+    { --- 4. a jump, from the constants -------------------------------------
+      Leaves at -JumpStrength and gains PLAYER_GRAVITY a frame, so it is still
+      rising for JumpStrength div PLAYER_GRAVITY frames. }
+    Reset;
+    Apex := 999; ApexFrame := 0; Landed := 0; StopFrame := 0;
+    Trace := ''; Trace2 := '';
+    for F := 1 to 90 do
+    begin
+      Step(0, 0, F <= 40, False);      { hold jump for 40 frames }
+      if EntityPixelY(E) < Apex then
+      begin
+        Apex := EntityPixelY(E);
+        ApexFrame := F;
+      end;
+      if (StopFrame = 0) and (E.Raw[EF_VEL_Y] >= 0) then
+        StopFrame := F;
+      if (Landed = 0) and (F > 3) and (E.Raw[PF_STATE] = PS_LANDING) then
+        Landed := F;
+      if F <= 6 then
+        Trace := Trace + Format('%d:%d/%d ', [F, EntityPixelY(E), E.Raw[EF_VEL_Y]]);
+      if (F >= 50) and (F <= 56) then
+        Trace2 := Trace2 + Format('%d:%d/%d/s%d ',
+          [F, EntityPixelY(E), E.Raw[EF_VEL_Y], E.Raw[PF_STATE]]);
+    end;
+    Log.Add('jump trace y/vy:  ' + Trace);
+    Log.Add('landing 50..56:   ' + Trace2);
+    Log.Add(Format('jump:             apex %d px up, vy hit 0 at frame %d,'
+      + ' landed frame %d', [199 - Apex, StopFrame, Landed]));
+    Log.Add(Format('  sounds:         %s', [W.Sounds]));
+    { The apex is asserted on the VELOCITY, not on the pixel position. Velocity
+      is in 1/32 pixel, so the last few frames of a rise move less than a whole
+      pixel and the pixel minimum is reached several frames before vy crosses
+      zero - which is exactly what the pixel version of this check reported. }
+    { JumpStrength div PLAYER_GRAVITY frames of gravity, PLUS the launch frame.
+      The jump impulse is applied in the GROUNDED branch, and gravity only in
+      the airborne one, so the frame that leaves the ground gets the impulse
+      and no gravity. Hence 26 + 1. Getting this wrong is how the check first
+      read, and the +1 is a fact about the original's ordering, not a fudge. }
+    if StopFrame <> P.JumpStrength div PLAYER_GRAVITY + 1 then
+    begin
+      Log.Add(Format('FAILED: vy reached 0 at frame %d, but -%d rising at +%d'
+        + ' a frame, plus the launch frame, takes %d',
+        [StopFrame, P.JumpStrength, PLAYER_GRAVITY,
+         P.JumpStrength div PLAYER_GRAVITY + 1]));
+      Inc(Result);
+    end;
+    if Landed = 0 then
+    begin
+      Log.Add('FAILED: the jump never landed');
+      Inc(Result);
+    end;
+    if Pos(IntToStr(SND_JUMP) + ' ', W.Sounds) <> 1 then
+    begin
+      Log.Add('FAILED: the jump did not play the jump sound first');
+      Inc(Result);
+    end;
+
+    { --- 5a. the dead zone stops the PLAYER, not the world -----------------
+      On a big map, walking right past pixel 177 scrolls the layer instead of
+      moving the entity, so the player's own position stops there. That is the
+      camera doing its job, and it is worth pinning because it looks like a bug
+      the first time you see it. }
+    L.MapTilesX := 1000;
+    L.OriginX := 0;
+    Reset;
+    for I := 1 to 400 do Step(1, 0, False, False);
+    Log.Add(Format('walk right on a big map: x %d, layer origin %d px'
+      + '  (dead zone at %d)',
+      [EntityPixelX(E), L.OriginX div 32, Camera.DEADZONE_RIGHT]));
+    if EntityPixelX(E) <> Camera.DEADZONE_RIGHT then
+    begin
+      Log.Add(Format('FAILED: expected the player to stop at the dead zone'
+        + ' edge %d, got %d', [Camera.DEADZONE_RIGHT, EntityPixelX(E)]));
+      Inc(Result);
+    end;
+    if L.OriginX <= 0 then
+    begin
+      Log.Add('FAILED: the player stopped but the layer never scrolled');
+      Inc(Result);
+    end;
+
+    { --- 5b. and on a map too small to scroll, it reaches the wall --------- }
+    L.MapTilesX := 10;
+    L.OriginX := 0;
+    Reset;
+    for I := 1 to 400 do Step(1, 0, False, False);
+    Log.Add(Format('walk into the wall:      x %d (wall at %d)',
+      [EntityPixelX(E), W.WallX]));
+    if EntityPixelX(E) >= W.WallX then
+    begin
+      Log.Add('FAILED: walked through the wall');
+      Inc(Result);
+    end;
+    if EntityPixelX(E) <> W.WallX - 1 then
+    begin
+      Log.Add(Format('FAILED: stopped at %d, not flush against the wall at %d',
+        [EntityPixelX(E), W.WallX - 1]));
+      Inc(Result);
+    end;
+    { --- 6. the glide, and the bug it carries -------------------------------
+      Entering needs Up, no horizontal input, having jumped, and the ability.
+      Once in, the ORIGINAL's vertical clamp writes the horizontal velocity -
+      see Player.pas. This checks the state is reached, not that the bug is
+      pleasant. }
+    Reset;
+    P.Head[ABILITY_GLIDE] := 1;
+    Step(0, 0, True, False);                    { jump }
+    for I := 1 to 4 do Step(0, 0, True, False);
+    Step(0, -1, False, False);                  { Up in the air }
+    Log.Add(Format('glide entry:      state %d (expected %d)',
+      [E.Raw[PF_STATE], PS_SPECIAL1]));
+    if E.Raw[PF_STATE] <> PS_SPECIAL1 then
+    begin
+      Log.Add('FAILED: Up in the air with the glide unlocked did not glide');
+      Inc(Result);
+    end;
+
+    { The same input WITHOUT the ability must do nothing - otherwise the
+      ability gate is not being read at all. }
+    Reset;
+    P.Head[ABILITY_GLIDE] := 0;
+    Step(0, 0, True, False);
+    for I := 1 to 4 do Step(0, 0, True, False);
+    Step(0, -1, False, False);
+    Log.Add(Format('glide entry, locked: state %d (expected %d)',
+      [E.Raw[PF_STATE], PS_AIRBORNE]));
+    if E.Raw[PF_STATE] = PS_SPECIAL1 then
+    begin
+      Log.Add('FAILED: glided without the ability unlocked');
+      Inc(Result);
+    end;
+
+  finally
+    W.Free;
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - the controller behaves as its own constants predict')
+  else
+    Log.Add('FAILED');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -1810,6 +2194,8 @@ begin
         Result := SelfTestStages(Log)
       else if ParamStr(1) = '--selftest-player' then
         Result := SelfTestPlayer(Log)
+      else if ParamStr(1) = '--selftest-trace' then
+        Result := SelfTestTrace(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -1833,7 +2219,8 @@ begin
      (ParamStr(1) = '--selftest-settings') or
      (ParamStr(1) = '--selftest-script') or
      (ParamStr(1) = '--selftest-stages') or
-     (ParamStr(1) = '--selftest-player') then
+     (ParamStr(1) = '--selftest-player') or
+     (ParamStr(1) = '--selftest-trace') then
   begin
     ExitCode := RunSelfTest;
     Exit;

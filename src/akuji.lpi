@@ -73,6 +73,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="Player.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="Camera.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>

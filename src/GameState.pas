@@ -98,6 +98,17 @@ var
   Input: TInputState;                       // p_InputState      0x0046CC58
 
 { Convenience for the pause path, which the original open-codes. }
+{ The tail of TFrm_main_AppIdle @ 0x00464D30, which is where the input record's
+  DERIVED fields are maintained. It runs AFTER the state handlers, so the latch
+  a handler reads holds the PREVIOUS frame's button state - which is what makes
+  "Button and not ButtonLatch" a rising edge.
+
+  It also ages the double-tap window. Player_Update opens that window; this
+  closes it, and clears the remembered direction when it expires. Splitting it
+  this way is the original's, not a convenience: the controller and the poller
+  each own half of the record. }
+procedure InputEndOfFrame(var Inp: TInputState; const Down: array of Boolean);
+
 procedure EnterPause;
 procedure LeavePause;
 
@@ -121,6 +132,38 @@ uses
 
 { The order is the original's, from FormKeyDown @ 0x004665C8: the menu index is
   saved and cleared BEFORE the game state is saved. }
+procedure InputEndOfFrame(var Inp: TInputState; const Down: array of Boolean);
+var
+  I: Integer;
+begin
+  if (Inp.AxisX = 0) and (Inp.AxisY = 0) then
+  begin
+    Inp.Moving := False;
+    Inp.RepeatTimer := 0;
+  end;
+  Inp.AxisYNegative := Inp.AxisY < 0;
+  if (Inp.AxisX <> 0) or (Inp.AxisY <> 0) then
+    Inp.Moving := True;
+  if Inp.RepeatTimer > 0 then Dec(Inp.RepeatTimer);
+  if Inp.HoldTimer > 0 then Dec(Inp.HoldTimer);
+  if Inp.HoldTimer = 0 then
+  begin
+    Inp.HeldX := 0;
+    Inp.HeldY := 0;
+  end;
+  for I := 0 to 3 do
+  begin
+    if (I <= High(Down)) and Down[I] then
+      Inp.ButtonLatch[I] := True
+    else
+    begin
+      Inp.ButtonLatch[I] := False;
+      Inp.ButtonRepeat[I] := 0;
+    end;
+    if Inp.ButtonRepeat[I] > 0 then Dec(Inp.ButtonRepeat[I]);
+  end;
+end;
+
 procedure EnterPause;
 begin
   SavedMenuIndex := PauseMenuIndex;
