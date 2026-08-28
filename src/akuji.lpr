@@ -1999,11 +1999,19 @@ type
     function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
+    { Not used by the trace, but left abstract it would be a runtime
+      abstract-method error the first time a handler destroyed something. }
+    procedure Destroy(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
     procedure PlaySound(Id: Integer); override;
     function RandomBelow(N: Integer): Integer; override;
   end;
+
+procedure TFlatWorld.Destroy(var E: TEntity; DropLoot: Boolean);
+begin
+  E.Raw[EF_ALIVE] := 0;
+end;
 
 function TFlatWorld.TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
 begin
@@ -2411,6 +2419,25 @@ end;
   --------------------------------------------------------------------------- }
 
 type
+  { A TTileSource over a shipped map, so the collision arithmetic can be swept
+    against real data rather than against a fixture built to suit it. }
+  TMapTiles = class(TTileSource)
+  public
+    Map: TTileMap;
+    function TileAt(TileX, TileY: Integer): Integer; override;
+  end;
+
+  { And one over a grid the test writes, for the cases a real map has no reason
+    to contain. Probes records every lookup so the SWEEP can be checked, not
+    just its answer. }
+  TGridTiles = class(TTileSource)
+  public
+    W, H: Integer;
+    Cells: array[0..63, 0..63] of Integer;
+    Probes: string;
+    function TileAt(TileX, TileY: Integer): Integer; override;
+  end;
+
   TStubSprites = class(TSpriteSink)
   public
     Vis:  array[0..15] of Boolean;
@@ -2442,6 +2469,19 @@ type
     procedure PlaySound(Id: Integer); override;
     function RandomBelow(N: Integer): Integer; override;
   end;
+
+function TMapTiles.TileAt(TileX, TileY: Integer): Integer;
+begin
+  Result := Map.TileAtRaw(TileX, TileY);
+end;
+
+function TGridTiles.TileAt(TileX, TileY: Integer): Integer;
+begin
+  Probes := Probes + Format('%d,%d ', [TileX, TileY]);
+  if (TileX < 0) or (TileY < 0) or (TileX >= W) or (TileY >= H) then
+    Exit(0);
+  Result := Cells[TileX][TileY];
+end;
 
 procedure TStubSprites.SetVisible(Handle: Integer; Visible: Boolean);
 begin Vis[Handle] := Visible; end;
@@ -2558,6 +2598,362 @@ const
     ( 815,  30,  245), ( 830,  15,  125), ( 835,  30,  251),
     ( 850,  59,  501), ( 875,  26,  227), ( 875,  54,  473),
     ( 950,  13,  123), ( 950,  53,  503), ( 975,  26,  253));
+
+{ --- 4. Entity_TileCollideX/Y @ 0x00457300 / 0x004574DC ------------------
+
+  The first check is the one that matters and it uses SHIPPED DATA. An entity
+  small enough to sit inside one tile is placed at the centre of every tile of a
+  real map in turn, and asked what it would hit moving one sub-pixel right. The
+  answer must be that tile when the map says it is solid and TILE_NONE when it
+  does not - for all of them.
+
+  That sweep is what pins the index arithmetic, and the -128 in particular. The
+  tile index is built from two separately-rounded pixel conversions and then
+  biased by 128 tiles, and 128 is only right because BOTH the layer origin and
+  the entity position carry POSITION_BIAS. Get that wrong by one and the whole
+  map misaligns; get the rounding wrong and it misaligns near the edges only.
+  Neither could hide behind a hand-built fixture. }
+function TestTileCollide(Log: TStringList; const GameDir: string): Integer;
+const
+  SOLID = 50;
+var
+  Map: TTileMap;
+  Tiles: TMapTiles;
+  Grid: TGridTiles;
+  L, L2: TLayerInfo;
+  E: TEntity;
+  TX, TY, Got, Want, Bad, Solids, Diff, A, B: Integer;
+  ProbeA, ProbeB: string;
+
+  procedure PlaceAt(PxX, PxY, ExtX, ExtY: Integer);
+  begin
+    FillChar(E, SizeOf(E), 0);
+    E.Raw[EF_POS_X]    := (PxX shl POSITION_SHIFT) + POSITION_BIAS;
+    E.Raw[EF_POS_Y]    := (PxY shl POSITION_SHIFT) + POSITION_BIAS;
+    E.Raw[EF_EXTENT_X] := ExtX;
+    E.Raw[EF_EXTENT_Y] := ExtY;
+  end;
+
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- Entity_TileCollideX/Y ---');
+
+  FillChar(L, SizeOf(L), 0);
+  L.OriginX := POSITION_BIAS;
+  L.OriginY := POSITION_BIAS;
+  L.TileW := 32;
+  L.TileH := 32;
+
+  { --- 4a. every tile of a shipped map ---------------------------------- }
+  Map := TTileMap.Create;
+  Tiles := TMapTiles.Create;
+  try
+    Tiles.Map := Map;
+    if not Map.Load(GameDir, 1) then
+    begin
+      Log.Add('FAILED: could not load map 001');
+      Inc(Result);
+    end
+    else if (Map.TileWidth <> 32) or (Map.TileHeight <> 32) then
+    begin
+      Log.Add(Format('FAILED: map 001 is %dx%d tiles, the arithmetic assumes 32',
+        [Map.TileWidth, Map.TileHeight]));
+      Inc(Result);
+    end
+    else
+    begin
+      Bad := 0;
+      Solids := 0;
+      for TY := 0 to Map.MapHeight - 1 do
+        for TX := 0 to Map.MapWidth - 1 do
+        begin
+          PlaceAt(TX * 32 + 16, TY * 32 + 16, 2, 2);
+          Want := Map.TileAtRaw(TX, TY);
+          if Want >= SOLID then
+            Inc(Solids)
+          else
+            Want := TILE_NONE;
+          Got := EntityTileCollideX(E, L, Tiles, SOLID, 1, 0, False);
+          if Got <> Want then
+          begin
+            if Bad < 5 then
+              Log.Add(Format('  tile (%d,%d): got %d, map says %d',
+                [TX, TY, Got, Want]));
+            Inc(Bad);
+          end;
+          { and the Y mirror, moving down, must agree tile for tile }
+          if EntityTileCollideY(E, L, Tiles, SOLID, 1, 0, False) <> Want then
+          begin
+            Inc(Bad);
+            if Bad < 8 then
+              Log.Add(Format('  tile (%d,%d): Y disagrees with X', [TX, TY]));
+          end;
+        end;
+      Log.Add(Format('map 001, %dx%d tiles (%d of them solid): %d wrong',
+        [Map.MapWidth, Map.MapHeight, Solids, Bad]));
+      Inc(Result, Bad);
+      if Solids = 0 then
+      begin
+        Log.Add('FAILED: no solid tiles in map 001 - the sweep proved nothing');
+        Inc(Result);
+      end;
+    end;
+  finally
+    Tiles.Free;
+    Map.Free;
+  end;
+
+  { --- 4b. the things a real map cannot show ----------------------------- }
+  Grid := TGridTiles.Create;
+  try
+    Grid.W := 20;
+    Grid.H := 15;
+
+    { A standing entity is never blocked - the whole body is inside if Delta
+      <> 0, which is why Player_Update can ask about EF_VEL_X unconditionally. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := 60;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    if EntityTileCollideX(E, L, Grid, SOLID, 0, 0, False) <> TILE_NONE then
+    begin
+      Log.Add('FAILED: a zero delta reported a collision');
+      Inc(Result);
+    end;
+
+    { The leading edge sweeps the WHOLE cross-axis span. A 40-tall entity
+      centred in tile row 5 spans rows 4..6, so a wall at its feet stops it. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][6] := 61;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 20, 40);
+    Grid.Probes := '';
+    Got := EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    Log.Add(Format('40-tall entity, wall at its feet: got %d, probed [%s]',
+      [Got, Trim(Grid.Probes)]));
+    if Got <> 61 then
+    begin
+      Log.Add('FAILED: the sweep did not reach the bottom of the box');
+      Inc(Result);
+    end;
+    if Trim(Grid.Probes) <> '5,4 5,5 5,6' then
+    begin
+      Log.Add('FAILED: the swept span should be rows 4..6 of column 5');
+      Inc(Result);
+    end;
+
+    { One row further down is outside the box and must not be seen. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][7] := 61;
+    if EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False) <> TILE_NONE then
+    begin
+      Log.Add('FAILED: the sweep reached past the bottom of the box');
+      Inc(Result);
+    end;
+
+    { Left and right edges are not symmetric: the right one carries a -1
+      because it is the last pixel inside the box. Centre 183 puts the right
+      edge in tile 6 and the left edge in tile 5. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[6][5] := 62;
+    PlaceAt(183, 5 * 32 + 16, 20, 2);
+    A := EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    B := EntityTileCollideX(E, L, Grid, SOLID, -1, 0, False);
+    Log.Add(Format('edges at centre 183: moving right %d, moving left %d',
+      [A, B]));
+    if (A <> 62) or (B <> TILE_NONE) then
+    begin
+      Log.Add('FAILED: the two edges should straddle the tile boundary here');
+      Inc(Result);
+    end;
+
+    { Scrolling is a ROUNDING decision, not a semantic one. It only decides
+      which of the two pixel conversions carries the 1/32 remainder, so the sum
+      can differ by one PIXEL - and that changes the tile only where the pixel
+      it moves across is a tile boundary.
+
+      A first version of this check compared the returned tile over a row of
+      identical solid tiles and found no difference anywhere in 1024 cases,
+      which proved nothing at all: the answer was the same tile VALUE either
+      way. It compares the probed COLUMN now, and sweeps the entity across two
+      whole tiles so a boundary is actually crossed. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    for TX := 0 to 19 do
+      Grid.Cells[TX][5] := 63;
+    Diff := 0;
+    for TX := 160 to 223 do
+    begin
+      PlaceAt(TX, 5 * 32 + 16, 20, 2);
+      E.Raw[EF_POS_X] := E.Raw[EF_POS_X] + 20;   { fraction on the entity }
+      L.OriginX := POSITION_BIAS;                { and none on the layer }
+      Grid.Probes := '';
+      EntityTileCollideX(E, L, Grid, SOLID, 20, 0, False);
+      ProbeA := Trim(Grid.Probes);
+      Grid.Probes := '';
+      EntityTileCollideX(E, L, Grid, SOLID, 20, 0, True);
+      ProbeB := Trim(Grid.Probes);
+      if ProbeA <> ProbeB then
+      begin
+        Inc(Diff);
+        if Diff = 1 then
+          Log.Add(Format('  at centre %d: not scrolling probes %s, scrolling '
+            + 'probes %s', [TX, ProbeA, ProbeB]));
+      end;
+      { Counting differences cannot see an INVERTED flag - swapping the two
+        answers leaves the count identical, and a mutation that did exactly
+        that survived a run of this test. So pin which answer is which at a
+        position worked out by hand: the entity carries a 20/32 pixel
+        fraction and the layer none, so moving the ENTITY crosses into tile 6
+        while moving the LAYER leaves it in tile 5. }
+      if TX = 182 then
+      begin
+        if ProbeA <> '6,5' then
+        begin
+          Log.Add(Format('FAILED: not scrolling should probe 6,5, got %s',
+            [ProbeA]));
+          Inc(Result);
+        end;
+        if ProbeB <> '5,5' then
+        begin
+          Log.Add(Format('FAILED: scrolling should probe 5,5, got %s',
+            [ProbeB]));
+          Inc(Result);
+        end;
+      end;
+    end;
+    L.OriginX := POSITION_BIAS;
+    Log.Add(Format('scrolling flag across two tiles of travel: changes the '
+      + 'column in %d of 64 positions', [Diff]));
+    if Diff = 0 then
+    begin
+      Log.Add('FAILED: the scrolling flag never mattered - it should, by '
+        + 'rounding');
+      Inc(Result);
+    end;
+    if Diff > 8 then
+    begin
+      Log.Add('FAILED: it should shift a boundary, not change the answer '
+        + 'everywhere');
+      Inc(Result);
+    end;
+
+    { The right edge's -1 is only visible when the edge lands on the LAST
+      pixel of a tile. A 20-wide entity centred at 182 has its right edge at
+      191, the last pixel of tile 5; drop the -1 and it becomes 192, the first
+      of tile 6. The earlier edge case used centre 183, where both readings
+      land in tile 6 and the -1 is invisible - and a mutation that removed it
+      survived because of that. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[6][5] := 64;
+    PlaceAt(182, 5 * 32 + 16, 20, 2);
+    Got := EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    Log.Add(Format('right edge flush with tile 5''s last pixel: %d', [Got]));
+    if Got <> TILE_NONE then
+    begin
+      Log.Add('FAILED: the right edge should still be inside tile 5');
+      Inc(Result);
+    end;
+
+    { A tile EXACTLY at the threshold is solid - the test is >=, not >. Nothing
+      else in this file uses a tile equal to the threshold, so a mutation to >
+      survived. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := SOLID;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    Got := EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    if Got <> SOLID then
+    begin
+      Log.Add(Format('FAILED: a tile equal to the threshold must be solid, '
+        + 'got %d', [Got]));
+      Inc(Result);
+    end;
+
+    { The cross-axis span converts each term to pixels SEPARATELY. Summing
+      first differs only by the carry of the two 1/32 fractions, and only
+      matters where that carry crosses a tile edge - which needs the entity on
+      a tile boundary AND both fractions set. At pixel Y 160 with 20/32 on each,
+      the correct reading spans rows 4..5 and the summed one only row 5. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    PlaceAt(176, 160, 2, 2);
+    E.Raw[EF_POS_Y] := E.Raw[EF_POS_Y] + 20;
+    L.OriginY := POSITION_BIAS + 20;
+    Grid.Probes := '';
+    EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    L.OriginY := POSITION_BIAS;
+    Log.Add(Format('cross-axis span with fractions on both: [%s]',
+      [Trim(Grid.Probes)]));
+    if Trim(Grid.Probes) <> '5,4 5,5' then
+    begin
+      Log.Add('FAILED: each term must be rounded to pixels on its own');
+      Inc(Result);
+    end;
+
+    { The Y sweep divides its own axis by TileH. Every shipped map is 32x32, so
+      swapping it for TileW is invisible against real data; this uses a
+      synthetic 32x16 layer purely to tell the two apart. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    L2 := L;
+    L2.TileH := 16;
+    PlaceAt(176, 176, 2, 2);
+    Grid.Probes := '';
+    EntityTileCollideY(E, L2, Grid, SOLID, 1, 0, False);
+    Log.Add(Format('Y sweep on a 32x16 layer probes [%s]', [Trim(Grid.Probes)]));
+    if Trim(Grid.Probes) <> '5,139' then
+    begin
+      Log.Add('FAILED: the Y sweep must divide its own axis by TileH');
+      Inc(Result);
+    end;
+
+    { The map wraps horizontally, because TileMap_Get has no bounds check.
+      Column -1 is the previous row's last column. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    PlaceAt(-1 * 32 + 16, 5 * 32 + 16, 2, 2);
+    Grid.Probes := '';
+    EntityTileCollideX(E, L, Grid, SOLID, 1, 0, False);
+    Log.Add(Format('an entity off the left edge probes [%s]',
+      [Trim(Grid.Probes)]));
+    if Trim(Grid.Probes) <> '-1,5' then
+    begin
+      Log.Add('FAILED: off-map lookups should be passed through, not clamped');
+      Inc(Result);
+    end;
+
+    { And the wrap itself, which lives in TTileMap.TileAtRaw rather than in the
+      collision code - the grid stub above never exercises it, which is why a
+      mutation that clamped instead of wrapping survived. Column -1 of row N is
+      the last column of row N-1, because the original indexes
+      Data[X + Y * Width] with no check at all. }
+    Map := TTileMap.Create;
+    try
+      if Map.Load(GameDir, 1) then
+      begin
+        Bad := 0;
+        Solids := 0;
+        for TY := 1 to Map.MapHeight - 1 do
+        begin
+          if Map.TileAtRaw(-1, TY) <> Map.TileAtRaw(Map.MapWidth - 1, TY - 1) then
+            Inc(Bad);
+          if Map.TileAtRaw(Map.MapWidth, TY - 1) <> Map.TileAtRaw(0, TY) then
+            Inc(Bad);
+          if Map.TileAtRaw(-1, TY) <> 0 then
+            Inc(Solids);
+        end;
+        Log.Add(Format('horizontal wrap over %d rows: %d wrong, %d of them '
+          + 'non-zero', [Map.MapHeight - 1, Bad, Solids]));
+        Inc(Result, Bad);
+        if Solids = 0 then
+        begin
+          Log.Add('FAILED: every wrapped lookup was 0 - a clamp would pass too');
+          Inc(Result);
+        end;
+      end;
+    finally
+      Map.Free;
+    end;
+
+  finally
+    Grid.Free;
+  end;
+end;
 
 function SelfTestEntities(Log: TStringList): Integer;
 var
@@ -2988,6 +3384,8 @@ begin
     W.Free;
     Pool.Free;
   end;
+
+  Inc(Result, TestTileCollide(Log, GameDir));
 
   Log.Add('');
   if Result = 0 then

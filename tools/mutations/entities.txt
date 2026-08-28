@@ -1,0 +1,182 @@
+the dispatcher's handler address for type 40
+src/EntityHandlers.pas
+---
+$0045B3EC
+--->
+$0045B3F0
+===
+ScaleByPercent falls back to round-half-up at a tie
+src/EntityHandlers.pas
+---
+  if R > 50 then
+    Exit(Sign * Integer(Q + 1));
+  if R < 50 then
+    Exit(Sign * Integer(Q));
+--->
+  if R >= 50 then
+    Exit(Sign * Integer(Q + 1));
+  if R < 50 then
+    Exit(Sign * Integer(Q));
+===
+the touch boundary moves by one slot
+src/EntityHandlers.pas
+---
+    if (Slot >= SLOT_MINOR_FIRST) and IsAlive(E^) then
+--->
+    if (Slot > SLOT_MINOR_FIRST) and IsAlive(E^) then
+===
+the sprite is not centred on the entity
+src/EntityHandlers.pas
+---
+                 - HalfExtent(E^.Raw[EF_EXTENT_X]);
+--->
+                 - 0 * HalfExtent(E^.Raw[EF_EXTENT_X]);
+===
+the damage flicker's parity is inverted
+src/EntityHandlers.pas
+---
+      if E^.Raw[EF_DEATH_TIMER] mod 2 = 0 then
+--->
+      if E^.Raw[EF_DEATH_TIMER] mod 2 <> 0 then
+===
+timers keep ticking during the pause menu
+src/EntityHandlers.pas
+---
+    if (AGameState <> GS_PAUSE) and (AGameState <> GS_STATE_140) then
+    begin
+      if E^.Raw[EF_TIMER] <> 0 then
+--->
+    if (AGameState <> GS_STATE_140) then
+    begin
+      if E^.Raw[EF_TIMER] <> 0 then
+===
+the loop walks the whole pool instead of 256 slots
+src/EntityHandlers.pas
+---
+  for Slot := 0 to ENTITY_UPDATE_COUNT - 1 do
+--->
+  for Slot := 0 to ENTITY_COUNT - 1 do
+===
+the mid-loop abandon is removed
+src/EntityHandlers.pas
+---
+    if (AGameState <> GS_PLAY) and (AGameState <> GS_STATE_140) then
+      Exit;
+--->
+    if (AGameState <> GS_PLAY) and (AGameState = GS_STATE_140) then
+      Exit;
+===
+screen-space entities follow the scroll too
+src/EntityHandlers.pas
+---
+    if E^.Raw[EF_SCREEN_SPACE] = 0 then
+--->
+    if E^.Raw[EF_SCREEN_SPACE] >= 0 then
+===
+a depth of -1 is not special-cased
+src/EntityHandlers.pas
+---
+      if Depth = DEPTH_BY_SCREEN_Y then
+--->
+      if Depth = -2 then
+===
+culling ignores EF_CULL_OFFSCREEN
+src/EntityHandlers.pas
+---
+and (E^.Raw[EF_CULL_OFFSCREEN] = 1)
+--->
+and (E^.Raw[EF_CULL_OFFSCREEN] >= 0)
+===
+the tile bias is 64 tiles instead of 128
+src/Entities.pas
+---
+  TILE_BIAS_TILES = $80;   { 128 }
+--->
+  TILE_BIAS_TILES = $40;   { 128 }
+===
+the right edge loses its -1
+src/Entities.pas
+---
+    Edge := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
+            + E.Raw[EF_TILE_OFS_X] - 1;
+--->
+    Edge := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
+            + E.Raw[EF_TILE_OFS_X];
+===
+the cross-axis span is summed before rounding
+src/Entities.pas
+---
+  Cross := OriginPixel(L.OriginY) + OriginPixel(E.Raw[EF_POS_Y] + DeltaY);
+--->
+  Cross := OriginPixel(L.OriginY + E.Raw[EF_POS_Y] + DeltaY);
+===
+the sweep stops after the first row
+src/Entities.pas
+---
+  while Row <= LastRow do
+  begin
+    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
+--->
+  while Row <= Row - 1 do
+  begin
+    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
+===
+a zero delta is no longer exempt
+src/Entities.pas
+---
+  if (DeltaX = 0) or (L.TileW = 0) or (L.TileH = 0) then
+--->
+  if (L.TileW = 0) or (L.TileH = 0) then
+===
+the scrolling flag moves the wrong term
+src/Entities.pas
+---
+  if Scrolling then
+  begin
+    MoveLayer := DeltaX;
+    MoveEnt   := 0;
+  end
+--->
+  if not Scrolling then
+  begin
+    MoveLayer := DeltaX;
+    MoveEnt   := 0;
+  end
+===
+the Y sweep divides its own axis by TileW
+src/Entities.pas
+---
+  Row := (OriginPixel(L.OriginY + MoveLayer)
+          + OriginPixel(E.Raw[EF_POS_Y] + MoveEnt) + Edge) div L.TileH
+         - TILE_BIAS_TILES;
+--->
+  Row := (OriginPixel(L.OriginY + MoveLayer)
+          + OriginPixel(E.Raw[EF_POS_Y] + MoveEnt) + Edge) div L.TileW
+         - TILE_BIAS_TILES;
+===
+the solid test becomes strictly greater
+src/Entities.pas
+---
+    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
+    if Tile >= SolidThreshold then
+--->
+    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
+    if Tile > SolidThreshold then
+===
+X and Y are swapped in the Y sweep's lookup
+src/Entities.pas
+---
+    Tile := Tiles.TileAt(Col - TILE_BIAS_TILES, Row);
+--->
+    Tile := Tiles.TileAt(Row, Col - TILE_BIAS_TILES);
+===
+off-map tile lookups are clamped instead of wrapped
+src/TileMaps.pas
+---
+  Idx := X + Y * FMapW;
+  if (Idx < 0) or (Idx >= FMapW * FMapH) then
+    Exit(0);
+--->
+  if (X < 0) or (Y < 0) or (X >= FMapW) or (Y >= FMapH) then
+    Exit(0);
+  Idx := X + Y * FMapW;

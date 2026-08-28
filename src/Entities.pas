@@ -98,6 +98,21 @@ const
     because $10000 is an exact multiple of 32; the order is kept because it is
     the order the original emits. }
   POSITION_BIAS_PIXELS = POSITION_BIAS shr POSITION_SHIFT;   { 2048 }
+
+  { What Entity_TileCollideX/Y subtract from a tile index before looking it up.
+
+    It is 128 rather than 64, and that is the interesting part. The tile index
+    is built from OriginPixel(layer origin) + OriginPixel(entity position), and
+    BOTH of those carry POSITION_BIAS - 2048 pixels each, 4096 together, which
+    is 128 tiles of 32. So the constant is independent evidence that the layer
+    origin is biased the same way an entity position is, which until now rested
+    only on the +31 rounding idiom looking identical in both.
+
+    Like every other tile calculation in the game it assumes 32-pixel tiles.
+    Every shipped map is 32. }
+  TILE_BIAS_TILES = $80;   { 128 }
+
+  TILE_NONE = -1;          { Entity_TileCollide*'s "nothing solid that way" }
   SCREEN_W       = $140;      { 320 }
   SCREEN_H       = $F0;       { 240 }
 
@@ -594,6 +609,25 @@ type
     comes back through PushX/PushY, and OnTopOfSolid says the hit was a
     landing. That is the original's shape - three globals rather than out
     parameters - and it is kept because the callers read them in that order. }
+  { The tilemap, as the collision code sees it.
+
+    TileMap_Get @ 0x0044DB5C is one line - `Data[X + Y * Width]`, a Word, with
+    NO bounds check of any kind. That is not the same as returning 0 off the
+    map, and the difference is reachable: an X outside 0..Width-1 simply indexes
+    into the NEIGHBOURING ROW, so the map wraps horizontally for anything that
+    walks off the side. An implementation is expected to reproduce that. Only an
+    index outside the array altogether cannot be reproduced.
+
+    The original also takes a LAYER INDEX and resolves both p_LayerInfo[layer]
+    and p_TileMaps[layer] from it - p_LayerInfo is an array of these records,
+    stride 0x20, which is one independent confirmation that TLayerInfo is
+    exactly eight ints. Here the caller resolves the layer instead and passes
+    the two directly. }
+  TTileSource = class
+  public
+    function TileAt(TileX, TileY: Integer): Integer; virtual; abstract;
+  end;
+
   { The sprite pool, as Entity_UpdateAll sees it.
 
     The original keeps sprites in a Delphi TList at 0x0046D35C and EF_SPRITE is
@@ -839,6 +873,42 @@ function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
   places rather than inlined. }
 procedure ApproachZero(var V: Integer; Step: Integer);
 
+{ 0x00457300 / 0x004574DC. The tile an entity would run into moving DeltaMain
+  along this axis, or TILE_NONE if nothing solid is in the way. The caller
+  compares the answer against the terrain's solid threshold - and so does this,
+  because the original stops at the FIRST tile at or above it rather than
+  returning the whole span.
+
+  It does not test one tile. It sweeps the entity's LEADING EDGE across every
+  tile the box spans on the other axis, so a tall entity is stopped by a wall
+  that only meets its feet. DeltaCross shifts that span, which is how a caller
+  asks "if I move this way AND that way, what stops me horizontally".
+
+  DELTA OF ZERO RETURNS TILE_NONE. The whole body sits inside `if Delta <> 0`,
+  so an entity that is not moving is never blocked - it can rest inside a solid
+  tile indefinitely and only the next non-zero velocity notices. That is why
+  Player_Update can ask about EF_VEL_X unconditionally.
+
+  SCROLLING is finer than it looks. It decides whether Delta is added to the
+  LAYER ORIGIN or to the ENTITY POSITION - but both land in the same sum, so it
+  changes no tile except through ROUNDING: each term is converted to pixels
+  separately, so which of the two carries the 1/32-pixel remainder decides
+  whether the sum crosses a pixel. It matters exactly when the two fractions
+  straddle a boundary, and not otherwise.
+
+  The two write their working tile coordinate to globals at 0x00484FA4 and
+  0x00484FA8. Those are NOT outputs: nothing outside these two functions
+  references either address, so they are locals the compiler happened to spill
+  to fixed storage. They are locals here. }
+function EntityTileCollideX(const E: TEntity; const L: TLayerInfo;
+                            Tiles: TTileSource; SolidThreshold: Integer;
+                            DeltaX, DeltaY: Integer;
+                            Scrolling: Boolean): Integer;
+function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
+                            Tiles: TTileSource; SolidThreshold: Integer;
+                            DeltaY, DeltaX: Integer;
+                            Scrolling: Boolean): Integer;
+
 { 0x00451354. Axis-aligned overlap of two boxes given as (L, T, R, B), with a
   per-axis margin that shrinks the test. The original writes it as
   separation-versus-width rather than the usual four edge comparisons; this is
@@ -949,6 +1019,108 @@ begin
     V := V - Step;
     if V < 0 then
       V := 0;
+  end;
+end;
+
+function EntityTileCollideX(const E: TEntity; const L: TLayerInfo;
+                            Tiles: TTileSource; SolidThreshold: Integer;
+                            DeltaX, DeltaY: Integer;
+                            Scrolling: Boolean): Integer;
+var
+  Edge, MoveLayer, MoveEnt, Cross, Row, LastRow, Col, Tile: Integer;
+begin
+  Result := TILE_NONE;
+  if (DeltaX = 0) or (L.TileW = 0) or (L.TileH = 0) then
+    Exit;
+
+  { The leading edge, as a pixel offset from the entity's centre. The two arms
+    are not symmetric: the right edge carries a -1 because it is the last pixel
+    INSIDE the box, not the first one past it. }
+  if DeltaX < 0 then
+    Edge := E.Raw[EF_BOX_OFS_X] - HalfExtent(E.Raw[EF_EXTENT_X])
+            + E.Raw[EF_TILE_OFS_X]
+  else
+    Edge := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
+            + E.Raw[EF_TILE_OFS_X] - 1;
+
+  if Scrolling then
+  begin
+    MoveLayer := DeltaX;
+    MoveEnt   := 0;
+  end
+  else
+  begin
+    MoveLayer := 0;
+    MoveEnt   := DeltaX;
+  end;
+
+  { The rows the box spans, with DeltaCross applied. Each term is converted to
+    pixels on its own - not summed first - which is what makes Scrolling a
+    rounding decision. }
+  Cross := OriginPixel(L.OriginY) + OriginPixel(E.Raw[EF_POS_Y] + DeltaY);
+  Row := (Cross - HalfExtent(E.Raw[EF_EXTENT_Y])
+          + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y]) div L.TileH;
+  LastRow := (Cross + HalfExtent(E.Raw[EF_EXTENT_Y])
+              - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1) div L.TileH;
+
+  Col := (OriginPixel(L.OriginX + MoveLayer)
+          + OriginPixel(E.Raw[EF_POS_X] + MoveEnt) + Edge) div L.TileW
+         - TILE_BIAS_TILES;
+
+  while Row <= LastRow do
+  begin
+    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
+    if Tile >= SolidThreshold then
+      Exit(Tile);
+    Inc(Row);
+  end;
+end;
+
+function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
+                            Tiles: TTileSource; SolidThreshold: Integer;
+                            DeltaY, DeltaX: Integer;
+                            Scrolling: Boolean): Integer;
+var
+  Edge, MoveLayer, MoveEnt, Cross, Col, LastCol, Row, Tile: Integer;
+begin
+  Result := TILE_NONE;
+  if (DeltaY = 0) or (L.TileW = 0) or (L.TileH = 0) then
+    Exit;
+
+  if DeltaY < 0 then
+    Edge := E.Raw[EF_BOX_OFS_Y] - HalfExtent(E.Raw[EF_EXTENT_Y])
+            + E.Raw[EF_TILE_OFS_Y]
+  else
+    Edge := HalfExtent(E.Raw[EF_EXTENT_Y]) - E.Raw[EF_BOX_OFS_Y]
+            + E.Raw[EF_TILE_OFS_Y] - 1;
+
+  if Scrolling then
+  begin
+    MoveLayer := DeltaY;
+    MoveEnt   := 0;
+  end
+  else
+  begin
+    MoveLayer := 0;
+    MoveEnt   := DeltaY;
+  end;
+
+  Cross := OriginPixel(L.OriginX) + OriginPixel(E.Raw[EF_POS_X] + DeltaX);
+  Col := (Cross - HalfExtent(E.Raw[EF_EXTENT_X])
+          + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X]) div L.TileW;
+  LastCol := (Cross + HalfExtent(E.Raw[EF_EXTENT_X])
+              - E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X] - 1) div L.TileW;
+
+  Row := (OriginPixel(L.OriginY + MoveLayer)
+          + OriginPixel(E.Raw[EF_POS_Y] + MoveEnt) + Edge) div L.TileH
+         - TILE_BIAS_TILES;
+
+  while Col <= LastCol do
+  begin
+    Tile := Tiles.TileAt(Col - TILE_BIAS_TILES, Row);
+    if Tile >= SolidThreshold then
+      Exit(Tile);
+    Inc(Col);
   end;
 end;
 

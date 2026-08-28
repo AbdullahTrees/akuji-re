@@ -66,6 +66,18 @@ type
     property SheetCols: Integer read FSheetCols;
     property SheetRows: Integer read FSheetRows;
     property Tiles[X, Y: Integer]: Word read GetTile; default;
+
+    { TileMap_Get @ 0x0044DB5C, which is what the COLLISION code calls and is
+      not the same function as GetTile above. It is one line - the Word at
+      Data[X + Y * MapWidth] - with no bounds check at all, so an X outside
+      0..MapWidth-1 indexes into the neighbouring row and the map wraps
+      horizontally for anything that walks off the side. That is reproduced
+      here because collision can reach it.
+
+      What is NOT reproduced: an index outside the array altogether, which the
+      original reads anyway. This returns 0 there. Drawing keeps GetTile, whose
+      clamp is right for a viewport. }
+    function TileAtRaw(X, Y: Integer): Integer;
   end;
 
 implementation
@@ -119,6 +131,16 @@ begin
   if (X < 0) or (Y < 0) or (X >= FMapW) or (Y >= FMapH) then
     Exit(0);
   Result := FTiles[Y * FMapW + X];
+end;
+
+function TTileMap.TileAtRaw(X, Y: Integer): Integer;
+var
+  Idx: Integer;
+begin
+  Idx := X + Y * FMapW;
+  if (Idx < 0) or (Idx >= FMapW * FMapH) then
+    Exit(0);
+  Result := FTiles[Idx];
 end;
 
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
