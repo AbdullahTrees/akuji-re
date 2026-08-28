@@ -675,9 +675,19 @@ begin
       if Index = 0 then begin Start := 9; Len := 3; end else Result := False;
     SUBOP_WAIT:
       if Index = 0 then begin Start := 9; Len := 6; end else Result := False;
+    SUBOP_TEST_FLAGS:
+      { Only the two LEADING fields are at fixed positions - the flag to set
+        and how many items follow. The items themselves are then at
+        17 + 6*N, but they are not arguments in the arity sense and the
+        interpreter reads them with its own stride, so they are not here. }
+      case Index of
+        0: begin Start := 9;  Len := 4; end;
+        1: begin Start := 14; Len := 2; end;
+      else
+        Result := False;
+      end;
   else
-    { 7, 8, 10, 13, 80, 99 take no arguments; 15 is variable and is checked by
-      its own rule rather than by position. }
+    { 7, 8, 10, 13, 80, 99 take no arguments. }
     Result := False;
   end;
 end;

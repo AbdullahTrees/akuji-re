@@ -309,7 +309,7 @@ procedure TEventRunner.Execute(Host: TEventHost; Events: TEventScript;
                                var P: TPlayerState; var AGameState: Integer);
 var
   Step: string;
-  Op, I, N, Flag, Want, Count, Start, Len: Integer;
+  Op, I, Flag, Want, Count, Start: Integer;
   Ok: Boolean;
 begin
   Step := CurrentStep;
@@ -458,8 +458,19 @@ begin
       end;
 
     SUBOP_TEST_FLAGS:
-      { arg 1 is a count and that many (op, flag) pairs follow, six characters
-        each. Every one must match for the target flag to be set. }
+      { arg 1 is a count and that many items follow, six characters apart:
+        one character saying whether the flag must be SET or CLEAR, then four
+        digits of flag index. Every one must match for arg 0's flag to be set.
+
+        This is the whole of the nine puzzle checkers - hit the switches, the
+        door opens - and the '0' form is a switch that must be left alone.
+
+        The two leading fields go through ArgPosition like every other
+        argument. That was not true when this was first written: ArgPosition
+        returned False for sub-op 15, so the count came back 0, the loop never
+        ran, and the test vacuously passed - it set flag 0, which is already 1
+        and always will be. Nothing observable happened, which is exactly the
+        kind of defect a test that only checks "no crash" cannot see. }
       begin
         Count := StepArg(Step, Op, 1);
         Ok := True;
@@ -512,11 +523,11 @@ begin
 
   else
     { An unknown sub-opcode does nothing at all in the original - no advance,
-      no error - which would hang the script. Reproduced, because inventing a
-      recovery would hide data that should never occur. }
-    N := 0;
-    if N <> 0 then
-      AdvanceStep(P, AGameState);
+      no error - which hangs the script where it stands. Reproduced rather than
+      recovered from: inventing a recovery would hide data that should never
+      occur, and no shipped program contains one. --selftest-runner drives
+      every shipped program to completion, which is what says so. }
+    ;
   end;
 end;
 

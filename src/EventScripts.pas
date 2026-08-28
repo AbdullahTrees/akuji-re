@@ -91,12 +91,22 @@
           calls Event_Begin on it immediately, every frame, until something
           stops it.
 
-          All nine in the shipped data are the same construction: placed at
-          tile (1,1) as entity type 20, csv 1 clear, csv 2 set, and carrying a
-          program that tests a list of flags with sub-op 15, and on success
-          sets a flag, waits 10 frames, plays sound 32 and disables itself with
-          sub-op 7. The flag it sets is its own csv 2 - so a solved puzzle
-          disables its own checker. Nine of nine, no exceptions.
+          All nine in the shipped data sit at tile (1,1) as entity type 20
+          with csv 1 clear and csv 2 set, and all nine SET THEIR OWN CSV 2 - so
+          a solved puzzle retires its own checker. Nine of nine on that.
+
+          EIGHT of them are also the same program: test a list of flags with
+          sub-op 15, and on success set the flag, wait 10 frames, play sound 32
+          and disable with sub-op 7. This once read "nine of nine, no
+          exceptions" and that was wrong; --selftest-runner found it by
+          driving each one. Stage 58's is
+
+              4,0000,1158,0001,0001,0020-*,1157-04-1158/1158-09-0032
+
+          with no list, no wait and no sub-op 7. It leaves by the other route:
+          setting 1158 makes the next spawn sweep disable the record, because
+          1158 is its own csv 2. So there are two ways for a checker to retire
+          and both end at the same place.
 
           Type 20 is also the one type Events_SpawnNearCamera special-cases,
           forcing its box to 32x32.
