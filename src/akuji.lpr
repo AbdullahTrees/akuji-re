@@ -2379,6 +2379,625 @@ begin
     Log.Add('FAILED');
 end;
 
+{ ---------------------------------------------------------------------------
+  --selftest-entities <gamedir> : Entity_UpdateAll.
+
+  Three checks, and the first is the one that matters.
+
+  1. HANDLER_ADDR against the BINARY. The switch is not a chain of compares -
+     the compiler emitted `JMP [EAX*4 + 0x00460924]`, so akuji.exe carries an
+     81-entry jump table naming every arm. This reads that table, follows each
+     arm to its CALL, and compares the 78 resulting addresses against the ones
+     transcribed into EntityHandlers.pas. A slip in any of 78 hand-copied
+     addresses would be invisible any other way, and "types 0, 18 and 20 have no
+     arm" stops being a claim and becomes a measurement: they are exactly the
+     entries pointing at the default target.
+
+  2. ScaleByPercent against exact arithmetic, with the exceptions named.
+
+     Away from a tie - Half * Percent = 50 (mod 100) - the FPU's error is far
+     too small to move the answer, so exact integer arithmetic is the reference.
+     At a tie it decides, and it does not always land on round-half-even: over
+     half-extents 0..1024 and percentages 0..100 it deviates in exactly SIXTY
+     places, which X87_DEVIATIONS lists by value. Both the values and the COUNT
+     are asserted, so an implementation that deviates anywhere else fails even
+     if it gets these sixty right.
+
+  3. The loop's own behaviour, driven through counting stubs. Entity_PlayerTouch
+     and Entity_TakeProjectileHits are not translated yet, and the dispatcher
+     calls them through nil-able procedure variables precisely so that a test
+     can put counters there - which is what pins the slot boundary, the type-68
+     special case and the mid-loop abandon without needing either function.
+  --------------------------------------------------------------------------- }
+
+type
+  TStubSprites = class(TSpriteSink)
+  public
+    Vis:  array[0..15] of Boolean;
+    Anim: array[0..15] of Integer;
+    SW, SH: array[0..15] of Integer;   { what Width/Height will report }
+    PX, PY, PZ: array[0..15] of Integer;
+    procedure SetVisible(Handle: Integer; Visible: Boolean); override;
+    function  GetVisible(Handle: Integer): Boolean; override;
+    procedure SetAnim(Handle, AnimId: Integer); override;
+    function  Width(Handle: Integer): Integer; override;
+    function  Height(Handle: Integer): Integer; override;
+    procedure SetPos(Handle, X, Y: Integer); override;
+    procedure SetDepth(Handle, Depth: Integer); override;
+  end;
+
+  TCountingWorld = class(TEntityWorld)
+  public
+    Killed: Integer;
+    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
+    function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
+    function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
+    function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
+    function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
+    procedure Destroy(var E: TEntity; DropLoot: Boolean); override;
+    procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
+    procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
+    procedure PlaySound(Id: Integer); override;
+    function RandomBelow(N: Integer): Integer; override;
+  end;
+
+procedure TStubSprites.SetVisible(Handle: Integer; Visible: Boolean);
+begin Vis[Handle] := Visible; end;
+function TStubSprites.GetVisible(Handle: Integer): Boolean;
+begin Result := Vis[Handle]; end;
+procedure TStubSprites.SetAnim(Handle, AnimId: Integer);
+begin Anim[Handle] := AnimId; end;
+function TStubSprites.Width(Handle: Integer): Integer;
+begin Result := SW[Handle]; end;
+function TStubSprites.Height(Handle: Integer): Integer;
+begin Result := SH[Handle]; end;
+procedure TStubSprites.SetPos(Handle, X, Y: Integer);
+begin PX[Handle] := X; PY[Handle] := Y; end;
+procedure TStubSprites.SetDepth(Handle, Depth: Integer);
+begin PZ[Handle] := Depth; end;
+
+function TCountingWorld.TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+begin Result := 0; end;
+function TCountingWorld.TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+begin Result := 0; end;
+function TCountingWorld.EdgeDistX(const E: TEntity; Delta: Integer): Integer;
+begin Result := 0; end;
+function TCountingWorld.EdgeDistY(const E: TEntity; Delta: Integer): Integer;
+begin Result := 0; end;
+function TCountingWorld.SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
+begin Result := False; end;
+function TCountingWorld.SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean;
+begin Result := False; end;
+function TCountingWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
+begin Result := SLOT_NONE; end;
+procedure TCountingWorld.Destroy(var E: TEntity; DropLoot: Boolean);
+begin Inc(Killed); E.Raw[EF_ALIVE] := 0; end;
+procedure TCountingWorld.SetSpawnField(Slot, IntIndex, Value: Integer);
+begin end;
+procedure TCountingWorld.SpawnDebris(const E: TEntity; Kind: Integer);
+begin end;
+procedure TCountingWorld.PlaySound(Id: Integer);
+begin end;
+function TCountingWorld.RandomBelow(N: Integer): Integer;
+begin Result := 0; end;
+
+var
+  { The dispatcher's two hooks are plain procedures, so their bookkeeping has to
+    be global. TouchAbortAt is how the mid-loop abandon is provoked: the touch
+    on that slot changes the game state, exactly as a touch that starts an event
+    script would. }
+  TouchCount, HitCount: Integer;
+  TouchSlots: string;
+  TouchAbortAt: Integer;
+  EntityTestState: Integer;
+
+procedure CountTouch(var E: TEntity; World: TEntityWorld);
+begin
+  Inc(TouchCount);
+  TouchSlots := TouchSlots + Format('%d ', [E.Raw[EF_SLOT]]);
+  if E.Raw[EF_SLOT] = TouchAbortAt then
+    EntityTestState := GS_TITLE_INIT;
+end;
+
+procedure CountHit(var E: TEntity; World: TEntityWorld);
+begin
+  Inc(HitCount);
+end;
+
+{ (Half * Percent) / 100 rounded half to even, done in integers so that it
+  cannot share a rounding mistake with the code under test. }
+function ExactPercent(Half, Percent: Integer): Integer;
+var
+  N, Q, R: Int64;
+begin
+  N := Int64(Half) * Percent;
+  Q := N div 100;
+  R := N mod 100;
+  if R > 50 then
+    Inc(Q)
+  else if R = 50 then
+    if Odd(Q) then Inc(Q);
+  Result := Integer(Q);
+end;
+
+const
+  { (half, percent, result) at every point where the x87 sequence disagrees with
+    exact round-half-even, over half-extents 0..1024 and percentages 0..100 -
+    the whole domain, not just the twelve percentages the shipped table happens
+    to use. Sixty places out of 103,525.
+
+    These come from an exact rational simulation of FDIV/FMULP/FISTP at 64-bit
+    significands, written separately from the Pascal. That is what makes this a
+    check rather than a restatement of the code under test.
+
+    They cluster: every one is a tie, half * percent = 50 (mod 100), and the
+    runs restart at powers of two, which is the ulp structure showing through.
+    Sweeping the FULL percentage range rather than the shipped twelve is
+    deliberate - a mutation that mishandles the exactly-half-an-ulp case is
+    invisible at the shipped percentages and shows up at 65. }
+  X87_DEVIATIONS: array[0..59, 0..2] of Integer = (
+    (  50,  59,   29), (  75,  42,   31), (  95,  30,   29),
+    ( 150,  21,   31), ( 150,  53,   79), ( 175,  30,   53),
+    ( 190,  15,   29), ( 190,  65,  123), ( 195,  30,   59),
+    ( 325,  18,   59), ( 325,  66,  215), ( 325,  78,  253),
+    ( 335,  30,  101), ( 350,  15,   53), ( 350,  53,  185),
+    ( 350,  65,  227), ( 355,  30,  107), ( 375,  30,  113),
+    ( 375,  54,  203), ( 390,  15,   59), ( 390,  65,  253),
+    ( 395,  30,  119), ( 415,  30,  125), ( 475,  26,  123),
+    ( 550,  53,  291), ( 625,  18,  113), ( 625,  66,  413),
+    ( 625,  78,  487), ( 650,   9,   59), ( 650,  33,  215),
+    ( 650,  39,  253), ( 650,  59,  383), ( 655,  30,  197),
+    ( 670,  15,  101), ( 670,  65,  435), ( 675,  30,  203),
+    ( 695,  30,  209), ( 710,  15,  107), ( 710,  65,  461),
+    ( 715,  30,  215), ( 725,  66,  479), ( 735,  30,  221),
+    ( 750,  15,  113), ( 750,  27,  203), ( 750,  53,  397),
+    ( 750,  65,  487), ( 755,  30,  227), ( 775,  30,  233),
+    ( 775,  54,  419), ( 790,  15,  119), ( 795,  30,  239),
+    ( 815,  30,  245), ( 830,  15,  125), ( 835,  30,  251),
+    ( 850,  59,  501), ( 875,  26,  227), ( 875,  54,  473),
+    ( 950,  13,  123), ( 950,  53,  503), ( 975,  26,  253));
+
+function SelfTestEntities(Log: TStringList): Integer;
+var
+  GameDir, ExeName: string;
+  Exe: TMemoryStream;
+  Table: array[0..ENTITY_TYPE_COUNT - 1] of Cardinal;
+  Arm: array[0..15] of Byte;
+  I, J, Bad, Rel, Target, NoArm, Half, Pct, Got, Want, Ties: Integer;
+  Pool: TEntityPool;
+  W: TCountingWorld;
+  S: TStubSprites;
+  P: TPlayerState;
+  L: TLayerInfo;
+  Inp: TInputState;
+  E: PEntity;
+
+  procedure Place(Slot, TypeId, Sprite, PxX, PxY: Integer);
+  var
+    Q: PEntity;
+  begin
+    Q := Pool.Entity(Slot);
+    FillChar(Q^, SizeOf(TEntity), 0);
+    Q^.Raw[EF_SLOT]   := Slot;
+    Q^.Raw[EF_ALIVE]  := 1;
+    Q^.Raw[EF_TYPE]   := TypeId;
+    Q^.Raw[EF_SPRITE] := Sprite;
+    Q^.Raw[EF_BYTE94] := 1;
+    Q^.Raw[EF_POS_X]  := (PxX shl POSITION_SHIFT) + POSITION_BIAS;
+    Q^.Raw[EF_POS_Y]  := (PxY shl POSITION_SHIFT) + POSITION_BIAS;
+  end;
+
+  procedure Run(AState: Integer);
+  begin
+    EntityTestState := AState;
+    TouchCount := 0;
+    HitCount := 0;
+    TouchSlots := '';
+    EntityUpdateAll(Pool, W, S, P, L, Inp, EntityTestState);
+  end;
+
+begin
+  Result := 0;
+  GameDir := ParamStr(2);
+  if GameDir = '' then
+    GameDir := ExtractFilePath(ParamStr(0));
+
+  Log.Add('=== Entity_UpdateAll @ 0x004608BC ===');
+  Log.Add('');
+
+  { --- 1. the switch, read out of akuji.exe ------------------------------ }
+  Bad := 0;
+  NoArm := 0;
+  Exe := TMemoryStream.Create;
+  try
+    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    if not FileExists(ExeName) then
+    begin
+      Log.Add('FAILED: akuji.exe is not in the game directory');
+      Inc(Result);
+    end
+    else
+    begin
+      Exe.LoadFromFile(ExeName);
+      Exe.Position := HANDLER_JUMP_TABLE - CODE_VA_BIAS;
+      Exe.ReadBuffer(Table[0], ENTITY_TYPE_COUNT * SizeOf(Cardinal));
+
+      for I := 0 to ENTITY_TYPE_COUNT - 1 do
+      begin
+        if Table[I] = HANDLER_NO_ARM_TARGET then
+        begin
+          Inc(NoArm);
+          if HANDLER_ADDR[I] <> HANDLER_NONE then
+          begin
+            Log.Add(Format('  type %d: exe says no arm, table names 0x%.6X',
+              [I, HANDLER_ADDR[I]]));
+            Inc(Bad);
+          end;
+          Continue;
+        end;
+
+        { Every arm is `MOV EAX,EBX` then `CALL rel32`, except the two that pass
+          no entity at all and start with the CALL. }
+        Exe.Position := Int64(Table[I]) - CODE_VA_BIAS;
+        Exe.ReadBuffer(Arm[0], SizeOf(Arm));
+        J := -1;
+        if Arm[0] = $E8 then J := 0
+        else if (Arm[0] = $8B) and (Arm[1] = $C3) and (Arm[2] = $E8) then J := 2;
+        if J < 0 then
+        begin
+          Log.Add(Format('  type %d: arm at 0x%.6X is not MOV/CALL', [I, Table[I]]));
+          Inc(Bad);
+          Continue;
+        end;
+        Rel := PInteger(@Arm[J + 1])^;
+        Target := Integer(Table[I]) + J + 5 + Rel;
+        if Cardinal(Target) <> HANDLER_ADDR[I] then
+        begin
+          Log.Add(Format('  type %d: exe 0x%.6X, table 0x%.6X',
+            [I, Target, HANDLER_ADDR[I]]));
+          Inc(Bad);
+        end;
+      end;
+
+      Log.Add(Format('jump table at 0x%.6X: %d arms, %d types with none, %d wrong',
+        [HANDLER_JUMP_TABLE, ENTITY_TYPE_COUNT - NoArm, NoArm, Bad]));
+      Inc(Result, Bad);
+
+      if NoArm <> 3 then
+      begin
+        Log.Add(Format('FAILED: expected 3 types with no arm, found %d', [NoArm]));
+        Inc(Result);
+      end;
+    end;
+  finally
+    Exe.Free;
+  end;
+
+  { --- 2. ScaleByPercent over its whole domain --------------------------- }
+  Bad := 0;
+  Got := 0;
+  Ties := 0;
+  for Half := 0 to 1024 do
+    for Pct := 0 to 100 do
+    begin
+      if (Half * Pct) mod 100 = 50 then
+        Inc(Ties);
+      Want := ExactPercent(Half, Pct);
+      for J := 0 to High(X87_DEVIATIONS) do
+        if (X87_DEVIATIONS[J][0] = Half) and (X87_DEVIATIONS[J][1] = Pct) then
+        begin
+          Want := X87_DEVIATIONS[J][2];
+          Break;
+        end;
+      if ScaleByPercent(Half, Pct) <> Want then
+      begin
+        if Bad < 5 then
+          Log.Add(Format('  half %d pct %d: got %d, x87 %d',
+            [Half, Pct, ScaleByPercent(Half, Pct), Want]));
+        Inc(Bad);
+      end;
+      if ScaleByPercent(Half, Pct) <> ExactPercent(Half, Pct) then
+        Inc(Got);
+    end;
+  Log.Add('');
+  Log.Add(Format('ScaleByPercent over 1025 x 101 cases (%d of them ties): '
+    + '%d wrong', [Ties, Bad]));
+  Log.Add(Format('  places where the x87 beats round-half-even: %d, want %d',
+    [Got, Length(X87_DEVIATIONS)]));
+  Inc(Result, Bad);
+  if Got <> Length(X87_DEVIATIONS) then
+  begin
+    Log.Add('FAILED: the set of x87 deviations is not the one the simulation found');
+    Inc(Result);
+  end;
+
+  { --- 3. the loop ------------------------------------------------------- }
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  S := TStubSprites.Create;
+  try
+    FillChar(P, SizeOf(P), 0);
+    FillChar(Inp, SizeOf(Inp), 0);
+    FillChar(L, SizeOf(L), 0);
+    L.TileW := 32; L.TileH := 32; L.MapTilesX := 20; L.MapTilesY := 15;
+    EntityPlayerTouch := @CountTouch;
+    EntityTakeProjectileHits := @CountHit;
+    TouchAbortAt := -1;
+
+    { (a) the scroll is carried, unless the type is screen-space. }
+    Pool.Clear;
+    L.DeltaX := 64; L.DeltaY := -32;
+    Place($21, 3, SPRITE_NONE, 100, 100);
+    Place($22, 3, SPRITE_NONE, 100, 100);
+    Pool.Entity($22)^.Raw[EF_SCREEN_SPACE] := 1;
+    Run(GS_PLAY);
+    Log.Add('');
+    Log.Add(Format('scroll carry: world x %d y %d, screen-space x %d y %d',
+      [EntityPixelX(Pool.Entity($21)^), EntityPixelY(Pool.Entity($21)^),
+       EntityPixelX(Pool.Entity($22)^), EntityPixelY(Pool.Entity($22)^)]));
+    if (EntityPixelX(Pool.Entity($21)^) <> 102)
+    or (EntityPixelY(Pool.Entity($21)^) <> 99) then
+    begin
+      Log.Add('FAILED: a world entity did not follow the scroll');
+      Inc(Result);
+    end;
+    if (EntityPixelX(Pool.Entity($22)^) <> 100)
+    or (EntityPixelY(Pool.Entity($22)^) <> 100) then
+    begin
+      Log.Add('FAILED: a screen-space entity followed the scroll');
+      Inc(Result);
+    end;
+    L.DeltaX := 0; L.DeltaY := 0;
+
+    { (b) the sprite is placed by its top-left, the entity is its centre. }
+    Pool.Clear;
+    S.SW[1] := 20; S.SH[1] := 11;
+    Place($21, 3, 1, 160, 120);
+    Pool.Entity($21)^.Raw[EF_DEPTH] := 3;
+    Run(GS_PLAY);
+    E := Pool.Entity($21);
+    Log.Add(Format('sprite: pos (%d,%d) extent %dx%d depth %d',
+      [S.PX[1], S.PY[1], E^.Raw[EF_EXTENT_X], E^.Raw[EF_EXTENT_Y], S.PZ[1]]));
+    if (S.PX[1] <> 150) or (S.PY[1] <> 115) then
+    begin
+      Log.Add('FAILED: sprite not centred on the entity (want 150,115)');
+      Inc(Result);
+    end;
+    if (E^.Raw[EF_EXTENT_X] <> 20) or (E^.Raw[EF_EXTENT_Y] <> 11) then
+    begin
+      Log.Add('FAILED: extents did not come from the sprite');
+      Inc(Result);
+    end;
+    if S.PZ[1] <> 3 then
+    begin
+      Log.Add('FAILED: explicit depth not passed through');
+      Inc(Result);
+    end;
+
+    { and the -1 depth, which no shipped type uses but the code still has. }
+    Pool.Clear;
+    Place($21, 3, 1, 160, 120);
+    Pool.Entity($21)^.Raw[EF_DEPTH] := DEPTH_BY_SCREEN_Y;
+    Run(GS_PLAY);
+    if S.PZ[1] <> S.PY[1] then
+    begin
+      Log.Add(Format('FAILED: depth -1 should sort by screen Y (%d, got %d)',
+        [S.PY[1], S.PZ[1]]));
+      Inc(Result);
+    end;
+
+    { (c) the death timer is also the flicker, and it hides on ODD frames. }
+    Pool.Clear;
+    Place($21, 3, 1, 160, 120);
+    Pool.Entity($21)^.Raw[EF_DEATH_TIMER] := 5;
+    Run(GS_PLAY);
+    if S.Vis[1] then
+    begin
+      Log.Add('FAILED: visible on an odd death-timer frame');
+      Inc(Result);
+    end;
+    Pool.Entity($21)^.Raw[EF_DEATH_TIMER] := 6;
+    Run(GS_PLAY);
+    if not S.Vis[1] then
+    begin
+      Log.Add('FAILED: hidden on an even death-timer frame');
+      Inc(Result);
+    end;
+
+    { (d) timers tick in play, and freeze in the pause menu and in state 140. }
+    Pool.Clear;
+    Place($21, 3, SPRITE_NONE, 160, 120);
+    Pool.Entity($21)^.Raw[EF_TIMER] := 10;
+    Pool.Entity($21)^.Raw[EF_DEATH_TIMER] := 10;
+    Run(GS_PLAY);
+    Run(GS_PAUSE);
+    Run(GS_STATE_140);
+    E := Pool.Entity($21);
+    Log.Add(Format('timers after play/pause/140: timer %d death %d',
+      [E^.Raw[EF_TIMER], E^.Raw[EF_DEATH_TIMER]]));
+    if (E^.Raw[EF_TIMER] <> 9) or (E^.Raw[EF_DEATH_TIMER] <> 9) then
+    begin
+      Log.Add('FAILED: only the GS_PLAY frame should have ticked the timers');
+      Inc(Result);
+    end;
+
+    { (e) the touch boundary: SLOT_MINOR_FIRST, not one either side of it. }
+    Pool.Clear;
+    Place(SLOT_ACTOR_LAST, 3, SPRITE_NONE, 160, 120);
+    Place(SLOT_MINOR_FIRST, 3, SPRITE_NONE, 160, 120);
+    Run(GS_PLAY);
+    Log.Add('');
+    Log.Add(Format('touch: %d call(s) from slots [%s], %d projectile pass(es)',
+      [TouchCount, Trim(TouchSlots), HitCount]));
+    if (TouchCount <> 1) or (HitCount <> 1)
+    or (Trim(TouchSlots) <> IntToStr(SLOT_MINOR_FIRST)) then
+    begin
+      Log.Add(Format('FAILED: only slot %d should be touch-tested',
+        [SLOT_MINOR_FIRST]));
+      Inc(Result);
+    end;
+
+    { (f) type 68 in state 3: touched once down in the actor slots, and TWICE
+      up in the minor slots, because the special case does not exclude them. }
+    Pool.Clear;
+    Place(5, TYPE_TOUCH_IN_STATE_3, SPRITE_NONE, 160, 120);
+    Pool.Entity(5)^.Raw[EF_STATE] := 3;
+    Run(GS_PLAY);
+    Log.Add(Format('type 68 state 3 in an actor slot: %d touch(es)', [TouchCount]));
+    if TouchCount <> 1 then
+    begin
+      Log.Add('FAILED: type 68 in state 3 should be touched once here');
+      Inc(Result);
+    end;
+
+    Pool.Clear;
+    Place($30, TYPE_TOUCH_IN_STATE_3, SPRITE_NONE, 160, 120);
+    Pool.Entity($30)^.Raw[EF_STATE] := 3;
+    Run(GS_PLAY);
+    Log.Add(Format('type 68 state 3 in a minor slot: %d touch(es)', [TouchCount]));
+    if TouchCount <> 2 then
+    begin
+      Log.Add('FAILED: type 68 in state 3 should be touched twice in a minor slot');
+      Inc(Result);
+    end;
+
+    { and state 2 gets nothing extra. }
+    Pool.Clear;
+    Place(5, TYPE_TOUCH_IN_STATE_3, SPRITE_NONE, 160, 120);
+    Pool.Entity(5)^.Raw[EF_STATE] := 2;
+    Run(GS_PLAY);
+    if TouchCount <> 0 then
+    begin
+      Log.Add('FAILED: type 68 outside state 3 should not be touched here');
+      Inc(Result);
+    end;
+
+    { (g) a touch that changes the game state abandons the rest of the frame.
+
+      The touch log alone cannot show this, and a first version of this check
+      that relied on it passed against a build with the abandon removed. The
+      reason is that the loop ALSO skips the touch pass for any slot whose
+      iteration starts outside GS_PLAY, so the touches stop either way. What
+      only the abandon stops is the work that happens BEFORE that guard - the
+      timer tick - so that is what this looks at. }
+    Pool.Clear;
+    for I := $21 to $25 do
+    begin
+      Place(I, 3, SPRITE_NONE, 160, 120);
+      Pool.Entity(I)^.Raw[EF_TIMER] := 100;
+    end;
+    TouchAbortAt := $22;
+    Run(GS_PLAY);
+    TouchAbortAt := -1;
+    Log.Add('');
+    Log.Add(Format('abandon on state change: touched [%s], timers %d %d %d %d %d',
+      [Trim(TouchSlots), Pool.Entity($21)^.Raw[EF_TIMER],
+       Pool.Entity($22)^.Raw[EF_TIMER], Pool.Entity($23)^.Raw[EF_TIMER],
+       Pool.Entity($24)^.Raw[EF_TIMER], Pool.Entity($25)^.Raw[EF_TIMER]]));
+    if Trim(TouchSlots) <> '33 34' then
+    begin
+      Log.Add('FAILED: the loop should stop touching after the state changed');
+      Inc(Result);
+    end;
+    for I := $23 to $25 do
+      if Pool.Entity(I)^.Raw[EF_TIMER] <> 100 then
+      begin
+        Log.Add(Format('FAILED: slot %d was still updated after the abandon', [I]));
+        Inc(Result);
+      end;
+
+    { (h) the pool is 289 slots and the loop walks 256 of them. An entity above
+      the line is spawnable and is never updated - reproduced, not corrected. }
+    Pool.Clear;
+    L.DeltaX := 320;
+    Place(ENTITY_UPDATE_COUNT, 3, SPRITE_NONE, 100, 100);
+    Place(ENTITY_UPDATE_COUNT - 1, 3, SPRITE_NONE, 100, 100);
+    Run(GS_PLAY);
+    L.DeltaX := 0;
+    Log.Add(Format('slot %d moved to %d, slot %d stayed at %d',
+      [ENTITY_UPDATE_COUNT - 1, EntityPixelX(Pool.Entity(ENTITY_UPDATE_COUNT - 1)^),
+       ENTITY_UPDATE_COUNT, EntityPixelX(Pool.Entity(ENTITY_UPDATE_COUNT)^)]));
+    if EntityPixelX(Pool.Entity(ENTITY_UPDATE_COUNT)^) <> 100 then
+    begin
+      Log.Add('FAILED: a slot above the loop bound was updated');
+      Inc(Result);
+    end;
+    if EntityPixelX(Pool.Entity(ENTITY_UPDATE_COUNT - 1)^) = 100 then
+    begin
+      Log.Add('FAILED: the last slot inside the bound was NOT updated');
+      Inc(Result);
+    end;
+    if EntitiesLive <> 1 then
+    begin
+      Log.Add(Format('FAILED: EntitiesLive counted %d, want 1', [EntitiesLive]));
+      Inc(Result);
+    end;
+
+    { (i) culling, and only for the types that ask for it. }
+    Pool.Clear;
+    W.Killed := 0;
+    Place($21, 3, SPRITE_NONE, 5000, 120);
+    Place($22, 3, SPRITE_NONE, 5000, 120);
+    Pool.Entity($21)^.Raw[EF_CULL_OFFSCREEN] := 1;
+    Run(GS_PLAY);
+    Log.Add('');
+    Log.Add(Format('off-screen cull: %d destroyed, culling entity alive=%d, '
+      + 'other alive=%d', [W.Killed, Pool.Entity($21)^.Raw[EF_ALIVE],
+      Pool.Entity($22)^.Raw[EF_ALIVE]]));
+    if (W.Killed <> 1) or (Pool.Entity($22)^.Raw[EF_ALIVE] <> 1) then
+    begin
+      Log.Add('FAILED: exactly the EF_CULL_OFFSCREEN entity should be destroyed');
+      Inc(Result);
+    end;
+
+    { (j) the box fields are rebuilt every frame from the sprite, and only in
+      GS_PLAY. Type 1's row is 30/20/30/30, so a 40-wide sprite gives 6. }
+    Pool.Clear;
+    S.SW[2] := 40; S.SH[2] := 40;
+    Place($21, 3, 2, 160, 120);
+    E := Pool.Entity($21);
+    E^.Raw[EF_BOX_PCT_X]   := 30;
+    E^.Raw[EF_BOX_PCT_Y]   := 20;
+    E^.Raw[EF_INSET_PCT_X] := 30;
+    E^.Raw[EF_INSET_PCT_Y] := 30;
+    Run(GS_PLAY);
+    Log.Add(Format('boxes from a 40x40 sprite at 30/20/30/30: %d %d %d %d',
+      [E^.Raw[EF_BOX_OFS_X], E^.Raw[EF_BOX_OFS_Y],
+       E^.Raw[EF_HITBOX_INSET_X], E^.Raw[EF_HITBOX_INSET_Y]]));
+    if (E^.Raw[EF_BOX_OFS_X] <> 6) or (E^.Raw[EF_BOX_OFS_Y] <> 4)
+    or (E^.Raw[EF_HITBOX_INSET_X] <> 6) or (E^.Raw[EF_HITBOX_INSET_Y] <> 6) then
+    begin
+      Log.Add('FAILED: want 6 4 6 6');
+      Inc(Result);
+    end;
+
+    E^.Raw[EF_BOX_OFS_X] := -1;
+    Run(GS_PAUSE);
+    if E^.Raw[EF_BOX_OFS_X] <> -1 then
+    begin
+      Log.Add('FAILED: the boxes were rebuilt outside GS_PLAY');
+      Inc(Result);
+    end;
+
+  finally
+    EntityPlayerTouch := nil;
+    EntityTakeProjectileHits := nil;
+    S.Free;
+    W.Free;
+    Pool.Free;
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - the dispatcher matches the switch in the binary and behaves '
+      + 'as read')
+  else
+    Log.Add('FAILED');
+end;
+
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -2409,6 +3028,8 @@ begin
         Result := SelfTestPlayer(Log)
       else if ParamStr(1) = '--selftest-trace' then
         Result := SelfTestTrace(Log)
+      else if ParamStr(1) = '--selftest-entities' then
+        Result := SelfTestEntities(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -2433,7 +3054,8 @@ begin
      (ParamStr(1) = '--selftest-script') or
      (ParamStr(1) = '--selftest-stages') or
      (ParamStr(1) = '--selftest-player') or
-     (ParamStr(1) = '--selftest-trace') then
+     (ParamStr(1) = '--selftest-trace') or
+     (ParamStr(1) = '--selftest-entities') then
   begin
     ExitCode := RunSelfTest;
     Exit;

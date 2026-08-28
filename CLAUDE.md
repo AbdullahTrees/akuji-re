@@ -421,11 +421,21 @@ in the original and is reproduced, not corrected.
 
 ### The dispatcher
 
-`Entity_UpdateAll` `0x4608BC` switches on `EF_TYPE` into **80 handlers, one per
-type** — that is what the whole `0x456000`–`0x45FFFF` block is. Types 0, 18 and
-20 have no arm; 18 and 20 are also two of the three rows whose type-table column
-0 is `-1`, so they are inert markers. The third, type 32, updates while drawing
-nothing.
+`Entity_UpdateAll` `0x4608BC` switches on `EF_TYPE` into **78 handlers, one per
+type** — that is what the whole `0x456000`–`0x45FFFF` block is. The compiler
+emitted it as a **jump table at `0x460924`**, not a compare chain, so the binary
+names every arm; `EntityHandlers.HANDLER_ADDR` transcribes all 78 and
+`--selftest-entities` reads the table back out of `akuji.exe` and diffs them.
+Types 0, 18 and 20 point at the default target — they have no arm at all. 18 and
+20 are also two of the three rows whose type-table column 0 is `-1`, so they are
+inert markers; the third, type 32, updates while drawing nothing.
+
+Per live slot, in order: carry the layer scroll unless `EF_SCREEN_SPACE`; run
+the handler; push visibility, animation, position and depth onto the sprite;
+tick `EF_TIMER` and `EF_DEATH_TIMER`; rebuild the four box fields; then touch,
+projectile and cull passes. **A touch that changes the game state abandons the
+rest of the pool for that frame** — a real early `Exit`, and the only way any of
+the four fresh reads of `GameState` can disagree with each other.
 
 ### The type table's 18 columns
 
@@ -435,6 +445,18 @@ booleans: **column 5** → `EF_SCREEN_SPACE` (the layer scroll is added only whe
 0) and **column 10** → `EF_CULL_OFFSCREEN` (destroy once `IsOffScreen(e, 4)`).
 **Column 7 is never copied at all** and is zero for all 81 types — dead, not
 undiscovered.
+
+**Columns 11–14 are PERCENTAGES.** `Entity_UpdateAll` rebuilds all four box
+fields every play frame as `Round(half-extent × column / 100)` — so a type does
+not carry a hitbox in pixels, it carries the *fraction of its own art* the box
+covers, and the extents themselves are refreshed from the sprite's current
+frame. What proves the reading is not the `100.0` divisor at `0x4610C0` but the
+values: across all 81 rows those columns only hold `0 5 10 20 30 33 40 50 60 70
+75 80`, and **33 and 75** are one third and three quarters.
+
+**Column 2** → `EF_DEPTH`, the sprite's draw-order key. `-1` would mean "sort by
+screen Y", but no shipped type is `-1` and no instruction writes one, so that
+branch is present and never taken.
 
 ### Coordinates
 
@@ -451,6 +473,9 @@ visible only at screen edges — `--selftest-dir` pins it over 8001 values.
 | `Entity_TileEdgeDistX/Y` `0x457150`/`0x457228` | how far it may actually move, to land flush |
 | `Entity_BoxesOverlap` `0x457F98` | entity-vs-entity AABB |
 | `Entity_IsOffScreen` `0x4580BC` | culling, margin × the entity's own extent |
+
+An entity position is the **centre** of its sprite: `Entity_UpdateAll` places
+the sprite at `position − half-extent` on both axes.
 
 **Two different inset pairs**: `+0xA0/+0xA4` for tile collision, `+0xA8/+0xAC`
 for entity-vs-entity. The solid-tile threshold is set per terrain by

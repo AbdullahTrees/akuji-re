@@ -91,6 +91,13 @@ const
   POSITION_BIAS  = $10000;
   POSITION_SHIFT = 5;         { 1/32 pixel }
   POSITION_ROUND = $10000 - 31;
+
+  { The bias expressed in whole pixels. Entity_UpdateAll converts a position to
+    a screen coordinate by shifting FIRST and subtracting the bias afterwards -
+    `(Raw div 32) - 2048` rather than `(Raw - $10000) div 32`. The two agree
+    because $10000 is an exact multiple of 32; the order is kept because it is
+    the order the original emits. }
+  POSITION_BIAS_PIXELS = POSITION_BIAS shr POSITION_SHIFT;   { 2048 }
   SCREEN_W       = $140;      { 320 }
   SCREEN_H       = $F0;       { 240 }
 
@@ -100,6 +107,7 @@ const
   EF_ALIVE       = $02;   { byte; zero means the slot is free }
   EF_TYPE        = $03;   { index into ENTITY_TYPES }
   EF_SPRITE      = $04;   { sprite-pool handle, -1 when the type has no sprite }
+  SPRITE_NONE    = -1;    { EF_SPRITE's empty value }
   EF_FLAG1C      = $07;   { set to 0 or 1 by FUN_004617FC }
   EF_BLOCK_A     = $08;   { 10 ints, zeroed on spawn }
   { Block B is a bank of 10 COUNTDOWN TIMERS. Steer (0x00461738) decrements one
@@ -116,7 +124,20 @@ const
   EF_VEL_X       = $20;   { zeroed on spawn, written as -96 by FUN_004617FC }
   EF_VEL_Y       = $21;
   EF_FACING      = $22;   { direction 0..63, see Directions.pas }
-  EF_TYPEF_08    = $23;   { <- type table +0x08 }
+  { Type table column 2. Entity_UpdateAll copies it to the sprite's draw-order
+    key, so this is the DRAW LAYER - except that -1 means "sort by screen Y",
+    clamped to 1..SCREEN_H. No shipped type is -1 (column 2 runs 0..8 across all
+    81 rows) and a byte scan of the code section finds no instruction writing -1
+    into +0x8C either, so the Y-sorting branch is present and never taken. That
+    is recorded rather than dropped: it is the original's dead branch, not a
+    misreading of it.
+
+    Entity_PlayerTouch reads the same field as `PosY + arg - 2 * [$23]`, i.e. as
+    a vertical inset, which is why the provenance name is kept alongside the
+    decoded one. }
+  EF_TYPEF_08    = $23;   { <- type table +0x08, column 2 }
+  EF_DEPTH       = EF_TYPEF_08;
+  DEPTH_BY_SCREEN_Y = -1;
   EF_HP          = $24;   { type table col 1. On a target this is HIT POINTS;
                             on a projectile the SAME slot is its damage. One
                             field, two roles by role - see the note below. }
@@ -156,8 +177,12 @@ const
 
     EF_EXTENT_* is halved before use (shr 1), so it is a full width/height and
     the box is centred on the position. }
-  EF_EXTENT_X    = $26;   { +0x98 }
-  EF_EXTENT_Y    = $27;   { +0x9C }
+  { Not stored: Entity_UpdateAll refreshes both every frame from the sprite's
+    CURRENT frame, through 0x0044CF1C and 0x0044CF68, and only while the sprite
+    is visible. So an entity's extent is its art's size, and one whose animation
+    changes size gets a collision box that follows it. }
+  EF_EXTENT_X    = $26;   { +0x98, sprite width }
+  EF_EXTENT_Y    = $27;   { +0x9C, sprite height }
   EF_BOX_OFS_X   = $28;   { +0xA0, added going one way and subtracted the other }
   EF_BOX_OFS_Y   = $29;   { +0xA4 }
   EF_TILE_OFS_X  = $3F;   { +0xFC }
@@ -187,6 +212,37 @@ const
     Anything that is not the player is blocked by every kind. }
   EF_HITBOX_INSET_X = $2A;  { +0xA8 }
   EF_HITBOX_INSET_Y = $2B;  { +0xAC }
+
+  { --- Where all four of those come from: Entity_UpdateAll @ 0x004608BC -----
+
+    Neither EF_BOX_OFS_* nor EF_HITBOX_INSET_* is a stored constant. All four
+    are RECOMPUTED every frame, while the game state is GS_PLAY, from the
+    sprite's current size and four PERCENTAGES held in the type table:
+
+        EF_BOX_OFS_X      := Round(HalfExtent(EF_EXTENT_X) * col11 / 100)
+        EF_BOX_OFS_Y      := Round(HalfExtent(EF_EXTENT_Y) * col12 / 100)
+        EF_HITBOX_INSET_X := Round(HalfExtent(EF_EXTENT_X) * col13 / 100)
+        EF_HITBOX_INSET_Y := Round(HalfExtent(EF_EXTENT_Y) * col14 / 100)
+
+    The divisor is a Single 100.0 at 0x004610C0 and the rounding is the x87's
+    round-half-to-even. Reproducing it is NOT a matter of writing Round instead
+    of Trunc: the original runs at 64-bit significands and no float type on
+    x86-64 does, so EntityHandlers.ScaleByPercent does the whole thing in
+    integers. See its header for why, and for how far the difference reaches.
+
+    Reading those columns as percentages does not rest on the divisor alone.
+    Across all 81 rows the four columns only ever hold 0, 5, 10, 20, 30, 33, 40,
+    50, 60, 70, 75 and 80, and nothing exceeds 100. The 33 and the 75 - exactly
+    one third and three quarters - are what no other reading of the columns
+    produces.
+
+    So a type does not carry a hitbox measured in pixels. It carries the
+    FRACTION of its own art that the box covers. }
+  EF_BOX_PCT_X   = $3A;   { +0xE8, type table column 11 }
+  EF_BOX_PCT_Y   = $3B;   { +0xEC, column 12 }
+  EF_INSET_PCT_X = $3C;   { +0xF0, column 13 }
+  EF_INSET_PCT_Y = $3D;   { +0xF4, column 14 }
+  BOX_PERCENT_DIVISOR: Single = 100.0;   { the Single at 0x004610C0 }
   EF_SOLID          = $3E;  { +0xF8, the kind above. It comes from TYPE TABLE
                               COLUMN 15, which the mapping above pins exactly,
                               and the shipped table corroborates the reading:
@@ -316,6 +372,11 @@ const
   TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
   TYPE_COL_UNUSED = 7;   { never copied, zero for all 81 types }
   TYPE_COL_SOLID  = 15;  { -> int $3E, EF_SOLID }
+  TYPE_COL_DEPTH       = 2;   { -> [$23], the draw layer }
+  TYPE_COL_BOX_PCT_X   = 11;  { -> [$3A] }
+  TYPE_COL_BOX_PCT_Y   = 12;  { -> [$3B] }
+  TYPE_COL_INSET_PCT_X = 13;  { -> [$3C] }
+  TYPE_COL_INSET_PCT_Y = 14;  { -> [$3D] }
 
   EF_SCREEN_SPACE   = $34;
   EF_CULL_OFFSCREEN = $39;
@@ -533,6 +594,33 @@ type
     comes back through PushX/PushY, and OnTopOfSolid says the hit was a
     landing. That is the original's shape - three globals rather than out
     parameters - and it is kept because the callers read them in that order. }
+  { The sprite pool, as Entity_UpdateAll sees it.
+
+    The original keeps sprites in a Delphi TList at 0x0046D35C and EF_SPRITE is
+    the index into it - FUN_0044CFB8 is nothing but TList.Get. The update loop
+    touches exactly five fields on a sprite and no methods, so only those are
+    here; anything more would be inventing a renderer rather than recording one.
+
+        +0x1C  animation base, written from EF_ANIM_ID
+        +0x20  frame within the animation, not touched here
+        +0x2C  screen X          +0x30  screen Y
+        +0x34  draw-order key    +0x3D  visible, a byte
+
+    These are plain field stores in the original, not property setters: the
+    depth step reads +0x30 straight back after writing it and gets exactly what
+    it wrote. This interface passes the value along instead, which is the same
+    thing and one fewer method to stub. }
+  TSpriteSink = class
+  public
+    procedure SetVisible(Handle: Integer; Visible: Boolean); virtual; abstract;
+    function  GetVisible(Handle: Integer): Boolean; virtual; abstract;
+    procedure SetAnim(Handle, AnimId: Integer); virtual; abstract;
+    function  Width(Handle: Integer): Integer; virtual; abstract;
+    function  Height(Handle: Integer): Integer; virtual; abstract;
+    procedure SetPos(Handle, X, Y: Integer); virtual; abstract;
+    procedure SetDepth(Handle, Depth: Integer); virtual; abstract;
+  end;
+
   TEntityWorld = class
   public
     PushX, PushY: Integer;       { 0x00484FAC / 0x00484FB0 }
@@ -589,6 +677,9 @@ type
     function PosX(Slot: Integer): Integer;
     function PosY(Slot: Integer): Integer;
     procedure SetPos(Slot, X, Y: Integer);
+    { The slot itself. Entity_UpdateAll walks the pool by pointer and hands
+      each entity to a handler that takes it by reference. }
+    function Entity(Slot: Integer): PEntity;
     function Field(Slot, IntIndex: Integer): Integer;
     procedure SetField(Slot, IntIndex, Value: Integer);
 
@@ -754,6 +845,18 @@ procedure ApproachZero(var V: Integer; Step: Integer);
   the same predicate, kept in the original's form. }
 function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
 
+{ E.Raw[Extent] div 2, rounded toward zero the way the original's shift-and-
+  correct does it. Exported because Entity_UpdateAll halves an extent four times
+  over and must halve it identically. }
+function HalfExtent(V: Integer): Integer;
+
+var
+  { 0x0046D20C and 0x0046D210. Entity_UpdateAll clears both at the top and
+    counts as it goes: every live slot, and every live slot that also holds a
+    sprite. Nothing inside the update loop reads them back. }
+  EntitiesLive:  Integer = 0;
+  EntitiesDrawn: Integer = 0;
+
 implementation
 
 
@@ -879,6 +982,13 @@ function TEntityPool.GetAlive(Index: Integer): Boolean;
 begin
   Result := (Index >= 0) and (Index < ENTITY_COUNT) and
             (FSlots[Index].Raw[EF_ALIVE] <> 0);
+end;
+
+function TEntityPool.Entity(Slot: Integer): PEntity;
+begin
+  if (Slot < 0) or (Slot >= ENTITY_COUNT) then
+    raise Exception.CreateFmt('Entity: slot %d out of range', [Slot]);
+  Result := @FSlots[Slot];
 end;
 
 function TEntityPool.Field(Slot, IntIndex: Integer): Integer;

@@ -30,6 +30,11 @@ import sys
 GAME_LO = 0x454790   # see the header of notes/game_functions.txt
 GAME_HI = 0x467200
 
+# Only the 0x form. Pascal's own $0045B3EC form is deliberately NOT matched:
+# EntityHandlers.HANDLER_ADDR lists all 78 arms of Entity_UpdateAll's switch as
+# data, and counting those as coverage would take the figure from 34% to 85%
+# without a line of any handler having been read. A table of addresses is a
+# to-do list, not a translation.
 ADDR_RE = re.compile(r"0x([0-9A-Fa-f]{6,8})")
 
 

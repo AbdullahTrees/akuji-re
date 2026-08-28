@@ -119,7 +119,7 @@ which is why every number in the data is zero-padded.
 
 | Address | Name | Grade | Notes |
 |---|---|---|---|
-| `0x4608BC` | `Entity_UpdateAll` | read | the dispatcher: switches on `EF_TYPE` into 80 handlers. Walks **256** slots although the pool is 289 |
+| `0x4608BC` | `Entity_UpdateAll` | translated | the dispatcher: a jump table at `0x460924` with 78 arms; types 0, 18 and 20 have none. Walks **256** slots although the pool is 289. Also refreshes every entity's extent from its sprite and rebuilds all four box fields from type-table percentages |
 | `0x4610C4` | `Entity_Spawn` | read | three ranges: slot 0 player, `1..$20` actors, `$21..$120` rest. Copies the type row into the entity |
 | `0x461400` | `Entity_Destroy` | corroborated | opcode-5 events set `Progress[StrToInt(Copy(ParamB,1,4))]`, matching the block at offset 10 |
 | `0x4615A8` | `Entity_UpdateDying` | read | the shared death guard, called from **30 sites** — more than anything else. Engages only for `EF_CLASS` 1, 2 and 6 (written as an unsigned `class-1` against 2 and 5). Classes 1 and 2 both spawn a **type 32 emitter** and seed four of its block-A slots differently — one emitter type, two death effects. Class 6 zeroes its death timer instead and calls `Entity_SpawnDebris(e, 1)`, so it dies the same frame. Class 2 plays sound 34 = `bom03.wav`. Implemented in `EntityHandlers.pas` |
@@ -203,6 +203,15 @@ drawing nothing.
 | `0x466E4C` | `Input_ConfirmPressed` | inferred | named from use, body not read |
 | `0x4653C8` | `GameState_Reset` | inferred | called on stage entry and game over |
 
+Outside the game layer, three library routines `Entity_UpdateAll` leans on:
+
+| address | name | notes |
+|---|---|---|
+| `0x44CFB8` | `TList_Get` | `*(list+8)[index]` — plain `TList.Get`, nothing sprite-specific |
+| `0x44CF1C` | `Sprite_FrameWidth` | `abs(r - l)` of a 20-byte frame rect, then an optional numerator/denominator zoom |
+| `0x44CF68` | `Sprite_FrameHeight` | the same on `b - t`, with its **own** zoom flag and ratio |
+| `0x402948` | `System_RoundToInt64` | the RTL's `Round` helper: takes `ST(0)`, rounds half to even |
+
 ## Verified RTL helpers
 
 Below the game layer, but needed to read anything. These are established:
@@ -249,6 +258,11 @@ primitive, not a component's.
 | `0x46D144` | `p_LayerInfo` — `+0x10` tileW, `+0x14` tileH, `+0x18` mapW, `+0x1C` mapH |
 | `0x46D344` | `p_Surfaces`, 32 slots |
 | `0x46CDEC` | `p_TileMaps`, per layer |
+| `0x46D35C` | `p_Sprites` — a `TList`; `EF_SPRITE` is the index into it |
+| `0x46D20C` | live entity count, recomputed by `Entity_UpdateAll` |
+| `0x46D210` | live-and-drawn entity count, likewise |
+| `0x460924` | `Entity_UpdateAll`'s **jump table**, 81 entries |
+| `0x4610C0` | the Single `100.0` the box percentages divide by |
 
 ## Lessons this file exists to preserve
 
