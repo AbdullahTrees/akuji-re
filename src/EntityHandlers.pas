@@ -62,6 +62,8 @@
       0x0045B7C4  type 42  a boss - six states, five difficulty tables
       0x0045BBD8  type 43  armour, chosen by variant
       0x0045BC00  type 44  type 42's shot
+      0x0045BCC4  type 45  a crumbling platform
+      0x0045BD9C  type 46  a homing enemy that wakes when you come close
 
   And the dispatcher they hang off:
 
@@ -849,6 +851,52 @@ const
   T44_GRAVITY = 2;
   T44_TERMINAL = $200;
 
+  { --- Types 45 and 46 --------------------------------------------------
+    TYPE 45 is a crumbling platform, and it is the only handler that reads
+    EF_RIDDEN - the flag Entity_SolidCollideY sets when something is standing
+    on a solid. Step on it and it starts shaking; after enough shakes it
+    clears EF_SOLID for 60 frames and you fall through; then it comes back.
+
+    Two details. The shake threshold is `block A[1] - tough[difficulty]`, so
+    a HIGHER difficulty makes it crumble SOONER - subtracting 0, 2 or 4 from
+    the placement's own count. And EF_RIDDEN is cleared at the END of every
+    frame whatever state it is in, so it is a one-frame signal that has to be
+    re-set by the collision each frame to keep counting.
+
+    TYPE 46 sleeps until you come close, then chases. Its wake test is the
+    horizontal distance in PIXELS - abs((self.x - player.x) >> 5) - against
+    64, 80 or 128 by difficulty, so an EASIER game wakes it later. Once awake
+    it uses Entity_SteerToPlayer, which turns one step toward the player every
+    few frames and rewrites the velocity from the direction table; this then
+    HALVES that velocity and multiplies by 2, 3 or 4 by difficulty.
+
+    It also clamps against terrain on both axes with the edge-distance snap,
+    so it slides along walls rather than embedding in them. Its initial
+    heading is Random(64), which is the second use of the RNG outside the
+    debris - so a room full of these does not move in lockstep. }
+  T45_FRAMES = 5;  T45_TICKS = 8;
+  T45_TABLE_ADDR = $0046C074;
+  T45_SPRITES: array[0..T45_FRAMES - 1] of Integer = (131, 132, 133, 134, 133);
+  T45_TOUGH_ADDR = $0046C088;
+  T45_TOUGH: array[0..2] of Integer = (0, 2, 4);
+  T45_SHAKE_FIRST = 1;      { the loop is frames 1..4 }
+  T45_BREAK_SOUND = $1C;
+  T45_GONE_FRAMES = $3C;
+
+  T46_FRAMES = 4;  T46_TICKS = 4;
+  T46_TABLE_ADDR = $0046C094;
+  T46_SPRITES: array[0..4] of Integer = (136, 137, 138, 137, 135);
+  T46_SLEEP_FRAME = 4;
+  T46_RANGE_ADDR = $0046C0A8;
+  T46_TURN_ADDR  = $0046C0B4;
+  T46_SPEED_ADDR = $0046C0C0;
+  T46_RANGE: array[0..2] of Integer = (64, 80, 128);   { easy wakes LATER }
+  T46_TURN:  array[0..2] of Integer = (4, 4, 2);
+  T46_SPEED: array[0..2] of Integer = (2, 3, 4);
+  T46_RISE = $A0;
+  T46_WAKE_SOUND = $1D;
+  T46_TURN_TIMER = 1;       { Steer's timer slot }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1103,6 +1151,14 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045BCC4. A crumbling platform - the only reader of EF_RIDDEN. }
+procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045BD9C. Sleeps until the player is close, then homes. }
+procedure EntityUpdate_Type46(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045BBD8. Armour. Its VARIANT selects which of the four armour
   vulnerability kinds it has - see the T43_ block. }
@@ -1856,6 +1912,133 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T45_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T45_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  { EF_RIDDEN is what Entity_SolidCollideY sets when something stands on a
+    solid. This is the only handler that reads it. }
+  if (E.Raw[EF_STATE] = 0) and (E.Raw[EF_RIDDEN] = 1) then
+    E.Raw[EF_STATE] := 1;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T45_TICKS;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T45_FRAMES - 1 then
+      begin
+        E.Raw[EF_FLAG1C] := T45_SHAKE_FIRST;
+        Inc(E.Raw[EF_CHILD_A]);
+        { A HIGHER difficulty subtracts more, so it breaks SOONER. }
+        if E.Raw[EF_CHILD_A] > E.Raw[EF_BLOCK_A + 1] - T45_TOUGH[D] then
+        begin
+          World.PlaySound(T45_BREAK_SOUND);
+          E.Raw[EF_STATE] := 2;
+          E.Raw[EF_BLOCK_B] := 0;
+          E.Raw[EF_CHILD_A] := 0;
+          E.Raw[EF_DEATH_TIMER] := T45_GONE_FRAMES;
+          E.Raw[EF_SOLID] := 0;
+        end;
+      end;
+    end;
+  end;
+
+  if (E.Raw[EF_STATE] = 2) and (E.Raw[EF_DEATH_TIMER] = 0) then
+  begin
+    E.Raw[EF_FLAG1C] := 0;
+    E.Raw[EF_STATE] := 0;
+    E.Raw[EF_SOLID] := 1;
+  end;
+
+  { Cleared every frame whatever the state - a one-frame signal the collision
+    has to re-set to keep the count going. }
+  E.Raw[EF_RIDDEN] := 0;
+end;
+
+procedure EntityUpdate_Type46(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Dist: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T46_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T46_SPRITES[Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Dec(E.Raw[EF_POS_Y], T46_RISE);
+    { So a room full of these does not move in lockstep. }
+    E.Raw[EF_FACING] := World.RandomBelow(DIR_COUNT);
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    E.Raw[EF_FLAG1C] := T46_SLEEP_FRAME;
+    { Horizontal distance in PIXELS, with the original's round-toward-zero
+      shift. Easy has the LONGEST range, so it wakes soonest there. }
+    Dist := Abs(OriginPixel(E.Raw[EF_POS_X]
+                - World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X)));
+    if Dist < T46_RANGE[D] then
+    begin
+      World.PlaySound(T46_WAKE_SOUND);
+      E.Raw[EF_FLAG1C] := 0;
+      E.Raw[EF_STATE] := 2;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { Steer turns one step toward the player and rewrites the velocity from
+      the direction table; this then halves it and scales by difficulty. }
+    World.Pool.Steer(E.Raw[EF_SLOT], T46_TURN_TIMER, T46_TURN[D]);
+    E.Raw[EF_VEL_X] := T46_SPEED[D] * HalfExtent(E.Raw[EF_VEL_X]);
+    E.Raw[EF_VEL_Y] := T46_SPEED[D] * HalfExtent(E.Raw[EF_VEL_Y]);
+
+    { Clamped on both axes, so it slides along walls instead of entering. }
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := World.EdgeDistX(E, E.Raw[EF_VEL_X]);
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T46_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T46_FRAMES;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type43(var E: TEntity; AGameState: Integer;
@@ -3687,11 +3870,13 @@ begin
       42: EntityUpdate_Type42(E^, AGameState, World);
       43: EntityUpdate_Type43(E^, AGameState, World);
       44: EntityUpdate_Type44(E^, AGameState, World);
+      45: EntityUpdate_Type45(E^, AGameState, World);
+      46: EntityUpdate_Type46(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 36 arms are in HANDLER_ADDR, untranslated }
+      { the other 34 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
