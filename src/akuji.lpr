@@ -3477,6 +3477,117 @@ begin
       + 'and the match is masked');
 end;
 
+{ Types 8 and 26 - the two effects that destroy themselves.
+
+  These are worth their own check because their failure mode is silence. An
+  effect whose handler is missing does not crash or look obviously wrong: it
+  just never dies, and the screen slowly fills with immortal entities wearing
+  sprite 0. Nothing in the dispatcher can notice. So what is asserted here is
+  that each one DOES reach its Entity_Destroy, and on which frame. }
+function TestEffectHandlers(Log: TStringList): Integer;
+var
+  W: TCountingWorld;
+  E: TEntity;
+  I, Bad, Died: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+  procedure Fresh(TypeId: Integer);
+  begin
+    FillChar(E, SizeOf(E), 0);
+    E.Raw[EF_ALIVE] := 1;
+    E.Raw[EF_TYPE] := TypeId;
+    E.Raw[EF_SPRITE] := SPRITE_NONE;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the self-destructing effects ---');
+  W := TCountingWorld.Create;
+  try
+    { --- type 8: four frames, five ticks each --------------------------- }
+    Fresh(8);
+    Died := -1;
+    for I := 1 to 60 do
+    begin
+      if E.Raw[EF_ALIVE] <> 0 then
+        EntityUpdate_Type08(E, GS_PLAY, W);
+      if (Died < 0) and (E.Raw[EF_ALIVE] = 0) then
+        Died := I;
+    end;
+    Log.Add(Format('type 8 lived %d frames', [Died]));
+    { Four frames of five ticks is 20, and the destroy lands ON the twentieth
+      rather than after it: the check follows the increment inside the same
+      call, so the tick that carries the counter past the last index also
+      destroys the entity. There is no extra frame. }
+    Want(Died = 20,
+         Format('type 8 died on frame %d, want 20 - four frames of five '
+           + 'ticks, with the destroy on the last of them', [Died]));
+
+    { Its sprite comes from the frame counter, so it must have walked the
+      whole table rather than sitting on one. }
+    Fresh(8);
+    EntityUpdate_Type08(E, GS_PLAY, W);
+    Want(E.Raw[EF_ANIM_ID] = 50, 'type 8 does not start on sprite 50');
+    for I := 1 to 5 do
+      EntityUpdate_Type08(E, GS_PLAY, W);
+    Want(E.Raw[EF_ANIM_ID] = 51,
+         Format('after five ticks type 8 is on sprite %d, want 51',
+                [E.Raw[EF_ANIM_ID]]));
+
+    { Outside play it freezes: the sprite is still written, the timer is not. }
+    Fresh(8);
+    for I := 1 to 60 do
+      EntityUpdate_Type08(E, GS_STATE_140, W);
+    Want(E.Raw[EF_ALIVE] <> 0, 'type 8 died during an event script');
+    Want(E.Raw[EF_ANIM_ID] = 50, 'type 8 animated during an event script');
+
+    { --- type 26: rises, then goes --------------------------------------- }
+    Fresh(26);
+    E.Raw[EF_POS_Y] := POSITION_BIAS;
+    Died := -1;
+    for I := 1 to 60 do
+    begin
+      if E.Raw[EF_ALIVE] <> 0 then
+        EntityUpdate_Type26(E, GS_PLAY, W);
+      if (Died < 0) and (E.Raw[EF_ALIVE] = 0) then
+        Died := I;
+    end;
+    Log.Add(Format('type 26 lived %d frames and rose %d sub-pixels',
+      [Died, POSITION_BIAS - E.Raw[EF_POS_Y]]));
+    Want(Died = 31,
+         Format('type 26 died on frame %d, want 31 - the count must EXCEED 30',
+                [Died]));
+    { It rose on every frame it was alive, 16 sub-pixels each. }
+    Want(POSITION_BIAS - E.Raw[EF_POS_Y] = 31 * $10,
+         Format('type 26 rose %d sub-pixels, want %d',
+                [POSITION_BIAS - E.Raw[EF_POS_Y], 31 * $10]));
+
+    { The variant is the whole difference between the two messages, and
+      Entity_TouchPickup is what sets it - 0 for an ordinary stone, 1 when the
+      stone completed a target. }
+    Fresh(26);
+    EntityUpdate_Type26(E, GS_PLAY, W);
+    Want(E.Raw[EF_ANIM_ID] = 83,
+         Format('variant 0 shows sprite %d, want 83', [E.Raw[EF_ANIM_ID]]));
+    Fresh(26);
+    E.Raw[EF_VARIANT] := 1;
+    EntityUpdate_Type26(E, GS_PLAY, W);
+    Want(E.Raw[EF_ANIM_ID] = 99,
+         Format('variant 1 shows sprite %d, want 99', [E.Raw[EF_ANIM_ID]]));
+  finally
+    W.Free;
+  end;
+
+  Result := Bad;
+  if Result = 0 then
+    Log.Add('OK - both effects reach their Entity_Destroy');
+end;
+
 function TestTileCollide(Log: TStringList; const GameDir: string): Integer;
 const
   SOLID = 50;
@@ -5289,6 +5400,7 @@ begin
   Inc(Result, TestKillTiles(Log));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
+  Inc(Result, TestEffectHandlers(Log));
 
   Log.Add('');
   if Result = 0 then

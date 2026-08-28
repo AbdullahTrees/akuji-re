@@ -27,6 +27,8 @@
       0x0045A7BC  type 36  the falling item a kill drops
       0x0045A944  type 16  the sign
       0x0045AA60  type 22  a one-sprite entity that can die
+      0x0045A0E4  type 8   the four-frame puff a move leaves behind
+      0x0045A50C  type 26  the pickup's rising GET
 
   And the dispatcher they hang off:
 
@@ -230,6 +232,41 @@ const
   DROP_TABLE_ADDR   = $0046BE54;
   DROP_TABLE_PTR    = $0046CE18;
   DROP_SPRITES: array[0..DROP_SPRITE_COUNT - 1] of Integer = (100, 101);
+
+  { --- Types 8 and 26, the two self-destructing effects -----------------
+    Both are spawned by something else, play a short animation, and call
+    Entity_Destroy on themselves. Between them they are why the screen filled
+    up with copies of Akuji: an effect whose handler does not exist never
+    reaches its Entity_Destroy, so it stays alive for ever wearing the anim id
+    Entity_Spawn gave it - column 0 of the type table, which is 0 for all 81
+    types, and sprite 0 is Akuji standing.
+
+    Nothing was leaking. The entities were simply immortal.
+
+    Type 8 is the puff the player's glide and air dash leave behind -
+    Player.pas spawns it at 0x004585A8's two Spawn(2, 8, ...) calls. Four
+    frames, five ticks each.
+
+    Type 26 is the "GET" that rises out of a collected Mana Stone.
+    Entity_TouchPickup spawns it and sets its VARIANT to say which kind of
+    pickup it was: 0 for an ordinary stone, 1 when the stone completed a
+    target and the player gained a life. So the two sprites are the two
+    messages, and the variant is the whole difference.
+
+    Note the index in each is unchecked in the original and cannot overflow
+    anyway: the frame that would run off the end is the frame that destroys
+    the entity, and the sprite is written before that. The clamps below are
+    unreachable rather than corrective - the same situation type 33 is in. }
+  TYPE8_FRAMES      = 4;
+  TYPE8_TICKS       = 4;    { advance when the count EXCEEDS it, so every 5 }
+  TYPE8_TABLE_ADDR  = $0046BCCC;
+  TYPE8_SPRITES: array[0..TYPE8_FRAMES - 1] of Integer = (50, 51, 52, 53);
+
+  TYPE26_LIFT       = $10;  { 16 sub-pixels a frame, straight up }
+  TYPE26_LIFETIME   = $1E;  { destroyed when the count EXCEEDS 30 }
+  TYPE26_TABLE_ADDR = $0046BE14;
+  TYPE26_VARIANTS   = 2;    { only 0 and 1 are ever spawned }
+  TYPE26_SPRITES: array[0..TYPE26_VARIANTS - 1] of Integer = (83, 99);
 
   { --- Types 16 and 22, the one-sprite entities -------------------------
     Two of the shortest handlers in the game. Each writes ONE anim id and
@@ -445,6 +482,15 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045A0E4. The four-frame puff. See TYPE8_SPRITES above. }
+procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A50C. The rising GET a collected Mana Stone leaves. Its VARIANT says
+  which of the two messages to show, and Entity_TouchPickup sets it. }
+procedure EntityUpdate_Type26(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045A944. The sign - what the player reads. Two instructions of
   substance, and no game-state guard at all: it writes its sprite whether the
@@ -1066,6 +1112,50 @@ begin
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
 end;
 
+procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= TYPE8_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := TYPE8_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > TYPE8_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > TYPE8_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type26(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Variant: Integer;
+begin
+  Variant := E.Raw[EF_VARIANT];
+  if (Variant < 0) or (Variant >= TYPE26_VARIANTS) then
+    Variant := 0;
+  E.Raw[EF_ANIM_ID] := TYPE26_SPRITES[Variant];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { Straight up, at a fixed rate - no gravity and no horizontal drift. }
+  Dec(E.Raw[EF_POS_Y], TYPE26_LIFT);
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > TYPE26_LIFETIME then
+    World.DestroyEntity(E, False);
+end;
+
 procedure EntityUpdate_Type16_Sign(var E: TEntity);
 begin
   E.Raw[EF_ANIM_ID] := SIGN_SPRITE;
@@ -1355,10 +1445,12 @@ begin
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
       33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
+      8:  EntityUpdate_Type08(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
+      26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 68 arms are in HANDLER_ADDR, untranslated }
+      { the other 66 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
