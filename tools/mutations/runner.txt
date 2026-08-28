@@ -1,0 +1,340 @@
+# Mutations for the event interpreter. Run with
+#
+#     SELFTEST=--selftest-runner tools/mutate.sh tools/mutations/runner.txt
+#
+# Every one of these is a reading that was actually considered and rejected
+# while translating the four functions, so each is a defect a careless
+# translation could plausibly have shipped rather than an arbitrary edit.
+===
+the alternative scan runs forwards
+src/EventRunner.pas
+---
+    for I := List.Count - 1 downto 0 do
+--->
+    for I := 0 to List.Count - 1 do
+===
+the alternative scan takes the first match rather than the last
+src/EventRunner.pas
+---
+      if (Flag >= 0) and (Flag < PROGRESS_LENGTH)
+         and (P.Progress[Flag] = 1) then
+      begin
+        Steps[StepIndex] := List[I];
+        Exit;
+      end;
+      Steps[StepIndex] := '';
+--->
+      if (Flag >= 0) and (Flag < PROGRESS_LENGTH)
+         and (P.Progress[Flag] = 1) then
+        Steps[StepIndex] := List[I]
+      else
+        Steps[StepIndex] := '';
+===
+Event_Begin clears one scratch flag too few
+src/EventRunner.pas
+---
+  for I := 1 to 4 do
+    P.Progress[I] := 0;
+--->
+  for I := 1 to 3 do
+    P.Progress[I] := 0;
+===
+Event_Begin clears one scratch flag too many, taking the default guard with it
+src/EventRunner.pas
+---
+  for I := 1 to 4 do
+    P.Progress[I] := 0;
+--->
+  for I := 0 to 4 do
+    P.Progress[I] := 0;
+===
+Event_Begin does not clear the scratch block at all
+src/EventRunner.pas
+---
+  for I := 1 to 4 do
+    P.Progress[I] := 0;
+--->
+  for I := 1 to 0 do
+    P.Progress[I] := 0;
+===
+a second script may start over a running one
+src/EventRunner.pas
+---
+  if AGameState = GS_STATE_140 then
+    Exit;
+--->
+  if AGameState = GS_PAUSE then
+    Exit;
+===
+the first step is skipped
+src/EventRunner.pas
+---
+  StepIndex := -1;          { AdvanceStep increments before using it }
+--->
+  StepIndex := 0;           { AdvanceStep increments before using it }
+===
+running off the end does not return to GS_PLAY
+src/EventRunner.pas
+---
+  if StepIndex > High(Steps) then
+  begin
+    AGameState := GS_PLAY;
+    Exit;
+  end;
+--->
+  if StepIndex > High(Steps) then
+    Exit;
+===
+the wait is exclusive, so a wait of N lasts N frames
+src/EventRunner.pas
+---
+        Inc(Cursor);
+        if StepArg(Step, Op, 0) < Cursor then
+--->
+        Inc(Cursor);
+        if StepArg(Step, Op, 0) <= Cursor then
+===
+the wait counts before incrementing
+src/EventRunner.pas
+---
+        Inc(Cursor);
+        if StepArg(Step, Op, 0) < Cursor then
+--->
+        if StepArg(Step, Op, 0) < Cursor then
+          Inc(Cursor);
+        if StepArg(Step, Op, 0) < Cursor then
+===
+the stage loads without waiting for the fade
+src/EventRunner.pas
+---
+        if (Waiting = 1) and (not Host.FadeBusy) then
+        begin
+          Host.StartFade(False);
+          Host.LoadStage(StepArg(Step, Op, 0), StepArg(Step, Op, 1),
+--->
+        if Waiting = 1 then
+        begin
+          Host.StartFade(False);
+          Host.LoadStage(StepArg(Step, Op, 0), StepArg(Step, Op, 1),
+===
+the dialogue is re-shown every frame it is up
+src/EventRunner.pas
+---
+    SUBOP_DIALOGUE:
+      { Shown once; the dialogue box itself decides when it is done, and it
+        is what calls AdvanceStep afterwards. }
+      if Waiting = 0 then
+      begin
+        Waiting := 1;
+        Host.ShowLine(StepArg(Step, Op, 0));
+      end;
+--->
+    SUBOP_DIALOGUE:
+      { Shown once; the dialogue box itself decides when it is done, and it
+        is what calls AdvanceStep afterwards. }
+      begin
+        Waiting := 1;
+        Host.ShowLine(StepArg(Step, Op, 0));
+      end;
+===
+an empty step hangs instead of advancing
+src/EventRunner.pas
+---
+  if Step = '' then
+  begin
+    AdvanceStep(P, AGameState);
+    Exit;
+  end;
+--->
+  if Step = '' then
+    Exit;
+===
+the flag list needs only one condition to hold
+src/EventRunner.pas
+---
+          if (Flag < 0) or (Flag >= PROGRESS_LENGTH)
+             or (P.Progress[Flag] <> Want) then
+          begin
+            Ok := False;
+            Break;
+          end;
+--->
+          if (Flag >= 0) and (Flag < PROGRESS_LENGTH)
+             and (P.Progress[Flag] = Want) then
+            Break;
+===
+the flag list reads its items with the wrong stride
+src/EventRunner.pas
+---
+          Start := (I - 1) * 6 + 17;
+--->
+          Start := (I - 1) * 5 + 17;
+===
+the flag list ignores the set-or-clear character
+src/EventRunner.pas
+---
+          Want := Ord(Trim(Copy(Step, Start, 1)) <> '0');
+--->
+          Want := 1;
+===
+sub-op 15's count is read from the wrong place
+src/EventCommands.pas
+---
+        0: begin Start := 9;  Len := 4; end;
+        1: begin Start := 14; Len := 2; end;
+      else
+        Result := False;
+      end;
+  else
+    { 7, 8, 10, 13, 80, 99 take no arguments. }
+--->
+        0: begin Start := 9;  Len := 4; end;
+        1: begin Start := 13; Len := 2; end;
+      else
+        Result := False;
+      end;
+  else
+    { 7, 8, 10, 13, 80, 99 take no arguments. }
+===
+the spawn window is one tile wider across
+src/EventRunner.pas
+---
+  SPAWN_WINDOW_X = 12;
+--->
+  SPAWN_WINDOW_X = 13;
+===
+the spawn window's margin is dropped
+src/EventRunner.pas
+---
+    InWindow := ((CamTileX - SPAWN_MARGIN_TILES < Rec.TileX)
+                 and (Rec.TileX < CamTileX + SPAWN_WINDOW_X)
+                 and (CamTileY - SPAWN_MARGIN_TILES < Rec.TileY)
+--->
+    InWindow := ((CamTileX <= Rec.TileX)
+                 and (Rec.TileX < CamTileX + SPAWN_WINDOW_X)
+                 and (CamTileY - SPAWN_MARGIN_TILES < Rec.TileY)
+===
+the window bounds are inclusive
+src/EventRunner.pas
+---
+                 and (Rec.TileX < CamTileX + SPAWN_WINDOW_X)
+--->
+                 and (Rec.TileX <= CamTileX + SPAWN_WINDOW_X)
+===
+opcode 4 obeys the window like everything else
+src/EventRunner.pas
+---
+                or (Rec.Opcode = EVOP_ALWAYS);
+--->
+                or False;
+===
+an entity is placed at its tile's corner, not its centre
+src/EventRunner.pas
+---
+  SPAWN_TILE_CENTRE = $200;
+--->
+  SPAWN_TILE_CENTRE = 0;
+===
+the entity does not remember which record placed it
+src/EventRunner.pas
+---
+    Pool.SetField(Slot, EF_EVENT_ID, I);
+--->
+    Pool.SetField(Slot, EF_EVENT_ID, -1);
+===
+a record in the window spawns again every frame
+src/EventRunner.pas
+---
+    if Rec.InWindow or Rec.Active then
+      Continue;
+--->
+    if Rec.Active then
+      Continue;
+===
+the forbidding flag skips the record instead of retiring it
+src/EventRunner.pas
+---
+    begin
+      Events.Disable(I);
+      if Rec.Active then
+        Pool.Kill(Rec.EntitySlot);
+      Continue;
+    end;
+--->
+    begin
+      Continue;
+    end;
+===
+a retired record keeps its entity
+src/EventRunner.pas
+---
+      Events.Disable(I);
+      if Rec.Active then
+        Pool.Kill(Rec.EntitySlot);
+--->
+      Events.Disable(I);
+===
+type 20's extent is not forced
+src/EventRunner.pas
+---
+  SPAWN_FORCED_EXTENT = 32;
+--->
+  SPAWN_FORCED_EXTENT = 0;
+===
+the M heading is not scaled to the 64-step turn
+src/EventRunner.pas
+---
+        Pool.SetField(Slot, EF_FACING, A2 shl 3);
+--->
+        Pool.SetField(Slot, EF_FACING, A2);
+===
+the J nudge is in 1/32 pixel rather than whole pixels
+src/EventRunner.pas
+---
+        Pool.SetField(Slot, EF_POS_X, Pool.Field(Slot, EF_POS_X) + A0 * 32);
+        Pool.SetField(Slot, EF_POS_Y, Pool.Field(Slot, EF_POS_Y) + A1 * 32);
+--->
+        Pool.SetField(Slot, EF_POS_X, Pool.Field(Slot, EF_POS_X) + A0);
+        Pool.SetField(Slot, EF_POS_Y, Pool.Field(Slot, EF_POS_Y) + A1);
+===
+the gated placement applies its state unconditionally
+src/EventRunner.pas
+---
+        if (A0 >= 0) and (A0 < PROGRESS_LENGTH) and (P.Progress[A0] = 1) then
+          Pool.SetField(Slot, EF_STATE, A1);
+--->
+        Pool.SetField(Slot, EF_STATE, A1);
+===
+the sub-opcode is read from the wrong two characters
+src/EventRunner.pas
+---
+  if not TryStrToInt(Copy(Step, 6, 2), Result) then
+--->
+  if not TryStrToInt(Copy(Step, 7, 2), Result) then
+===
+sub-op 4 clears its flag and sub-op 5 sets it
+src/EventRunner.pas
+---
+    SUBOP_SET_FLAG:
+      begin
+        Flag := StepArg(Step, Op, 0);
+        if (Flag >= 0) and (Flag < PROGRESS_LENGTH) then
+          P.Progress[Flag] := 1;
+--->
+    SUBOP_SET_FLAG:
+      begin
+        Flag := StepArg(Step, Op, 0);
+        if (Flag >= 0) and (Flag < PROGRESS_LENGTH) then
+          P.Progress[Flag] := 0;
+===
+sub-op 13 does not save
+src/EventRunner.pas
+---
+    SUBOP_SAVE:
+      begin
+        Host.SaveGame(P);
+        AdvanceStep(P, AGameState);
+      end;
+--->
+    SUBOP_SAVE:
+      AdvanceStep(P, AGameState);

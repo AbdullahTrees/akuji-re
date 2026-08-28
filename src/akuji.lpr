@@ -5054,8 +5054,36 @@ begin
         Cmd := Prog[0].Alternatives[0];
         if Cmd.SubOp <> SUBOP_TEST_FLAGS then
         begin
-          { Stage 58's is the odd one out and is checked by shape below rather
-            than driven here. }
+          { Stage 58's checker is `1157-04-1158/1158-09-0032` - a plain set-flag
+            behind a guard rather than a list. Drive it anyway: it is the only
+            place in the shipped data where sub-op 4's effect is observable
+            from a script alone, and without it a SET_FLAG that CLEARED its
+            flag passed every check here. }
+          if Cmd.SubOp = SUBOP_SET_FLAG then
+          begin
+            FreshPlayer(P);
+            GS := GS_PLAY;
+            R.StartEvent(S, Idx, EVENT_BEGIN_FROM_SPAWN, P, GS);
+            R.Execute(H, S, P, GS);
+            Want(P.Progress[Cmd.Args[0]] = 0,
+                 Format('  stage %d: flag %d was set with guard %d clear',
+                        [I, Cmd.Args[0], Cmd.Guard]));
+
+            FreshPlayer(P);
+            P.Progress[Cmd.Guard] := 1;
+            GS := GS_PLAY;
+            R.StartEvent(S, Idx, EVENT_BEGIN_FROM_SPAWN, P, GS);
+            R.Execute(H, S, P, GS);
+            Want(P.Progress[Cmd.Args[0]] = 1,
+                 Format('  stage %d: guard %d set but flag %d did not go up',
+                        [I, Cmd.Guard, Cmd.Args[0]]));
+
+            { It sets its own forbidding flag - the property that does hold
+              for all nine, and the one that retires this one. }
+            Want(Cmd.Args[0] = S[Idx].BlockedBy,
+                 Format('  stage %d: sets flag %d but its csv 2 is %d',
+                        [I, Cmd.Args[0], S[Idx].BlockedBy]));
+          end;
           Continue;
         end;
         Inc(Lists);
@@ -5270,16 +5298,23 @@ begin
     Want(not SpawnsAt(Tx, Ty + 2), 'spawned one tile above the window');
 
     { In the window, the entity lands in the MIDDLE of its tile and remembers
-      which record put it there. }
+      which record put it there.
+
+      The 512 is written out rather than spelled SPAWN_TILE_CENTRE on purpose.
+      Both were the constant to begin with, and mutation testing walked
+      straight past a build with SPAWN_TILE_CENTRE set to 0: the assertion
+      moved with the thing it was checking, so it could not fail. An
+      expectation must be independent of what it is testing or it is only
+      restating it. Same for the forced extent below. }
     SpawnsAt(Tx, Ty);
     Slot := S[Idx].EntitySlot;
     Want(Pool.Alive[Slot], 'the spawned slot is not alive');
-    Want(Pool.PosX(Slot) = Tx * 32 * 32 + SPAWN_TILE_CENTRE,
+    Want(Pool.PosX(Slot) = Tx * 32 * 32 + 512,
          Format('spawned at x=%d, want %d',
-                [Pool.PosX(Slot), Tx * 32 * 32 + SPAWN_TILE_CENTRE]));
-    Want(Pool.PosY(Slot) = Ty * 32 * 32 + SPAWN_TILE_CENTRE,
+                [Pool.PosX(Slot), Tx * 32 * 32 + 512]));
+    Want(Pool.PosY(Slot) = Ty * 32 * 32 + 512,
          Format('spawned at y=%d, want %d',
-                [Pool.PosY(Slot), Ty * 32 * 32 + SPAWN_TILE_CENTRE]));
+                [Pool.PosY(Slot), Ty * 32 * 32 + 512]));
     Want(Pool.Field(Slot, EF_EVENT_ID) = Idx,
          'the entity does not remember its event');
 
@@ -5300,6 +5335,31 @@ begin
     R.SpawnNearCamera(S, Pool, L, Tx + 40, Ty, P, GS);
     Want(S[Idx].InWindow,
          'leaving the window cleared the mark while the entity was still out');
+
+    { And now the case the two marks exist to tell apart. Kill the entity
+      without moving the camera, exactly as Entity_Destroy would: the
+      has-entity mark goes down but the in-window mark stays up, and the sweep
+      must NOT place a replacement. Dropping the in-window test entirely
+      survived every other check here, because a record that spawns
+      successfully is left holding an entity anyway - this is the only state
+      in which the two differ. }
+    S.SetActive(Idx, False);
+    Pool.Kill(Slot);
+    Live := Pool.LiveCount;
+    R.SpawnNearCamera(S, Pool, L, Tx, Ty, P, GS);
+    Want(not S[Idx].Active,
+         'an entity that died inside the window was replaced at once');
+    Want(Pool.LiveCount = Live,
+         Format('the sweep after a death took the pool from %d to %d',
+                [Live, Pool.LiveCount]));
+
+    { Leave the window with no entity and the mark clears, so it can come
+      back next time. That is the other half of the same pair. }
+    R.SpawnNearCamera(S, Pool, L, Tx + 40, Ty, P, GS);
+    Want(not S[Idx].InWindow,
+         'leaving the window with no entity did not clear the mark');
+    R.SpawnNearCamera(S, Pool, L, Tx, Ty, P, GS);
+    Want(S[Idx].Active, 'the record never came back after leaving the window');
 
     { --- the forbidding flag retires the record for good --------------- }
     S.Load(GameDir, 2);
@@ -5344,10 +5404,12 @@ begin
       Want(S[Idx].Active, 'an opcode-4 checker did not spawn out of the window');
       Want(GS = GS_STATE_140,
            'an opcode-4 checker was placed but its script did not start');
-      Want(Pool.Field(S[Idx].EntitySlot, EF_EXTENT_X) = SPAWN_FORCED_EXTENT,
-           'type 20 did not get its extent forced');
-      Want(Pool.Field(S[Idx].EntitySlot, EF_EXTENT_Y) = SPAWN_FORCED_EXTENT,
-           'type 20 did not get its extent forced');
+      Want(Pool.Field(S[Idx].EntitySlot, EF_EXTENT_X) = 32,
+           Format('type 20 got extent x %d, want a whole tile',
+                  [Pool.Field(S[Idx].EntitySlot, EF_EXTENT_X)]));
+      Want(Pool.Field(S[Idx].EntitySlot, EF_EXTENT_Y) = 32,
+           Format('type 20 got extent y %d, want a whole tile',
+                  [Pool.Field(S[Idx].EntitySlot, EF_EXTENT_Y)]));
     end;
   finally
     Pool.Free;
