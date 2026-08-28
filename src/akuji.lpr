@@ -33,7 +33,7 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
-  Stages, Camera, TileMaps, Player,
+  Stages, Camera, TileMaps, Player, EntityHandlers,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -1715,6 +1715,19 @@ begin
         Inc(Bad);
       Log.Add(Format('glide, air dash and knockback tables:      %d wrong', [Bad]));
       Inc(Result, Bad);
+
+      { Type 14's item table, 16 variants x 4 frames, read back the same way. }
+      Bad := 0;
+      SetLength(Table, ITEM_VARIANTS * ITEM_FRAMES);
+      Exe.Position := ITEM_SPRITE_TABLE_ADDR - DATA_VA_BIAS;
+      Exe.ReadBuffer(Table[0], ITEM_VARIANTS * ITEM_FRAMES * SizeOf(Integer));
+      for I := 0 to ITEM_VARIANTS - 1 do
+        for J := 0 to ITEM_FRAMES - 1 do
+          if Table[I * ITEM_FRAMES + J] <> ITEM_SPRITES[I][J] then
+            Inc(Bad);
+      Log.Add(Format('type 14 item table at 0x%.6X:            %d of %d wrong',
+        [ITEM_SPRITE_TABLE_ADDR, Bad, ITEM_VARIANTS * ITEM_FRAMES]));
+      Inc(Result, Bad);
     end;
   finally
     Exe.Free;
@@ -1902,15 +1915,20 @@ var
   I, F, StartX, Apex, ApexFrame, Landed, DashVX, StopFrame: Integer;
   Trace, Trace2: string;
 
-  procedure Step(AxisX, AxisY: Integer; Jump, Attack: Boolean);
+  procedure StepIn(AGameState, AxisX, AxisY: Integer; Jump, Attack: Boolean);
   begin
     Inp.AxisX := AxisX;
     Inp.AxisY := AxisY;
     Inp.Button[0] := Jump;
     Inp.Button[1] := Attack;
     Down[0] := Jump; Down[1] := Attack; Down[2] := False; Down[3] := False;
-    PlayerUpdate(E, P, L, Inp, W);
+    PlayerUpdate(E, P, L, Inp, W, AGameState);
     InputEndOfFrame(Inp, Down);
+  end;
+
+  procedure Step(AxisX, AxisY: Integer; Jump, Attack: Boolean);
+  begin
+    StepIn(GS_PLAY, AxisX, AxisY, Jump, Attack);
   end;
 
   { Reset SETTLES for three frames before handing back, and that is not
@@ -2152,6 +2170,32 @@ begin
     if E.Raw[PF_STATE] = PS_SPECIAL1 then
     begin
       Log.Add('FAILED: glided without the ability unlocked');
+      Inc(Result);
+    end;
+
+    { --- 7. the GS_PLAY guard -------------------------------------------
+      Player_Update returns straight after the clock unless GameState is 60.
+      This check exists because the guard was MISSING from the first version of
+      Player.pas - the audit against a fresh decompile found it, and without a
+      test it could go missing again. The clock must still run; nothing else
+      may. }
+    Reset;
+    StartX := EntityPixelX(E);
+    F := P.ElapsedSec * 60 + P.Field11C0;
+    for I := 1 to 120 do
+      StepIn(GS_PAUSE, 1, 0, True, True);
+    Log.Add('');
+    Log.Add(Format('120 frames while paused: x %d (was %d), state %d, clock +%d',
+      [EntityPixelX(E), StartX, E.Raw[PF_STATE],
+       (P.ElapsedSec * 60 + P.Field11C0) - F]));
+    if EntityPixelX(E) <> StartX then
+    begin
+      Log.Add('FAILED: the player moved while the game was not in play');
+      Inc(Result);
+    end;
+    if (P.ElapsedSec * 60 + P.Field11C0) - F <> 120 then
+    begin
+      Log.Add('FAILED: the play clock did not run while paused - it should');
       Inc(Result);
     end;
 

@@ -782,6 +782,39 @@ Three things the first version of it got wrong, all worth knowing:
   impulse is applied in the grounded branch and gravity only in the airborne
   one - the launch frame gets no gravity.
 
+### Auditing code written under the old process
+
+Everything written before section 3a's rule was adopted was written from
+batched reads, so it has to be re-checked against a fresh decompile, function
+by function. Risk is **not** uniform, and only two files carry most of it:
+
+| | risk | why |
+|---|---|---|
+| asset units, `EventCommands`, `EventScripts`, `Stages`, the `PlayerState` record | low | each has an external check - byte-identical Python diffs, or all-or-nothing invariants over 692 records / 65 maps |
+| `Camera.pas` | low | written immediately, and its clamp is checked against every map |
+| **`Player.pas`**, **`Entities.pas`** | **high** | the behaviour code, which by definition has no data to check against |
+
+The audit is: re-decompile, diff line by line, fix, and **add a test for each
+fix** so the defect cannot come back silently.
+
+`Player_Update` has been audited this way and it found three real defects, none
+of which any existing check would have caught:
+
+* `PF_OWNER` was `$04`. The original writes byte `+4`, which is int **1**;
+  `$04` is byte `+0x10`, `EF_SPRITE`. Every projectile was recording its owner
+  in the sprite handle.
+* the projectile lifetime went to `EF_TIMER` (`$1C`, byte `+0x70`). The original
+  writes byte `+0x50`, int **`$14`**.
+* **the `GameState = 60` guard was missing entirely**, so the controller would
+  have kept stepping behind a dialogue box or a pause menu.
+
+That is a 3-defect yield on the first audited function, which is the measure of
+how much the old process was costing.
+
+`Entities.pas` is next: `Entity_Spawn`, `Entity_TileEdgeDistX/Y` and
+`Entity_UpdateDying` are the parts written from notes rather than from a live
+decompile.
+
 **Restore mutations by copying a file, never with `git checkout`.** Twice now
 that has misfired: once it reverted a whole file of uncommitted work, and once
 it silently did nothing because the file was untracked, leaving the mutation

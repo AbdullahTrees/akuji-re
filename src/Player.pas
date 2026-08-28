@@ -79,13 +79,21 @@ const
   PF_PEND_VY      = $2D;
   PF_ANIM_FRAME   = $07;   { = EF_FLAG1C; walk cycle sub-frame 0..2 }
   PF_ANIM_ID      = $05;   { the sprite id drawn this frame }
-  PF_OWNER        = $04;   { on a projectile: the slot that fired it }
+  PF_OWNER        = $01;   { on a projectile: the slot that fired it.
+                             The original writes BYTE +4, which is int 1. This
+                             said $04 until the audit - $04 is byte +0x10,
+                             which is EF_SPRITE, the sprite-pool handle. }
+  PF_PROJ_LIFE    = $14;   { on a projectile: its lifetime, from the weapon
+                             table. Byte +0x50. Same slot as PF_CHARGE on the
+                             player - block B is per-type, as always. }
 
   { --- Sounds, from the recovered name array ------------------------------- }
   SND_JUMP        = 3;    SND_LAND_HARD  = 4;
   SND_ATTACK      = 5;    SND_CHARGE_FULL = 6;
   SND_CHARGED     = 7;    SND_LAND_SOFT  = 8;
-  SND_GLIDE_END   = 9;    SND_AIRDASH_END = 10;
+  { 9 and 10 play on BOTH entering and leaving their state, so the -_END names
+    they carried were half wrong. }
+  SND_GLIDE       = 9;    SND_AIRDASH    = 10;
   SND_DEATH       = 12;   SND_DASH_START = 21;
 
   { --- The weapon table @ 0x00468E84, four 16-byte records ----------------
@@ -159,7 +167,7 @@ type
   the tap state, not the poller. }
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
-                       World: TPlayerWorld);
+                       World: TPlayerWorld; AGameState: Integer);
 
 implementation
 
@@ -269,7 +277,7 @@ begin
   if HitX or HitY then
   begin
     World.Spawn(2, 8, E.Raw[EF_POS_X] - POSITION_BIAS, E.Raw[EF_POS_Y] - POSITION_BIAS);
-    World.PlaySound(SND_GLIDE_END);
+    World.PlaySound(SND_GLIDE);
     E.Raw[PF_STATE] := PS_GROUND;
     E.Raw[PF_STATE_BEFORE] := 0;
     E.Raw[PF_RIDING] := 0;
@@ -304,7 +312,7 @@ begin
   if HitX or HitY or (E.Raw[EF_VEL_X] = 0) then
   begin
     World.Spawn(2, 8, E.Raw[EF_POS_X] - POSITION_BIAS, E.Raw[EF_POS_Y] - POSITION_BIAS);
-    World.PlaySound(SND_AIRDASH_END);
+    World.PlaySound(SND_AIRDASH);
     E.Raw[PF_STATE] := PS_LANDING;
     E.Raw[PF_STATE_BEFORE] := 0;
     E.Raw[PF_RIDING] := 0;
@@ -381,7 +389,7 @@ end;
 
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
-                       World: TPlayerWorld);
+                       World: TPlayerWorld; AGameState: Integer);
 var
   SavedVX, Slot, Frames, W: Integer;
   ScrollX, ScrollY, BlockedX, BlockedY: Boolean;
@@ -395,6 +403,13 @@ begin
     P.Field11C0 := 0;
     Inc(P.ElapsedSec);
   end;
+
+  { Everything below runs ONLY during play. The clock above does not - it keeps
+    counting through events, pauses and the game-over screen, which is why it
+    sits before this return. Omitting this guard was the third defect the audit
+    found; without it the controller would keep stepping behind a dialogue box. }
+  if AGameState <> GS_PLAY then
+    Exit;
 
   P.SpawnFacing := E.Raw[EF_FACING];
 
@@ -447,7 +462,7 @@ begin
         if (Inp.AxisX = 0) and (Inp.AxisY < 0) and (E.Raw[PF_HAS_JUMPED] = 1) and
            (P.Head[ABILITY_GLIDE] = 1) then
         begin
-          World.PlaySound(SND_GLIDE_END);
+          World.PlaySound(SND_GLIDE);
           World.Spawn(2, 8, E.Raw[EF_POS_X] - POSITION_BIAS,
                       E.Raw[EF_POS_Y] - POSITION_BIAS);
           E.Raw[PF_STATE] := PS_SPECIAL1;
@@ -462,7 +477,7 @@ begin
         if (Inp.AxisX = 0) and (Inp.AxisY > 0) and (E.Raw[PF_HAS_JUMPED] = 1) and
            (P.Head[ABILITY_AIRDASH] = 1) then
         begin
-          World.PlaySound(SND_AIRDASH_END);
+          World.PlaySound(SND_AIRDASH);
           World.Spawn(2, 8, E.Raw[EF_POS_X] - POSITION_BIAS,
                       E.Raw[EF_POS_Y] - POSITION_BIAS);
           E.Raw[EF_DEATH_TIMER] := AIRDASH_INVULN;
@@ -790,7 +805,7 @@ begin
       World.SetSpawnField(Slot, PF_OWNER, E.Raw[EF_SLOT]);
       World.SetSpawnField(Slot, EF_VEL_X, DirVelX(E.Raw[EF_FACING]) div 4);
       World.SetSpawnField(Slot, EF_STATE, 2);
-      World.SetSpawnField(Slot, EF_TIMER, WEAPONS[W].Lifetime);
+      World.SetSpawnField(Slot, PF_PROJ_LIFE, WEAPONS[W].Lifetime);
       World.SetSpawnField(Slot, EF_HP, 8);
       World.SetSpawnField(Slot, $3A, $1E);
       World.SetSpawnField(Slot, $3B, $1E);
@@ -816,7 +831,7 @@ begin
     World.SetSpawnField(Slot, PF_OWNER, E.Raw[EF_SLOT]);
     World.SetSpawnField(Slot, EF_VEL_X, WEAPONS[W].Speed * DirVelX(E.Raw[EF_FACING]));
     World.SetSpawnField(Slot, EF_STATE, WEAPONS[W].ProjState);
-    World.SetSpawnField(Slot, EF_TIMER, WEAPONS[W].Lifetime);
+    World.SetSpawnField(Slot, PF_PROJ_LIFE, WEAPONS[W].Lifetime);
     if P.Weapon > 1 then
       World.SetSpawnField(Slot, EF_HP, 2)
     else
