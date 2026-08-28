@@ -3806,8 +3806,10 @@ var
   Line, Name: string;
   Stk: array[0..7] of Integer;
   NStk: Integer;
-  E: TEntity;
+  E, E2: TEntity;
   L: TLayerInfo;
+  BoxA, BoxB: TBox;
+  IsBool: Boolean;
 
   function Num(const S: string): Integer;
   begin
@@ -3936,6 +3938,7 @@ begin
       Addr := Num(F[2]);
       ReadStack;
       Want := AsSigned(StrToInt64(F[Arrow + 1]));
+      IsBool := False;
 
       case Addr of
         $004513E0:
@@ -3957,10 +3960,47 @@ begin
             BuildEntityAndLayer;
             Got := TileEdgeDistY(E, L, Key('f.delta', 0));
           end;
+        $00451354:
+          begin
+            BoxA.L := Key('f.al', 0);  BoxA.T := Key('f.at', 0);
+            BoxA.R := Key('f.ar', 0);  BoxA.B := Key('f.ab', 0);
+            BoxB.L := Key('f.bl', 0);  BoxB.T := Key('f.bt', 0);
+            BoxB.R := Key('f.br', 0);  BoxB.B := Key('f.bb', 0);
+            Got := Ord(RectOverlap(BoxA, BoxB, Key('f.sx', 0),
+                                   Key('f.sy', 0)));
+            IsBool := True;
+          end;
+        $00457F98:
+          begin
+            FillChar(E, SizeOf(E), 0);
+            FillChar(E2, SizeOf(E2), 0);
+            E.Raw[EF_POS_X] := Key('f.apos', 0);
+            E.Raw[EF_POS_Y] := Key('f.apos', 0);
+            E.Raw[EF_EXTENT_X] := Key('f.aext', 0);
+            E.Raw[EF_EXTENT_Y] := Key('f.aext', 0);
+            E.Raw[EF_HITBOX_INSET_X] := Key('f.ains', 0);
+            E.Raw[EF_HITBOX_INSET_Y] := Key('f.ains', 0);
+            E2.Raw[EF_POS_X] := Key('f.bpos', 0);
+            E2.Raw[EF_POS_Y] := Key('f.apos', 0);
+            E2.Raw[EF_EXTENT_X] := Key('f.bext', 0);
+            E2.Raw[EF_EXTENT_Y] := Key('f.bext', 0);
+            E2.Raw[EF_HITBOX_INSET_X] := Key('f.bins', 0);
+            E2.Raw[EF_HITBOX_INSET_Y] := Key('f.bins', 0);
+            Got := Ord(EntitiesOverlap(E, E2, Key('f.sx', 1),
+                                       Key('f.sy', 1)));
+            IsBool := True;
+          end;
       else
         Inc(NoRef);
         Continue;
       end;
+
+      { A Delphi Boolean comes back in AL, and the original leaves whatever
+        was in the register in the upper 24 bits - Rect_Overlap literally
+        builds its result as CONCAT31(shrinkY shr 8, 1). So a boolean is
+        compared on the low byte only. }
+      if IsBool then
+        Want := Ord((Want and $FF) <> 0);
 
       Inc(Ran);
       if Got <> Want then

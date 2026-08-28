@@ -62,12 +62,17 @@ def layer_mem(origin_x=0, origin_y=0, dx=0, dy=0, tw=32, th=32, mx=30, my=24):
                             le([origin_x, origin_y, dx, dy, tw, th, mx, my]))
 
 
-def entity_mem(**fields):
+def entity_mem(at=None, **fields):
     """A whole TEntity, zeroed except for the int indices given."""
     raw = [0] * ENTITY_INTS
     for k, v in fields.items():
         raw[int(k[1:])] = v            # keys look like i30
-    return 'mem=0x%X:%s' % (ENTITY_AT, le(raw))
+    return 'mem=0x%X:%s' % (ENTITY_AT if at is None else at, le(raw))
+
+
+ENTITY_B = ENTITY_AT + 0x104          # a second TEntity, right after the first
+BOX_A = 0x60001000                    # two bare TBox records
+BOX_B = 0x60001100
 
 
 # --------------------------------------------------------------------------
@@ -133,10 +138,76 @@ def cases_edgedist():
     return out
 
 
+def cases_rect():
+    """Rect_Overlap @ 0x451354 vs Entities.RectOverlap.
+
+    Two bare boxes by pointer, plus a per-axis shrink. The original returns the
+    flag in AL ONLY - on a hit it builds EAX as CONCAT31(shrinkY >> 8, 1), so
+    the upper 24 bits are whatever happened to be in that argument. The
+    comparison therefore has to mask to the low byte, and a shrink big enough
+    to make those bits non-zero is included on purpose so that a harness which
+    forgot to mask would fail here.
+    """
+    out = ['# Rect_Overlap(A, B, shrinkX, shrinkY) - pointers in EAX, EDX']
+    boxes = [(0, 0, 10, 10), (5, 5, 15, 15), (10, 10, 20, 20),
+             (-5, -5, 5, 5), (0, 0, 1, 1), (100, 100, 140, 120)]
+    for i, a in enumerate(boxes):
+        for j, b in enumerate(boxes):
+            # A NEGATIVE shrink expands the test instead of tightening it,
+            # which is the only way to get a TRUE result whose upper 24 bits
+            # are also dirty: the original returns CONCAT31(shrinkY shr 8, 1),
+            # so -256 makes those bits 0xFFFFFF. A large positive shrink can
+            # never do it - it stops anything overlapping at all, which is how
+            # a first version of this quietly failed to exercise the masking.
+            for sx, sy in ((0, 0), (2, 2), (0x300, 0x300), (-256, -256)):
+                out.append(
+                    'CASE rect_%d_%d_%d 0x451354 eax=0x%X edx=0x%X ecx=%d '
+                    'stk=%d mem=0x%X:%s mem=0x%X:%s '
+                    'f.al=%d f.at=%d f.ar=%d f.ab=%d '
+                    'f.bl=%d f.bt=%d f.br=%d f.bb=%d f.sx=%d f.sy=%d'
+                    % (i, j, sx, BOX_A, BOX_B, sx, sy,
+                       BOX_A, le(list(a)), BOX_B, le(list(b)),
+                       a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3], sx, sy))
+    return out
+
+
+def cases_boxes():
+    """Entity_BoxesOverlap @ 0x457F98 vs Entities.EntitiesOverlap.
+
+    Two entities in memory. The SECOND one's extents get multiplied by the two
+    scale arguments before its box is built; the first is always used at its
+    own size.
+    """
+    out = ['# Entity_BoxesOverlap(a, b, scaleX, scaleY)']
+    base = 0x10000
+    for dx in (0, 9, 20, 41):
+        for exta in (8, 21):
+            for extb in (8, 21):
+                for ins in (0, 3):
+                    for scale in (1, 2):
+                        ea = entity_mem(at=ENTITY_AT, i30=base, i31=base,
+                                        i38=exta, i39=exta, i42=ins, i43=ins)
+                        eb = entity_mem(at=ENTITY_B, i30=base + dx * 32,
+                                        i31=base, i38=extb, i39=extb,
+                                        i42=ins, i43=ins)
+                        out.append(
+                            'CASE box_%d_%d_%d_%d_%d 0x457F98 eax=0x%X '
+                            'edx=0x%X ecx=%d stk=%d %s %s '
+                            'f.apos=%d f.aext=%d f.ains=%d '
+                            'f.bpos=%d f.bext=%d f.bins=%d f.sx=%d f.sy=%d'
+                            % (dx, exta, extb, ins, scale, ENTITY_AT,
+                               ENTITY_B, scale, scale, ea, eb,
+                               base, exta, ins, base + dx * 32, extb, ins,
+                               scale, scale))
+    return out
+
+
 SETS = {
     'compare': cases_compare,
     'angle': cases_angle,
     'edgedist': cases_edgedist,
+    'rect': cases_rect,
+    'boxes': cases_boxes,
 }
 
 

@@ -909,6 +909,30 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
                             DeltaY, DeltaX: Integer;
                             Scrolling: Boolean): Integer;
 
+{ 0x00457F98. The entity-versus-entity hit test: build both boxes and hand
+  them to Rect_Overlap.
+
+  The box is the one EF_HITBOX_INSET_* describes - the +0xA8/+0xAC pair, not
+  the +0xA0/+0xA4 pair tile collision uses. Getting those two the wrong way
+  round would be silent and wrong.
+
+  TWO THINGS THE EARLIER WRITE-UP DID NOT HAVE.
+
+  The SECOND entity's extents are multiplied by ScaleX and ScaleY before the
+  box is built, so a caller can test against a deliberately enlarged or shrunk
+  version of it. The first entity is always used at its own size, which is the
+  same as passing 1.
+
+  And the pixel conversion here does NOT remove POSITION_BIAS. Everywhere else
+  an entity position becomes pixels by subtracting the bias first; this uses the
+  bare `if negative then +31, then shift` form, so both boxes carry the same
+  +2048 pixel offset and it cancels in the comparison. Reproduced rather than
+  tidied, because tidying it would be a real change: the bias only cancels
+  because BOTH sides carry it. }
+function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
+function EntitiesOverlap(const A, B: TEntity;
+                         ScaleX, ScaleY: Integer): Boolean;
+
 { 0x00451354. Axis-aligned overlap of two boxes given as (L, T, R, B), with a
   per-axis margin that shrinks the test. The original writes it as
   separation-versus-width rather than the usual four edge comparisons; this is
@@ -1122,6 +1146,31 @@ begin
       Exit(Tile);
     Inc(Col);
   end;
+end;
+
+function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
+var
+  W, H: Integer;
+begin
+  W := E.Raw[EF_EXTENT_X] * ScaleX;
+  H := E.Raw[EF_EXTENT_Y] * ScaleY;
+  { OriginPixel, not EntityPixelX - see the header: the bias stays in. }
+  Result.L := OriginPixel(E.Raw[EF_POS_X]) - HalfExtent(W)
+              + E.Raw[EF_HITBOX_INSET_X];
+  Result.T := OriginPixel(E.Raw[EF_POS_Y]) - HalfExtent(H)
+              + E.Raw[EF_HITBOX_INSET_Y];
+  Result.R := Result.L + W - 2 * E.Raw[EF_HITBOX_INSET_X];
+  Result.B := Result.T + H - 2 * E.Raw[EF_HITBOX_INSET_Y];
+end;
+
+function EntitiesOverlap(const A, B: TEntity;
+                         ScaleX, ScaleY: Integer): Boolean;
+var
+  BoxA, BoxB: TBox;
+begin
+  BoxA := EntityBox(A, 1, 1);
+  BoxB := EntityBox(B, ScaleX, ScaleY);
+  Result := RectOverlap(BoxA, BoxB, 0, 0);
 end;
 
 function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
