@@ -50,7 +50,7 @@ interface
 uses
   Classes, SysUtils, Entities, EntityHandlers, Player, Camera, PlayerState,
   GameState, Stages, TileMaps, EventScripts, EventCommands, EventRunner,
-  Sprites, SpritePool;
+  Sprites, SpritePool, BgAnime;
 
 type
   { A TTileSource over a loaded map. The map may be nil - a session with no
@@ -115,6 +115,7 @@ type
     FStages: TStageTable;
     FStageIndex: Integer;
     FSprites: TSpritePool;
+    FBgAnime: TBgAnime;
     function GetLayer: TLayerInfo;
   public
     { Borrowed, not owned. }
@@ -136,6 +137,13 @@ type
 
     { One frame of logic. }
     procedure Frame(var AGameState: Integer);
+
+    { 0x0044E2C0, once a frame. Deliberately NOT part of Frame: AppIdle ticks
+      the animator outside the state dispatch, so a background keeps moving
+      through a dialogue box and a pause, where no game logic steps at all.
+      Putting it in Frame would have frozen the walls whenever anything
+      interrupted play. }
+    procedure TickBackground;
 
     { The camera tile the spawn walk needs, derived from the layer origin the
       same way Events_SpawnNearCamera does it. }
@@ -163,6 +171,11 @@ type
     { The sprite pool. Not presentation: an entity's extents are read off its
       sprite every frame, so this is where every collision size comes from.
       Give it a frame table with SetFrames before beginning a stage. }
+    { The animated background tiles, when the terrain declares any. Nil for
+      terrains 5..9, which is a configuration and not a missing piece -
+      Terrain_Configure builds one only for 1..4. }
+    property BgAnim: TBgAnime read FBgAnime;
+
     property Sprites: TSpritePool read FSprites;
     procedure SetFrames(AFrames: TSpriteSet);
 
@@ -322,6 +335,7 @@ begin
   if FOwnAudio then
     FAudio.Free;
   FEventHost.Free;
+  FBgAnime.Free;
   FTiles.Free;
   FRunner.Free;
   FEvents.Free;
@@ -380,6 +394,12 @@ begin
   FWorld.SolidThreshold := Thr;
   FWorld.TerrainId := Terrain;
 
+  { Terrain_Configure builds the animator for terrains 1..4 and nothing for
+    5..9. Rebuilt per stage because its tracks are the terrain's. }
+  FreeAndNil(FBgAnime);
+  if Anim.TrackCount > 0 then
+    FBgAnime := TBgAnime.Create(Map, Anim);
+
   FEvents.Load(FGameDir, StageIndex);
 
   FTiles.Map := Map;
@@ -405,6 +425,12 @@ begin
     FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);
 
   AGameState := GS_PLAY;
+end;
+
+procedure TGameSession.TickBackground;
+begin
+  if FBgAnime <> nil then
+    FBgAnime.Tick;
 end;
 
 procedure TGameSession.Frame(var AGameState: Integer);

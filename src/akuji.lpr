@@ -34,7 +34,7 @@ uses
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
-  SpritePool, Sprites, Dialogue,
+  SpritePool, Sprites, Dialogue, BgAnime,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -6816,6 +6816,59 @@ begin
            S.Pool.Field(I, EF_EXTENT_X), S.Pool.Field(I, EF_EXTENT_Y),
            BoolToStr(S.Sprites.GetVisible(S.Pool.Field(I, EF_SPRITE)), True)]));
     Log.Add('');
+
+    { --- the animated background tiles -------------------------------- }
+    { The tick's whole effect is to repoint a tile id at another cell of the
+      tileset, so every instance of that tile animates at once. Stage 1 is
+      terrain 1, which declares two tracks: tile 7 cycling 7,8,9,8 and tile 17
+      cycling 17,18,19,18, both at 8 ticks a frame. }
+    if S.BgAnim = nil then
+    begin
+      Log.Add('  FAILED: terrain 1 built no background animator');
+      Inc(Bad);
+    end
+    else
+    begin
+      Want(S.BgAnim.TrackCount = 2,
+           Format('terrain 1 has %d tracks, want 2', [S.BgAnim.TrackCount]));
+      Want(S.BgAnim.TrackTile(0) = 7,
+           Format('track 0 animates tile %d, want 7', [S.BgAnim.TrackTile(0)]));
+
+      { Nothing initialises the timer, so the FIRST tick already shows frame 0
+        rather than waiting 8 frames. A timer that started at 8 would look
+        almost right and be one frame late for ever. }
+      S.BgAnim.Restart;
+      StartX := S.Map.TileDef(7).Left;
+      S.TickBackground;
+      Want(S.Map.TileDef(7).Left = TileSrcX(7, 32, 10),
+           'the first tick did not put tile 7 on its own cell');
+      Want(S.BgAnim.TrackCursor(0) = 1,
+           Format('after one tick the cursor is %d, want 1',
+                  [S.BgAnim.TrackCursor(0)]));
+
+      { Then it holds for 8 ticks, and the ninth advances. }
+      for I := 1 to 7 do
+        S.TickBackground;
+      Want(S.BgAnim.TrackCursor(0) = 1,
+           Format('the cursor moved after %d ticks, want it to hold for 8',
+                  [8]));
+      S.TickBackground;
+      Want(S.BgAnim.TrackCursor(0) = 2,
+           'the cursor did not advance on the eighth tick');
+      Want(S.Map.TileDef(7).Left = TileSrcX(8, 32, 10),
+           'tile 7 is not showing tile 8''s cell on frame 1');
+
+      { And the cycle is 7,8,9,8 - four frames, then back to the start. }
+      for I := 1 to 8 * 2 do
+        S.TickBackground;
+      Want(S.BgAnim.TrackCursor(0) = 0,
+           Format('after four frames the cursor is %d, want it wrapped to 0',
+                  [S.BgAnim.TrackCursor(0)]));
+      Want(S.Map.TileDef(7).Left = TileSrcX(8, 32, 10),
+           'the fourth frame of 7,8,9,8 is not tile 8');
+      Log.Add(Format('background: %d tracks, tile %d cycling through its '
+        + 'four frames', [S.BgAnim.TrackCount, S.BgAnim.TrackTile(0)]));
+    end;
 
     { --- the camera follows, and only outside the dead zone ---------- }
     { The layer must not move while the player is inside the dead zone, and

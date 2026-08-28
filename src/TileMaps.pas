@@ -80,6 +80,15 @@ type
     FTileW, FTileH: Integer;
     FSheetCols, FSheetRows: Integer;
     FTiles: array of Word;
+    { One source rect per tile id, exactly as the original's component keeps
+      one 0x18-byte record per tile at Self+4+index*0x18. Load_Map fills it
+      once with the row-major cell and NOTHING else would ever change it - but
+      TMYBGANIME does, every few frames, which is the whole mechanism behind
+      an animated background: it redefines the TILE, so every instance of that
+      id on screen animates together. Computing the cell at draw time instead
+      would look identical until something animates, and then it could not. }
+    FTileDefs: array of TRect;
+    procedure BuildTileDefs;
     function GetTile(X, Y: Integer): Word;
   public
     function LoadFromFile(const FileName: string): Boolean;
@@ -110,6 +119,13 @@ type
       original reads anyway. This returns 0 there. Drawing keeps GetTile, whose
       clamp is right for a viewport. }
     function TileAtRaw(X, Y: Integer): Integer;
+
+    { 0x0044DAE0, TileMap_DefineTile. Repoints one tile id at a different cell
+      of the tileset. This is how TMYBGANIME animates a background: it changes
+      the TILE, so every instance of it redraws. }
+    procedure DefineTile(TileId, SrcY, SrcX: Integer);
+    function TileDef(TileId: Integer): TRect;
+    function TileDefCount: Integer;
   end;
 
 implementation
@@ -167,10 +183,54 @@ begin
 
     SetLength(FTiles, FMapW * FMapH);
     S.ReadBuffer(FTiles[0], FMapW * FMapH * 2);
+    BuildTileDefs;
     Result := True;
   finally
     S.Free;
   end;
+end;
+
+{ Load_Map's registration loop, verbatim in effect:
+
+      TileMap_DefineTile(map, i, surface, 1,
+                         (i / SheetCols) * TileHeight,
+                         (i % SheetCols) * TileWidth)
+
+  for i in 0 .. SheetCols * SheetRows - 1. }
+procedure TTileMap.BuildTileDefs;
+var
+  I, N, X, Y: Integer;
+begin
+  N := FSheetCols * FSheetRows;
+  SetLength(FTileDefs, N);
+  for I := 0 to N - 1 do
+  begin
+    X := TileSrcX(I, FTileW, FSheetCols);
+    Y := TileSrcY(I, FTileH, FSheetCols);
+    FTileDefs[I] := Rect(X, Y, X + FTileW, Y + FTileH);
+  end;
+end;
+
+{ 0x0044DAE0. Note the argument order - SrcY before SrcX - which is the
+  original's, and the reason it is kept is that every caller writes them that
+  way round. See the unit header. }
+procedure TTileMap.DefineTile(TileId, SrcY, SrcX: Integer);
+begin
+  if (TileId < 0) or (TileId >= Length(FTileDefs)) then
+    Exit;
+  FTileDefs[TileId] := Rect(SrcX, SrcY, SrcX + FTileW, SrcY + FTileH);
+end;
+
+function TTileMap.TileDef(TileId: Integer): TRect;
+begin
+  if (TileId < 0) or (TileId >= Length(FTileDefs)) then
+    Exit(Rect(0, 0, 0, 0));
+  Result := FTileDefs[TileId];
+end;
+
+function TTileMap.TileDefCount: Integer;
+begin
+  Result := Length(FTileDefs);
 end;
 
 function TTileMap.GetTile(X, Y: Integer): Word;
@@ -216,13 +276,14 @@ begin
       if Idx >= FSheetCols * FSheetRows then
         Continue;
 
-      SrcX := TileSrcX(Idx, FTileW, FSheetCols);
-      SrcY := TileSrcY(Idx, FTileH, FSheetCols);
+      { From the per-tile table, not recomputed - see FTileDefs. }
+      if (Idx < 0) or (Idx >= Length(FTileDefs)) then
+        Continue;
 
       DX := TX * FTileW - OffsetX;
       DY := TY * FTileH - OffsetY;
       Dest.CopyRect(Rect(DX, DY, DX + FTileW, DY + FTileH), Sheet.Canvas,
-                    Rect(SrcX, SrcY, SrcX + FTileW, SrcY + FTileH));
+                    FTileDefs[Idx]);
     end;
 end;
 

@@ -227,6 +227,10 @@ begin
 
   PollInput;              { step 2-3 }
   DDDD1.Clear;            { step 4  - TDDDD_Clear    0x00449E78 }
+  { The animated background tiles, once a frame and OUTSIDE the state
+    dispatch - which is where AppIdle ticks them, so a wall keeps moving
+    behind a dialogue box or a pause. }
+  FSession.TickBackground;
   DispatchState;          { step 5 }
   { TODO step 6: sprite/entity update across 8 layers }
   { TODO step 7: button edge-detection and repeat timers }
