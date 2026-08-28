@@ -323,3 +323,81 @@ src/Entities.pas
       PlaySound(SND_WATER02);
 --->
     PlaySound(SND_WATER01);
+===
+the X sweep loses its zero-delta guard
+src/Entities.pas
+---
+  if ((E.Raw[EF_ALIVE] and $FF) = 0) or (Delta = 0) then
+    Exit;
+
+  { The box is built from the entity as it WOULD be after the move on this
+--->
+  if ((E.Raw[EF_ALIVE] and $FF) = 0) then
+    Exit;
+
+  { The box is built from the entity as it WOULD be after the move on this
+===
+the Y sweep gains a zero-delta guard it should not have
+src/Entities.pas
+---
+  if (E.Raw[EF_ALIVE] and $FF) = 0 then
+    Exit;
+
+  Moved := E;
+  Inc(Moved.Raw[EF_POS_Y], Delta);
+--->
+  if ((E.Raw[EF_ALIVE] and $FF) = 0) or (Delta = 0) then
+    Exit;
+
+  Moved := E;
+  Inc(Moved.Raw[EF_POS_Y], Delta);
+===
+softness is not crossed over between the axes
+src/Entities.pas
+---
+  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_Y, SkipSoft,
+--->
+  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_X, SkipSoft,
+===
+riding drops the layer scroll
+src/Entities.pas
+---
+    PushX := ((OriginPixel(O^.Raw[EF_POS_X] + Layer.DeltaX)
+--->
+    PushX := ((OriginPixel(O^.Raw[EF_POS_X])
+===
+the on-top tolerance is inclusive
+src/Entities.pas
+---
+    if Gap < SOLID_TOP_TOLERANCE then
+--->
+    if Gap <= SOLID_TOP_TOLERANCE then
+===
+the air dash no longer phases through
+src/Entities.pas
+---
+    if (E.Raw[EF_STATE] = SOLID_STATE_AIRDASH)
+       and (O^.Raw[EF_VULN_KIND] = SOLID_PHASE_VULN) then
+      Continue;
+--->
+    if (E.Raw[EF_STATE] = SOLID_STATE_AIRDASH)
+       and (O^.Raw[EF_VULN_KIND] = -999) then
+      Continue;
+===
+an entity can block itself
+src/Entities.pas
+---
+    if Slot = Mine then
+      Continue;
+--->
+    if Slot = -1 then
+      Continue;
+===
+the horizontal push points the wrong way
+src/Entities.pas
+---
+  if Mine.L < Other.L then
+    PushX := -Abs(Mine.R - Other.L) shl POSITION_SHIFT
+--->
+  if Mine.L < Other.L then
+    PushX := Abs(Mine.R - Other.L) shl POSITION_SHIFT

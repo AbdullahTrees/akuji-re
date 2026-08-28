@@ -3351,12 +3351,22 @@ begin
       Inc(Result);
     end;
 
-    { A zero delta does nothing on X ... }
+    { A zero delta does nothing on X ...
+
+      The solid is at 119 so the boxes ALREADY OVERLAP without moving. At 120
+      they merely touch and the sweep would answer False whether the guard
+      existed or not - which is exactly how a first version of this case let a
+      mutation that deleted the guard survive. }
     Reset(3);
-    Place(Solid, 120, 100, 3);
+    Place(Solid, 119, 100, 3);
     if W.SolidCollideX(Pool.Entity(Subject)^, 0, False) then
     begin
       Log.Add('FAILED: the X sweep should ignore a zero delta');
+      Inc(Result);
+    end;
+    if not W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: ... but a non-zero delta must still see that solid');
       Inc(Result);
     end;
 
@@ -3405,6 +3415,28 @@ begin
       Inc(Result);
     end;
     W.Layer.DeltaX := 0;
+
+    { The on-top tolerance is EXCLUSIVE. Placed so the gap is exactly 8, which
+      is the only distance that tells < from <=; every other case in this file
+      sits at a gap of 1 and cannot see the difference. }
+    Reset(3);
+    Place(Solid, 100, 113, 3);
+    W.SolidCollideY(Pool.Entity(Subject)^, 32, False);
+    Log.Add(Format('gap of exactly %d: onTop %d (want 0)',
+      [SOLID_TOP_TOLERANCE, Ord(W.OnTopOfSolid)]));
+    if W.OnTopOfSolid then
+    begin
+      Log.Add('FAILED: a gap of exactly 8 is NOT on top - the test is < 8');
+      Inc(Result);
+    end;
+    Reset(3);
+    Place(Solid, 100, 114, 3);
+    W.SolidCollideY(Pool.Entity(Subject)^, 32, False);
+    if not W.OnTopOfSolid then
+    begin
+      Log.Add('FAILED: a gap of 7 IS on top');
+      Inc(Result);
+    end;
 
     { Softness is per axis. Kind 1 is soft in X and solid in Y; kind 2 the
       other way round. Nothing here is soft when SkipSoft is off. }
