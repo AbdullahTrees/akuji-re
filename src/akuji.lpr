@@ -2632,6 +2632,162 @@ const
   the entity position carry POSITION_BIAS. Get that wrong by one and the whole
   map misaligns; get the rounding wrong and it misaligns near the edges only.
   Neither could hide behind a hand-built fixture. }
+{ Entity_CheckKillTiles @ 0x004576B4.
+
+  Unlike Entity_TileCollide*, which sweep a one-dimensional span along one
+  edge, this walks the entity's whole tile RECTANGLE. TGridTiles records every
+  lookup, so the shape of the sweep is checked and not merely its answer -
+  which is the difference between "it found the tile" and "it looked where the
+  original looks". }
+function TestKillTiles(Log: TStringList): Integer;
+const
+  KILL = KILL_TILE;   { terrains 1..8; Stages.pas has the table }
+var
+  Grid: TGridTiles;
+  L: TLayerInfo;
+  E: TEntity;
+  Bad: Integer;
+
+  procedure PlaceAt(PxX, PxY, ExtX, ExtY: Integer);
+  begin
+    FillChar(E, SizeOf(E), 0);
+    E.Raw[EF_POS_X]    := (PxX shl POSITION_SHIFT) + POSITION_BIAS;
+    E.Raw[EF_POS_Y]    := (PxY shl POSITION_SHIFT) + POSITION_BIAS;
+    E.Raw[EF_EXTENT_X] := ExtX;
+    E.Raw[EF_EXTENT_Y] := ExtY;
+  end;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('FAILED: ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- Entity_CheckKillTiles ---');
+
+  FillChar(L, SizeOf(L), 0);
+  L.OriginX := POSITION_BIAS;
+  L.OriginY := POSITION_BIAS;
+  L.TileW := 32;
+  L.TileH := 32;
+
+  { The 0x80 the original subtracts from both tile coordinates is not a magic
+    number: the layer origin and the entity position EACH carry POSITION_BIAS,
+    which is 2048 pixels, and 2048 / 32 is 64 tiles. Two of them is 128. So
+    TILE_BIAS_TILES is a consequence of the bias appearing twice in the sum,
+    and if the bias ever changed this would have to change with it. }
+  Want(TILE_BIAS_TILES = 2 * ((POSITION_BIAS shr POSITION_SHIFT) div 32),
+       Format('TILE_BIAS_TILES is %d but two lots of the origin bias is %d',
+              [TILE_BIAS_TILES,
+               2 * ((POSITION_BIAS shr POSITION_SHIFT) div 32)]));
+
+  Grid := TGridTiles.Create;
+  try
+    Grid.W := 20;
+    Grid.H := 15;
+
+    { --- the tile under a small entity ---------------------------------- }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_BLOCK_B] := 77;
+    Grid.Probes := '';
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = KILL_TILE_STATE,
+         Format('standing on the kill tile left the state at %d, want %d',
+                [E.Raw[EF_STATE], KILL_TILE_STATE]));
+    Want(E.Raw[EF_BLOCK_B] = 0,
+         Format('the state counter was left at %d, want 0',
+                [E.Raw[EF_BLOCK_B]]));
+    Log.Add(Format('small entity on a kill tile: probed [%s]',
+      [Trim(Grid.Probes)]));
+
+    { --- an ordinary tile does nothing ---------------------------------- }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := KILL - 1;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_BLOCK_B] := 77;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = 3, 'a tile one below the kill tile killed anyway');
+    Want(E.Raw[EF_BLOCK_B] = 77, 'a near miss still cleared the counter');
+
+    { --- the WHOLE box is swept, both axes ------------------------------ }
+    { A 20 x 40 entity centred in tile (5,5) spans columns 4..5 and rows 4..6.
+      Tile Collide would only sweep one edge; this must reach all six. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 20, 40);
+    Grid.Probes := '';
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Log.Add(Format('20x40 entity at tile (5,5): probed [%s]',
+      [Trim(Grid.Probes)]));
+    Want(Trim(Grid.Probes) = '5,4 5,5 5,6',
+         'the swept rectangle is not columns 5..5 by rows 4..6');
+
+    { A kill tile at the bottom of that box is found... }
+    Grid.Cells[5][6] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 20, 40);
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = KILL_TILE_STATE,
+         'a kill tile at the entity''s feet was missed');
+
+    { ...and one row further down is outside it and must not be. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][7] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 20, 40);
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = 3, 'the sweep reached a row below the box');
+
+    { A wide entity reaches sideways too, which is what makes this a
+      rectangle rather than a column. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[6][5] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 80, 2);
+    Grid.Probes := '';
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Log.Add(Format('80-wide entity at tile (5,5): probed [%s]',
+      [Trim(Grid.Probes)]));
+    Want(E.Raw[EF_STATE] = KILL_TILE_STATE,
+         'a kill tile beside a wide entity was missed');
+
+    { --- the low sixteen bits, and only those --------------------------- }
+    { The original compares MOVZX EAX,AX against the global, so a tile whose
+      low word is the kill tile matches however high the rest is. No shipped
+      map has such a word; the masking is reproduced because it is there. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := $10000 + KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = KILL_TILE_STATE,
+         'the comparison is not masked to sixteen bits');
+
+    { And terrain 9's kill tile, 1000, is outside the id space every tileset
+      can produce - which is what makes that terrain survivable. Asked here
+      the only way a fixture can: a map that does not contain it. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][5] := 99;          { the largest id any 10x10 tileset has }
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 2);
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL_TILE_NONE);
+    Want(E.Raw[EF_STATE] = 3,
+         'the highest tile id a tileset can hold matched terrain 9''s kill tile');
+  finally
+    Grid.Free;
+  end;
+
+  Result := Bad;
+  if Result = 0 then
+    Log.Add('OK - the whole box is swept, nothing outside it is, '
+      + 'and the match is masked');
+end;
+
 function TestTileCollide(Log: TStringList; const GameDir: string): Integer;
 const
   SOLID = 50;
@@ -4441,6 +4597,7 @@ begin
   Inc(Result, TestSolidCollide(Log));
   Inc(Result, TestTouchHandlers(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
+  Inc(Result, TestKillTiles(Log));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
 

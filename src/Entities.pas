@@ -112,7 +112,11 @@ const
     Every shipped map is 32. }
   TILE_BIAS_TILES = $80;   { 128 }
 
-  TILE_NONE = -1;          { Entity_TileCollide*'s "nothing solid that way" }
+  TILE_NONE = -1;
+
+  { What Entity_CheckKillTiles puts an entity into on touching the stage's kill
+    tile. Stages.pas has which tile that is per terrain. }
+  KILL_TILE_STATE = 10;          { Entity_TileCollide*'s "nothing solid that way" }
 
   { --- Delphi's Random, from 0x00402AC4 ---------------------------------
     Two instructions and a multiply:
@@ -1101,6 +1105,55 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
                             DeltaY, DeltaX: Integer;
                             Scrolling: Boolean): Integer;
 
+{ 0x004576B4. Instant death by terrain. Sweeps every tile the entity's box
+  covers and, on finding the stage's KILL TILE, puts the entity into state 10 -
+  the fall-death state - and clears EF_BLOCK_B so the state starts from its
+  first frame.
+
+  Camera_ApplyMoveY @ 0x00459E73 is the only caller, so this runs on every
+  vertical movement step and nowhere else. Falling into a pit is checked; being
+  pushed sideways into one is not.
+
+  ## The box it sweeps
+
+  The four bounds are the SAME arithmetic Entity_TileCollideX/Y use for their
+  leading and trailing edges, taken on both axes at once:
+
+      top    = (originPx + posPx - half(extentY) + boxOfsY + tileOfsY)     div tileH
+      bottom = (originPx + posPx + half(extentY) - boxOfsY + tileOfsY - 1) div tileH
+
+  and the same across. EF_BOX_OFS_* is ADDED on the leading edge and SUBTRACTED
+  on the trailing one, which is what makes it an inset rather than an offset;
+  the -1 keeps a box that ends exactly on a boundary out of the next tile.
+  Both conversions use the bare `if negative then +31, then shift` form -
+  OriginPixel, not PixelOf - so the position keeps its bias and the tile
+  indices come out high by it. That is exactly why the lookup subtracts
+  TILE_BIAS_TILES from both coordinates, the same bias the layer origin
+  carries.
+
+  ## Two details a tidy rewrite would lose
+
+  The match is on the LOW 16 BITS of the tile - MOVZX EAX,AX - so a map word
+  above $FFFF could never match. Nothing in the shipped data has one, but the
+  masking is the original's and is kept.
+
+  On a match the original breaks the COLUMN loop only. The row loop keeps
+  going, so the state is set once per row that contains a kill tile rather than
+  once per entity. It is idempotent, so nothing observable changes - but it is
+  a `break`, not an `exit`, and reproducing it costs nothing.
+
+  ## It always returns False
+
+  The function reserves a byte of stack for its Boolean result, writes 0 to it
+  on entry, and never writes it again; the last two instructions load that byte
+  into AL and return. So the result is a constant False whatever it finds, and
+  Camera_ApplyMoveY ignores it. Modelled as a procedure, because a function
+  returning a constant is not a result - it is a Delphi function that forgot to
+  assign one. Stages.pas has the kill tile itself: 29 for terrains 1..8, and
+  1000 for terrain 9, which no tileset can produce. }
+procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
+                               Tiles: TTileSource; KillTile: Integer);
+
 { 0x00457F98. The entity-versus-entity hit test: build both boxes and hand
   them to Rect_Overlap.
 
@@ -1733,6 +1786,41 @@ begin
     else if Kind = DEBRIS_SHATTER then
       SetSpawnField(Slot, EF_FLAG1C, I);
   end;
+end;
+
+procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
+                               Tiles: TTileSource; KillTile: Integer);
+var
+  Top, Bottom, Left, Right, Row, Col, OX, OY, PX, PY, HX, HY: Integer;
+begin
+  if (Tiles = nil) or (L.TileW = 0) or (L.TileH = 0) then
+    Exit;
+
+  OX := OriginPixel(L.OriginX);
+  OY := OriginPixel(L.OriginY);
+  PX := OriginPixel(E.Raw[EF_POS_X]);
+  PY := OriginPixel(E.Raw[EF_POS_Y]);
+  HX := HalfExtent(E.Raw[EF_EXTENT_X]);
+  HY := HalfExtent(E.Raw[EF_EXTENT_Y]);
+
+  Top    := (OY + PY - HY + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y])
+            div L.TileH;
+  Bottom := (OY + PY + HY - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1)
+            div L.TileH;
+  Left   := (OX + PX - HX + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X])
+            div L.TileW;
+  Right  := (OX + PX + HX - E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X] - 1)
+            div L.TileW;
+
+  for Row := Top to Bottom do
+    for Col := Left to Right do
+      if (Tiles.TileAt(Col - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
+          and $FFFF) = KillTile then
+      begin
+        E.Raw[EF_STATE] := KILL_TILE_STATE;
+        E.Raw[EF_BLOCK_B] := 0;
+        Break;                 { the COLUMN loop only, as the original does }
+      end;
 end;
 
 function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
