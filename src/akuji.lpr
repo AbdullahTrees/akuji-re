@@ -3488,7 +3488,7 @@ function TestEffectHandlers(Log: TStringList): Integer;
 var
   W: TCountingWorld;
   E: TEntity;
-  I, Bad, Died: Integer;
+  I, Bad, Died, Frames: Integer;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -3545,6 +3545,53 @@ begin
       EntityUpdate_Type08(E, GS_STATE_140, W);
     Want(E.Raw[EF_ALIVE] <> 0, 'type 8 died during an event script');
     Want(E.Raw[EF_ANIM_ID] = 50, 'type 8 animated during an event script');
+
+    { --- the whole family, by the property that matters ---------------- }
+    { An effect that never reaches its Entity_Destroy is invisible to every
+      other check and fills the screen over minutes. So each one is driven to
+      exhaustion and required to end - or, for the three that deliberately do
+      not, required to STILL BE ALIVE. Getting that backwards is exactly the
+      bug this catches, in either direction. }
+    for I := 3 to 13 do
+    begin
+      if I = 8 then
+        Continue;                { covered in detail above }
+      Fresh(I);
+      E.Raw[EF_VEL_X] := 32;     { types 3 and 6 need a direction to animate }
+      Died := -1;
+      for Frames := 1 to 400 do
+      begin
+        if E.Raw[EF_ALIVE] = 0 then
+          Break;
+        case I of
+          3:  EntityUpdate_Type03(E, GS_PLAY, W);
+          4:  EntityUpdate_Type04(E, GS_PLAY, W);
+          5:  EntityUpdate_Type05(E, GS_PLAY, W);
+          6:  EntityUpdate_Type06(E, GS_PLAY, W);
+          7:  EntityUpdate_Type07(E, GS_PLAY, W);
+          9:  EntityUpdate_Type09(E, GS_PLAY);
+          10: EntityUpdate_Type10(E, GS_PLAY, W);
+          11: EntityUpdate_Type11(E, GS_PLAY);
+          12: EntityUpdate_Type12(E, GS_PLAY);
+          13: EntityUpdate_Type13(E, GS_PLAY, W);
+        end;
+        if (Died < 0) and (E.Raw[EF_ALIVE] = 0) then
+          Died := Frames;
+      end;
+      { 9, 11 and 12 have no Entity_Destroy at all - they are culled
+        off-screen instead, which is a different mechanism. }
+      if (I = 9) or (I = 11) or (I = 12) then
+        Want(Died < 0,
+             Format('type %d ended itself on frame %d; it has no '
+               + 'Entity_Destroy and should be culled instead', [I, Died]))
+      else
+        Want(Died > 0,
+             Format('type %d never ended in 400 frames - it would stay on '
+               + 'screen for ever wearing sprite %d',
+               [I, E.Raw[EF_ANIM_ID]]));
+      if Died > 0 then
+        Log.Add(Format('  type %2d ended on frame %d', [I, Died]));
+    end;
 
     { --- type 26: rises, then goes --------------------------------------- }
     Fresh(26);

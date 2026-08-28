@@ -29,6 +29,16 @@
       0x0045AA60  type 22  a one-sprite entity that can die
       0x0045A0E4  type 8   the four-frame puff a move leaves behind
       0x0045A50C  type 26  the pickup's rising GET
+      0x00459EB4  type 3   a moving three-frame puff, sprite row by heading
+      0x00459F1C  type 4   two frames, then gone
+      0x00459F6C  type 5   an effect that hangs off another entity
+      0x0045A020  type 6   the explosion's spark
+      0x0045A08C  type 7   four frames in one of two rows
+      0x0045A120  type 9   a particle that circles
+      0x0045A184  type 10  six frames, then gone
+      0x0045A1C0  type 11  a four-frame loop that never ends
+      0x0045A20C  type 12  the same, slower
+      0x0045A24C  type 13  debris - four states, four motions
 
   And the dispatcher they hang off:
 
@@ -232,6 +242,131 @@ const
   DROP_TABLE_ADDR   = $0046BE54;
   DROP_TABLE_PTR    = $0046CE18;
   DROP_SPRITES: array[0..DROP_SPRITE_COUNT - 1] of Integer = (100, 101);
+
+  { --- The effect family, types 3..13 -----------------------------------
+    Eleven handlers built from the same four moves: write a sprite from a
+    table indexed by a frame counter, tick that counter every N frames,
+    optionally move, and destroy at the end. What differs is which of those
+    each one does, and it is worth having them side by side because the
+    differences are the only content.
+
+        type  frames  ticks  motion                     ends
+          3      3      5    POS_X += VEL_X             yes
+          4      2      3    none                       yes
+          5      4      5    follows its OWNER          yes
+          6      4      9    POS += VEL                 yes
+          7      4      5    none                       yes
+          9      1      -    circles, one step a frame  no
+         10      6      3    none                       yes
+         11      4      3    none                       NO - it loops
+         12      4      4    none                       NO - it loops
+         13    varies       four states, see below      3 of 4
+
+    Types 11 and 12 never call Entity_Destroy at all. They are not leaks: an
+    entity that leaves the screen is culled by Entity_UpdateAll, which is a
+    different mechanism from an effect timing out, and these two rely on it.
+
+    Types 9 and 13 are the only two that also run in GS_PLAY_ALT (100) rather
+    than GS_PLAY alone.
+
+    THE SPRITE TABLES all sit in one run at 0x0046BC5C and their extents come
+    from the next table's start, which is the discipline tools/table_bounds.py
+    exists to enforce - see the 16-versus-2 error it was written after. Two of
+    them are two ROWS rather than a flat list, indexed by a second field with
+    a stride of four:
+
+        type 6   row from block A[1], which the explosion sets when it spawns
+                 the spark - so the same table serves two burst colours
+        type 7   row from the VARIANT }
+  T3_FRAMES = 3;  T3_TICKS = 4;   { advance when the count EXCEEDS, so every 5 }
+  T3_TABLE_ADDR = $0046BC5C;
+  T3_SPRITES: array[0..1, 0..T3_FRAMES - 1] of Integer =
+    ((20, 21, 22),      { moving left  }
+     (23, 24, 25));     { moving right }
+
+  T4_FRAMES = 2;  T4_TICKS = 2;
+  T4_TABLE_ADDR = $0046BC74;
+  T4_SPRITES: array[0..T4_FRAMES - 1] of Integer = (26, 27);
+
+  T5_FRAMES = 4;  T5_TICKS = 4;
+  T5_TABLE_ADDR = $0046BC7C;
+  T5_SPRITES: array[0..T5_FRAMES - 1] of Integer = (200, 201, 202, 203);
+
+  T6_FRAMES = 4;  T6_TICKS = 8;   { every 9 - the slowest of the family }
+  T6_ROWS = 2;
+  T6_TABLE_ADDR = $0046BC8C;
+  T6_SPRITES: array[0..T6_ROWS - 1, 0..T6_FRAMES - 1] of Integer =
+    ((204, 205, 206, 207), (208, 209, 210, 211));
+
+  T7_FRAMES = 4;  T7_TICKS = 4;
+  T7_ROWS = 2;
+  T7_TABLE_ADDR = $0046BCAC;
+  T7_SPRITES: array[0..T7_ROWS - 1, 0..T7_FRAMES - 1] of Integer =
+    ((40, 41, 42, 43), (233, 234, 235, 236));
+
+  T9_TABLE_ADDR = $0046BCDC;
+  T9_SPRITE = 212;
+
+  T10_FRAMES = 6;  T10_TICKS = 2;
+  T10_TABLE_ADDR = $0046BCE0;
+  T10_SPRITES: array[0..T10_FRAMES - 1] of Integer =
+    (213, 214, 215, 216, 217, 218);
+
+  T11_FRAMES = 4;  T11_TICKS = 2;
+  T11_TABLE_ADDR = $0046BCF8;
+  T11_SPRITES: array[0..T11_FRAMES - 1] of Integer = (64, 65, 66, 65);
+  T11_DEATH_TIMER = 2;
+
+  T12_FRAMES = 4;  T12_TICKS = 3;
+  T12_TABLE_ADDR = $0046BD08;
+  T12_SPRITES: array[0..T12_FRAMES - 1] of Integer = (67, 68, 69, 70);
+
+  { The one-shot latch types 4, 5, 6 and 7 all set on their first play frame.
+    EF_STATE marks it done and the death timer is what actually removes them
+    if their animation somehow does not. }
+  EFFECT_LATCH_TIMER = $F0;
+
+  { --- Type 13, the debris ----------------------------------------------
+    Four states, and the state is set by whoever spawns it - see
+    Entity_SpawnDebris's DEBRIS_* kinds in Entities.pas.
+
+      0  a splash: rises against a growing downward pull, three frames at
+         nine ticks, then gone
+      1  a shard: gravity, twelve frames at five ticks, then gone. Its sprite
+         table depends on the STAGE TERRAIN - one for terrain 3 and another
+         for terrain 4, and no write at all for any other terrain, which
+         leaves whatever sprite it already had
+      2  and 3: gravity and drift, no animation and NO end. Like types 11 and
+         12 they rely on being culled off-screen
+
+    Two things reproduced rather than tidied. States 1, 2 and 3 add VEL_Y to
+    POS_Y TWICE in the same frame - the original really does write
+    `POS_Y += VEL_Y` on two separate lines - so debris falls at double the
+    rate its velocity says. And the gravity is applied BEFORE the first add,
+    so the first frame already moves. }
+  T13_STATE_SPLASH = 0;
+  T13_STATE_SHARD  = 1;
+  T13_SPLASH_FRAMES = 3;  T13_SPLASH_TICKS = 8;
+  T13_SHARD_FRAMES = 12;  T13_SHARD_TICKS  = 4;
+  T13_GRAVITY = 2;
+  T13_TERMINAL = $200;
+  T13_SPLASH_TABLE_ADDR = $0046BD18;
+  T13_SHARD3_TABLE_ADDR = $0046BD24;
+  T13_SHARD4_TABLE_ADDR = $0046BD5C;
+  T13_STATE2_TABLE_ADDR = $0046BD54;
+  T13_STATE3_TABLE_ADDR = $0046BD8C;
+  T13_SPLASH_SPRITES: array[0..T13_SPLASH_FRAMES - 1] of Integer =
+    (219, 220, 221);
+  T13_SHARD3_SPRITES: array[0..T13_SHARD_FRAMES - 1] of Integer =
+    (240, 241, 240, 241, 242, 243, 242, 243, 244, 245, 244, 245);
+  T13_SHARD4_SPRITES: array[0..T13_SHARD_FRAMES - 1] of Integer =
+    (256, 257, 256, 257, 258, 259, 258, 259, 260, 261, 260, 261);
+  { States 2 and 3 never advance their frame counter, so only element 0 of
+    each is ever read. The rest of both tables is unreachable from here. }
+  T13_STATE2_SPRITE = 231;
+  T13_STATE3_SPRITE = 283;
+  T13_TERRAIN_SHARD3 = 3;
+  T13_TERRAIN_SHARD4 = 4;
 
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
@@ -482,6 +617,51 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x00459EB4. A moving puff whose sprite row is chosen by which way it is
+  going - and by the SIGN of its velocity, so a puff with no horizontal speed
+  at all keeps whatever sprite it had. }
+procedure EntityUpdate_Type03(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x00459F1C. Two frames and gone. }
+procedure EntityUpdate_Type04(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x00459F6C. An effect that hangs off another entity: its position is its
+  OWNER's plus an offset, and the offset shrinks toward zero along its heading
+  every frame, so it retracts into whatever fired it. }
+procedure EntityUpdate_Type05(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A020. The spark the explosion throws out. Its sprite ROW comes from
+  block A[1], which EntityUpdate_Type33_Explosion sets when it spawns one. }
+procedure EntityUpdate_Type06(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A08C. Four frames in one of two rows, chosen by the variant. }
+procedure EntityUpdate_Type07(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A120. A particle that circles: one direction step a frame, moving by
+  the full X component and HALF the Y, which is what makes the path an ellipse
+  rather than a circle. It never destroys itself - it leaves the screen. }
+procedure EntityUpdate_Type09(var E: TEntity; AGameState: Integer);
+
+{ 0x0045A184. Six frames and gone. }
+procedure EntityUpdate_Type10(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A1C0. A four-frame loop with no end, and a death timer it keeps
+  topping back up. }
+procedure EntityUpdate_Type11(var E: TEntity; AGameState: Integer);
+
+{ 0x0045A20C. The same loop one tick slower, without the timer. }
+procedure EntityUpdate_Type12(var E: TEntity; AGameState: Integer);
+
+{ 0x0045A24C. The debris. Four states - see the T13_ block above. }
+procedure EntityUpdate_Type13(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045A0E4. The four-frame puff. See TYPE8_SPRITES above. }
 procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
@@ -1112,6 +1292,338 @@ begin
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
 end;
 
+{ The one-shot latch types 4..7 share: mark it done and arm the death timer.
+  Written once here because it is literally the same three lines in each. }
+procedure EffectLatch(var E: TEntity);
+begin
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_DEATH_TIMER] := EFFECT_LATCH_TIMER;
+  end;
+end;
+
+procedure EntityUpdate_Type03(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T3_FRAMES) then
+    Frame := 0;
+  { By the SIGN, and zero writes nothing at all - the original has two
+    separate ifs with no else, so a puff standing still keeps its sprite. }
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T3_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T3_SPRITES[1][Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T3_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > T3_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type04(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T4_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T4_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  EffectLatch(E);
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T4_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > T4_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type05(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Owner: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T5_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T5_SPRITES[Frame];
+
+  { Its position is not its own: it is the owner's plus the offset held in the
+    velocity fields. Written EVERY frame including outside play, so it stays
+    pinned to its owner through a dialogue box. }
+  Owner := E.Raw[EF_OWNER];
+  if (World.Pool <> nil) and (Owner >= 0) and (Owner < ENTITY_COUNT) then
+  begin
+    E.Raw[EF_POS_X] := World.Pool.Field(Owner, EF_POS_X) + E.Raw[EF_VEL_X];
+    E.Raw[EF_POS_Y] := World.Pool.Field(Owner, EF_POS_Y) + E.Raw[EF_VEL_Y];
+  end;
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { The offset shrinks along the heading, so it retracts into the owner. }
+  Dec(E.Raw[EF_VEL_X], DirVelX(E.Raw[EF_FACING]));
+  Dec(E.Raw[EF_VEL_Y], DirVelY(E.Raw[EF_FACING]));
+
+  EffectLatch(E);
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T5_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > T5_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type06(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Row: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T6_FRAMES) then
+    Frame := 0;
+  Row := E.Raw[EF_BLOCK_A + 1];
+  if (Row < 0) or (Row >= T6_ROWS) then
+    Row := 0;
+  E.Raw[EF_ANIM_ID] := T6_SPRITES[Row][Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+  Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+  EffectLatch(E);
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T6_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > T6_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type07(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Row: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T7_FRAMES) then
+    Frame := 0;
+  Row := E.Raw[EF_VARIANT];
+  if (Row < 0) or (Row >= T7_ROWS) then
+    Row := 0;
+  E.Raw[EF_ANIM_ID] := T7_SPRITES[Row][Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  EffectLatch(E);
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T7_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > T7_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
+procedure EntityUpdate_Type09(var E: TEntity; AGameState: Integer);
+begin
+  E.Raw[EF_ANIM_ID] := T9_SPRITE;
+
+  { One of only two handlers that also run in GS_PLAY_ALT. }
+  if (AGameState <> GS_PLAY) and (AGameState <> GS_PLAY_ALT) then
+    Exit;
+
+  { Full X, HALF Y - so the path is an ellipse, not a circle. }
+  Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]));
+  Inc(E.Raw[EF_POS_Y], HalfExtent(DirVelY(E.Raw[EF_FACING])));
+
+  E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+end;
+
+procedure EntityUpdate_Type10(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T10_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T10_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T10_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+    { Note the destroy is INSIDE the advance here, unlike types 3..7 where it
+      is a separate test every frame. Same effect, and kept as written. }
+    if E.Raw[EF_FLAG1C] > T10_FRAMES - 1 then
+      World.DestroyEntity(E, False);
+  end;
+end;
+
+procedure EntityUpdate_Type11(var E: TEntity; AGameState: Integer);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T11_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T11_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { Topped back up whenever it reaches zero, so this never actually dies of
+    it - Entity_UpdateAll's flicker reads the same field, which is why an
+    entity of this type blinks. }
+  if E.Raw[EF_DEATH_TIMER] = 0 then
+    E.Raw[EF_DEATH_TIMER] := T11_DEATH_TIMER;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T11_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    { WRAPS. No Entity_Destroy anywhere in this handler. }
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T11_FRAMES;
+  end;
+end;
+
+procedure EntityUpdate_Type12(var E: TEntity; AGameState: Integer);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T12_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T12_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T12_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T12_FRAMES;
+  end;
+end;
+
+procedure EntityUpdate_Type13(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+
+  { The sprite, by state. Four independent ifs, and two of them also test the
+    stage's terrain - so a state-1 shard in any terrain but 3 or 4 gets no
+    write at all and keeps whatever it had. }
+  if E.Raw[EF_STATE] = T13_STATE_SPLASH then
+    if (Frame >= 0) and (Frame < T13_SPLASH_FRAMES) then
+      E.Raw[EF_ANIM_ID] := T13_SPLASH_SPRITES[Frame];
+  if (E.Raw[EF_STATE] = T13_STATE_SHARD)
+     and (World.TerrainId = T13_TERRAIN_SHARD3) then
+    if (Frame >= 0) and (Frame < T13_SHARD_FRAMES) then
+      E.Raw[EF_ANIM_ID] := T13_SHARD3_SPRITES[Frame];
+  if (E.Raw[EF_STATE] = T13_STATE_SHARD)
+     and (World.TerrainId = T13_TERRAIN_SHARD4) then
+    if (Frame >= 0) and (Frame < T13_SHARD_FRAMES) then
+      E.Raw[EF_ANIM_ID] := T13_SHARD4_SPRITES[Frame];
+  if E.Raw[EF_STATE] = 2 then
+    E.Raw[EF_ANIM_ID] := T13_STATE2_SPRITE;
+  if E.Raw[EF_STATE] = 3 then
+    E.Raw[EF_ANIM_ID] := T13_STATE3_SPRITE;
+
+  if (AGameState <> GS_PLAY) and (AGameState <> GS_PLAY_ALT) then
+    Exit;
+
+  if E.Raw[EF_STATE] = T13_STATE_SPLASH then
+  begin
+    { A pull that grows by one a frame, with no cap, and the X step comes off
+      the direction table rather than a velocity. }
+    Inc(E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]));
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T13_SPLASH_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T13_SPLASH_FRAMES - 1 then
+      begin
+        World.DestroyEntity(E, False);
+        Exit;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = T13_STATE_SHARD then
+  begin
+    Inc(E.Raw[EF_VEL_Y], T13_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T13_TERMINAL then
+      E.Raw[EF_VEL_Y] := T13_TERMINAL;
+    { TWICE. The original writes POS_Y += VEL_Y on two separate lines with the
+      X move between them, so this falls at double the rate its velocity
+      says. Reproduced, not corrected. }
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T13_SHARD_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T13_SHARD_FRAMES - 1 then
+      begin
+        World.DestroyEntity(E, False);
+        Exit;
+      end;
+    end;
+  end;
+
+  { States 2 and 3 share one arm - the original tests `state - 2 < 2` - and
+    neither animates nor ends. }
+  if (E.Raw[EF_STATE] = 2) or (E.Raw[EF_STATE] = 3) then
+  begin
+    Inc(E.Raw[EF_VEL_Y], T13_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T13_TERMINAL then
+      E.Raw[EF_VEL_Y] := T13_TERMINAL;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
 procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
@@ -1445,12 +1957,22 @@ begin
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
       33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
+      3:  EntityUpdate_Type03(E^, AGameState, World);
+      4:  EntityUpdate_Type04(E^, AGameState, World);
+      5:  EntityUpdate_Type05(E^, AGameState, World);
+      6:  EntityUpdate_Type06(E^, AGameState, World);
+      7:  EntityUpdate_Type07(E^, AGameState, World);
       8:  EntityUpdate_Type08(E^, AGameState, World);
+      9:  EntityUpdate_Type09(E^, AGameState);
+      10: EntityUpdate_Type10(E^, AGameState, World);
+      11: EntityUpdate_Type11(E^, AGameState);
+      12: EntityUpdate_Type12(E^, AGameState);
+      13: EntityUpdate_Type13(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 66 arms are in HANDLER_ADDR, untranslated }
+      { the other 56 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
