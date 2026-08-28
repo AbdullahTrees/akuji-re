@@ -105,7 +105,7 @@
 | `0046cce0` | `PTR_DAT_0046cce0` | Event script array |
 | `0046d1c8` | `PTR_DAT_0046d1c8` | Event string data |
 | `0046cfb4` | `PTR_DAT_0046cfb4` | Stage definition table (0x4C-byte entries) |
-| `0046cc44` | `PTR_DAT_0046cc44` | Boss HP (set by `Configure_Stage_Params`) |
+| `0046cc44` | `PTR_DAT_0046cc44` | Solid-tile threshold (set by `Terrain_Configure`) - every reader is a tile test |
 | `0046cf5c` | `PTR_DAT_0046cf5c` | Stage timer (set by `Configure_Stage_Params`) |
 | `0046d060` | `PTR_DAT_0046d060` | Boss entity pointer |
 | `0044e14c` | `PTR_DAT_0044e14c` | Entity class reference |

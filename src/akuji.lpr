@@ -3993,7 +3993,29 @@ end;
   the successor of each table's base to be base + length.
 
   That would have caught the sixteen immediately - the next pointer after
-  0x0046BDA0 is 0x0046BDC0, thirty-two bytes on. }
+  0x0046BDA0 is 0x0046BDC0, thirty-two bytes on.
+
+  SWEEPING THE REST
+
+  The four tables above were checked this way and the other eighty were not,
+  which left the same class of defect free to sit in any of them. Pin() below
+  applies the identical test to EVERY table any handler records an address
+  for, and separates two things the old wording ran together:
+
+    * the EXTENT - how many ints the binary lays down at that address, pinned
+      from outside by where the next table begins
+    * the READ COUNT - how many of them a handler can reach
+
+  They are usually the same and sometimes not, and a table where they differ
+  is exactly where a length gets recorded wrong. Requiring both, and requiring
+  the recorded values to be a PREFIX of what the binary holds, means a table
+  can be short on purpose but not by accident.
+
+  Running it for the first time found two: type 26's table is four ints and
+  was recorded as two, and type 37's is six and was recorded as five. Type 26
+  is reachable - its handler indexes by EF_VARIANT with no bound - so that one
+  was a real under-record; type 37's sixth int is unreachable behind a mod 5,
+  so five stays the read count and six is now stated as the extent. }
 function TestSpriteTables(Log: TStringList; const GameDir: string): Integer;
 const
   { Where the pointer globals live, and the span of table bodies they address.
@@ -4001,13 +4023,16 @@ const
     pointer could only ever make a table look SHORTER, never longer, so this
     cannot pass something it should fail. }
   PTRS_LO = $0046C400;  PTRS_HI = $0046D400;
-  BODY_LO = $0046B800;  BODY_HI = $0046C400;
+  { Wide enough to take in the sound table at 0x00468E34 as well as the run of
+    sprite tables. Widening only ADDS starts below every existing base, so it
+    cannot change an extent that was already pinned. }
+  BODY_LO = $00468000;  BODY_HI = $0046C400;
 var
   Exe: TMemoryStream;
   ExeName: string;
   Buf: array of Cardinal;
   Starts: array of Cardinal;
-  I, J, K, Bad, Got: Integer;
+  I, J, K, Bad, Got, Swept: Integer;
   V, Next: Cardinal;
 
   { The smallest table start strictly greater than Base. }
@@ -4019,6 +4044,64 @@ var
     for N := 0 to High(Starts) do
       if (Starts[N] > Base) and (Starts[N] < Result) then
         Result := Starts[N];
+  end;
+
+  { Extent, front, and values in one go. Ints is what the binary lays down;
+    Want/WantCount is what we recorded, which may be shorter when a handler
+    cannot reach the rest - but must never be longer, and must be a prefix. }
+  procedure Pin(const Name: string; Base: Cardinal; Ints: Integer;
+                Want: PInteger; WantCount: Integer);
+  var
+    Vals: array of Integer;
+    N: Integer;
+    IsStart: Boolean;
+  begin
+    Inc(Swept);
+    IsStart := False;
+    for N := 0 to High(Starts) do
+      if Starts[N] = Base then IsStart := True;
+    if not IsStart then
+    begin
+      Log.Add(Format('  %s: 0x%.6X is not the target of any pointer global, '
+        + 'so nothing pins its front', [Name, Base]));
+      Inc(Bad);
+      Exit;
+    end;
+
+    if Successor(Base) <> Base + Cardinal(Ints) * 4 then
+    begin
+      Log.Add(Format('  %s: claims %d ints, but the next table starts at '
+        + '0x%.6X, not 0x%.6X',
+        [Name, Ints, Successor(Base), Base + Cardinal(Ints) * 4]));
+      Inc(Bad);
+      Exit;
+    end;
+
+    if WantCount > Ints then
+    begin
+      Log.Add(Format('  %s: %d values recorded but the table holds only %d',
+        [Name, WantCount, Ints]));
+      Inc(Bad);
+      Exit;
+    end;
+
+    SetLength(Vals, Ints);
+    Exe.Position := Int64(Base) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Vals[0], Ints * SizeOf(Integer));
+    for N := 0 to WantCount - 1 do
+      if Vals[N] <> PInteger(PtrUInt(Want) + PtrUInt(N * SizeOf(Integer)))^ then
+      begin
+        Log.Add(Format('  %s: entry %d is %d in the exe, %d here',
+          [Name, N, Vals[N],
+           PInteger(PtrUInt(Want) + PtrUInt(N * SizeOf(Integer)))^]));
+        Inc(Bad);
+      end;
+  end;
+
+  { A table whose handler reads only element 0, recorded as a scalar. }
+  procedure PinOne(const Name: string; Base: Cardinal; Ints, Want: Integer);
+  begin
+    Pin(Name, Base, Ints, @Want, 1);
   end;
 
   procedure CheckTable(const Name: string; Ptr, Base: Cardinal; Ints: Integer);
@@ -4095,6 +4178,116 @@ begin
     CheckTable('type 27', SAVE_POINT_PTR, SAVE_POINT_ADDR, SAVE_POINT_FRAMES);
     Log.Add(Format('four tables, pointer and extent: %d wrong', [Bad]));
     Inc(Result, Bad);
+
+    { --- every table any handler records an address for -------------------
+      Generated once from the binary and kept by hand since. A new handler
+      adds its line here; a table with no line here is a table whose length
+      nothing checks. }
+    Bad := 0;
+    Swept := 0;
+    Pin('type 14 sprites', ITEM_SPRITE_TABLE_ADDR, 8, @ITEM_SPRITES[0][0], 8);
+    Pin('type 24 sprites', ITEM24_TABLE_ADDR, 16, @ITEM24_SPRITES[0], 16);
+    Pin('type 24 beat', ITEM24_BEAT_ADDR, 2, @ITEM24_BEAT_SPRITES[0], 2);
+    Pin('type 25 sprites', ITEM25_TABLE_ADDR, 3, @ITEM25_SPRITES[0], 3);
+    Pin('type 27 sprites', SAVE_POINT_ADDR, 2, @SAVE_POINT_SPRITES[0], 2);
+    Pin('drop sprites', DROP_TABLE_ADDR, 2, @DROP_SPRITES[0], 2);
+    Pin('type 2 sprites', T2_TABLE_ADDR, 12, @T2_SPRITES[0][0], 12);
+    Pin('type 3 sprites', T3_TABLE_ADDR, 6, @T3_SPRITES[0][0], 6);
+    Pin('type 4 sprites', T4_TABLE_ADDR, 2, @T4_SPRITES[0], 2);
+    Pin('type 5 sprites', T5_TABLE_ADDR, 4, @T5_SPRITES[0], 4);
+    Pin('type 6 sprites', T6_TABLE_ADDR, 8, @T6_SPRITES[0][0], 8);
+    Pin('type 7 sprites', T7_TABLE_ADDR, 8, @T7_SPRITES[0][0], 8);
+    Pin('type 8 sprites', TYPE8_TABLE_ADDR, 4, @TYPE8_SPRITES[0], 4);
+    PinOne('type 9 sprite', T9_TABLE_ADDR, 1, T9_SPRITE);
+    Pin('type 10 sprites', T10_TABLE_ADDR, 6, @T10_SPRITES[0], 6);
+    Pin('type 11 sprites', T11_TABLE_ADDR, 4, @T11_SPRITES[0], 4);
+    Pin('type 12 sprites', T12_TABLE_ADDR, 4, @T12_SPRITES[0], 4);
+    Pin('type 13 splash', T13_SPLASH_TABLE_ADDR, 3, @T13_SPLASH_SPRITES[0], 3);
+    Pin('type 13 shard 3', T13_SHARD3_TABLE_ADDR, 12,
+        @T13_SHARD3_SPRITES[0], 12);
+    PinOne('type 13 state 2', T13_STATE2_TABLE_ADDR, 2, T13_STATE2_SPRITE);
+    Pin('type 13 shard 4', T13_SHARD4_TABLE_ADDR, 12,
+        @T13_SHARD4_SPRITES[0], 12);
+    PinOne('type 13 state 3', T13_STATE3_TABLE_ADDR, 5, T13_STATE3_SPRITE);
+    Pin('type 15 sprites', T15_TABLE_ADDR, 2, @T15_SPRITES[0], 2);
+    PinOne('type 16 sign', SIGN_SPRITE_ADDR, 1, SIGN_SPRITE);
+    PinOne('type 21 sprite', T21_TABLE_ADDR, 1, T21_SPRITE);
+    PinOne('type 22 sprite', TYPE22_SPRITE_ADDR, 1, TYPE22_SPRITE);
+    PinOne('type 23 sprite', T23_TABLE_ADDR, 1, T23_SPRITE);
+    Pin('type 26 sprites', TYPE26_TABLE_ADDR, 4, @TYPE26_SPRITES[0], 4);
+    Pin('type 28 sprites', T28_TABLE_ADDR, 4, @T28_SPRITES[0], 4);
+    Pin('type 29 sprites', T29_TABLE_ADDR, 4, @T29_SPRITES[0], 4);
+    Pin('type 30 sprites', T30_TABLE_ADDR, 4, @T30_SPRITES[0][0], 4);
+    Pin('type 31 sprites', T31_TABLE_ADDR, 5, @T31_SPRITES[0], 5);
+    Pin('type 31 hp bonus', T31_HP_BONUS_ADDR, 3, @T31_HP_BONUS[0], 3);
+    Pin('type 31 wait', T31_WAIT_ADDR, 3, @T31_WAIT[0], 3);
+    Pin('type 31 rate', T31_RATE_ADDR, 3, @T31_RATE[0], 3);
+    Pin('type 33 sprites', BOOM_TABLE_ADDR, 6, @BOOM_SPRITES[0], 6);
+    Pin('type 34 sprites', T34_TABLE_ADDR, 5, @T34_SPRITES[0], 5);
+    Pin('type 34 rate', T34_RATE_ADDR, 3, @T34_RATE[0], 3);
+    Pin('type 35 sprites', T35_TABLE_ADDR, 8, @T35_SPRITES[0], 8);
+    { six ints, five reachable - the sixth is behind a mod 5 }
+    Pin('type 37 sprites', T37_TABLE_ADDR, 6, @T37_SPRITES[0], T37_FRAMES);
+    Pin('type 38 sprites', T38_TABLE_ADDR, 8, @T38_SPRITES[0][0], 8);
+    Pin('type 38 wait', T38_WAIT_ADDR, 3, @T38_WAIT[0], 3);
+    Pin('type 39 sprites', T39_TABLE_ADDR, 10, @T39_SPRITES[0], 10);
+    Pin('type 39 speed', T39_SPEED_ADDR, 3, @T39_SPEED[0], 3);
+    Pin('type 39 wind', T39_WIND_ADDR, 3, @T39_WIND[0], 3);
+    Pin('type 40 sprites', T40_TABLE_ADDR, 8, @T40_SPRITES[0][0], 8);
+    Pin('type 40 cooldown', T40_COOLDOWN_ADDR, 3, @T40_COOLDOWN[0], 3);
+    Pin('type 41 sprites', T41_TABLE_ADDR, 6, @T41_SPRITES[0], 6);
+    Pin('type 41 wait', T41_WAIT_ADDR, 3, @T41_WAIT[0], 3);
+    Pin('type 42 rise len', T42_RISE_LEN_ADDR, 3, @T42_RISE_LEN[0], 3);
+    Pin('type 42 recover', T42_RECOVER_ADDR, 3, @T42_RECOVER[0], 3);
+    Pin('type 42 shots', T42_SHOTS_ADDR, 3, @T42_SHOTS[0], 3);
+    Pin('type 42 hp bonus', T42_HP_BONUS_ADDR, 3, @T42_HP_BONUS[0], 3);
+    Pin('type 42 sprites', T42_TABLE_ADDR, 7, @T42_SPRITES[0], 7);
+    Pin('type 42 angles', T42_ANGLES_ADDR, 6, @T42_ANGLES[0], 6);
+    Pin('type 43 sprites', T43_TABLE_ADDR, 4, @T43_SPRITES[0], 4);
+    Pin('type 44 sprites', T44_TABLE_ADDR, 8, @T44_SPRITES[0], 8);
+    Pin('type 45 sprites', T45_TABLE_ADDR, 5, @T45_SPRITES[0], 5);
+    Pin('type 45 tough', T45_TOUGH_ADDR, 3, @T45_TOUGH[0], 3);
+    Pin('type 46 sprites', T46_TABLE_ADDR, 5, @T46_SPRITES[0], 5);
+    Pin('type 46 range', T46_RANGE_ADDR, 3, @T46_RANGE[0], 3);
+    Pin('type 46 turn', T46_TURN_ADDR, 3, @T46_TURN[0], 3);
+    Pin('type 46 speed', T46_SPEED_ADDR, 3, @T46_SPEED[0], 3);
+    Pin('type 47 sprites', T47_TABLE_ADDR, 5, @T47_SPRITES[0], 5);
+    Pin('type 47 wait', T47_WAIT_ADDR, 3, @T47_WAIT[0], 3);
+    Pin('type 47 rest', T47_REST_ADDR, 3, @T47_REST[0], 3);
+    { four ints, two reachable - the spawn loop counts down from 2 }
+    Pin('type 47 angles', T47_ANGLES_ADDR, 4, @T47_ANGLES[0], 2);
+    Pin('type 48 sprites', T48_TABLE_ADDR, 4, @T48_SPRITES[0], 4);
+    Pin('type 49 sprites', T49_TABLE_ADDR, 4, @T49_SPRITES[0], 4);
+    Pin('type 49 range', T49_RANGE_ADDR, 3, @T49_RANGE[0], 3);
+    Pin('type 49 rest', T49_REST_ADDR, 3, @T49_REST[0], 3);
+    Pin('type 50 sprites', T50_TABLE_ADDR, 6, @T50_SPRITES[0], 6);
+    Pin('type 50 patrol', T50_PATROL_ADDR, 3, @T50_PATROL[0], 3);
+    Pin('type 50 hold', T50_HOLD_ADDR, 3, @T50_HOLD[0], 3);
+    Pin('type 51 sprites', T51_TABLE_ADDR, 4, @T51_SPRITES[0], 4);
+    Pin('type 52 hp', T52_HP_ADDR, 3, @T52_HP[0], 3);
+    Pin('type 52 count', T52_COUNT_ADDR, 3, @T52_COUNT[0], 3);
+    Pin('type 52 speed', T52_SPEED_ADDR, 3, @T52_SPEED[0], 3);
+    Pin('type 52 timing', T52_TIMING_ADDR, 3, @T52_TIMING[0], 3);
+    Pin('type 52 sprites', T52_TABLE_ADDR, 8, @T52_SPRITES[0][0], 8);
+    Pin('type 53 sprites', T53_TABLE_ADDR, 10, @T53_SPRITES[0][0], 10);
+    Pin('type 56 sprites', T56_TABLE_ADDR, 3, @T56_SPRITES[0], 3);
+    Pin('type 56 skew', T56_SKEW_ADDR, 3, @T56_SKEW[0], 3);
+    Pin('type 56 count', T56_COUNT_ADDR, 3, @T56_COUNT[0], 3);
+    Pin('type 56 speed', T56_SPEED_ADDR, 3, @T56_SPEED[0], 3);
+    Pin('type 59 sprites', T59_TABLE_ADDR, 6, @T59_SPRITES[0], 6);
+    Pin('type 59 speed', T59_SPEED_ADDR, 3, @T59_SPEED[0], 3);
+    Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
+    Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
+      [Swept, Bad]));
+    Inc(Result, Bad);
+
+    { A sweep that checked nothing would also report zero wrong. }
+    if Swept < 80 then
+    begin
+      Log.Add('FAILED: the sweep is too small to be the whole set');
+      Inc(Result);
+    end;
+
 
     { And the values, now that the lengths mean something. }
     Bad := 0;

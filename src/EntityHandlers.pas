@@ -72,6 +72,7 @@
       0x0045C608  type 51  a pure chaser
       0x0045CA28  type 53  a charger, by facing
       0x0045CE78  type 56  a trap that bursts when you get near
+      0x0045C678  type 52  a boss: circles, dives twice, then summons
       0x0045D670  type 59  a sleeper that rises, aims once, and flies
 
   And the dispatcher they hang off:
@@ -529,6 +530,10 @@ const
   T31_RISE  = $100;         { 8 px up on spawn }
   T31_DRIFT = $80;          { 4 px left }
 
+  { The table is SIX ints - (222, 223, 224, 225, 226, 222) - but the handler
+    animates `frame := (frame + 1) mod 5`, so the sixth is unreachable. Five is
+    the read count, not the extent; the sweep in --selftest-entities pins the
+    extent separately so the two facts cannot be confused again. }
   T37_FRAMES = 5;  T37_TICKS = 6;
   T37_TABLE_ADDR = $0046BE5C;
   T37_SPRITES: array[0..T37_FRAMES - 1] of Integer = (222, 223, 224, 225, 226);
@@ -923,7 +928,9 @@ const
     often, but they were tuned as separate numbers rather than one.
 
     The angle table it draws from starts with the same (-1, 1, ...) run type
-    42's fan uses, but only the first two entries are read here. }
+    42's fan uses, but only the first two entries are read here - the loop is
+    a `do ... while (--n)` from 2, so the other two ints of the four-int table
+    are unreachable from this handler. }
   T47_FRAMES = 2;  T47_TICKS = 8;
   T47_TABLE_ADDR = $0046C0CC;
   T47_SPRITES: array[0..4] of Integer = (139, 140, 141, 142, 143);
@@ -1142,6 +1149,75 @@ const
   T59_RISE_FRAME = 1;
   T59_HANG_FRAME = 2;
 
+  { --- Type 52, the boss ------------------------------------------------
+    A three-beat cycle: circle, dive, circle, dive, circle, SUMMON, repeat.
+    EF_CHILD_B counts the beats and is what picks which of the two attacks
+    state 2 runs; it resets to 0 after the summon.
+
+      1  hover: a two-frame flap on an eight-tick reload, and a wait whose
+         length is (EF_HP div 40) * 100 plus a difficulty table. The HP term is
+         the interesting half - it is the boss's CURRENT hp, so as you damage
+         it the wait shrinks and it attacks faster. Nothing else in the game
+         paces itself off its own health.
+      2  circle: adds DirVelX(facing) to X and turns SIXTEEN steps a frame, a
+         quarter turn, so it traverses a square rather than a circle
+      3  dive: falls at gravity 2 from -0x20, stops horizontally the moment
+         Entity_TileCollideX reports a solid tile, and lands when VEL_Y passes
+         0x1F
+
+    It REWRITES ITS OWN EF_INSET_PCT_Y - 70 on entering the circle and 20 on
+    entering the dive - which Entity_UpdateAll turns back into a hitbox inset
+    every frame. So the boss is a small target while it circles and a large
+    one while it dives. Type 50 rewrites its own EF_VULN_KIND for a similar
+    reason; these two are the only self-modifying hitboxes so far.
+
+    Its HP table is NEGATIVE on every difficulty - (-30, -20, -10), applied
+    once at spawn. So the type table carries the hard-mode figure and each
+    easier setting subtracts from it, rather than the other way round. Type 50
+    does this too but only on easy.
+
+    Only on HARD does it re-aim before circling; on easy and normal it keeps
+    whatever direction it already had, and a zero is forced to +0x80 so it can
+    never stall.
+
+    The summon spawns type 53 - the charger - 48 pixels ahead and 5 below, and
+    writes the charger's VEL_X itself as sign * DirVelX(0) * a speed table.
+    DirVelX(0) is 32, so the chargers run at 64, 96 or 96. }
+  T52_FRAMES = 2;  T52_TICKS = 8;
+  T52_TABLE_ADDR = $0046C1B0;
+  T52_SPRITES: array[0..1, 0..3] of Integer =
+    ((500, 501, 502, 506),        { going left  }
+     (503, 504, 505, 507));       { going right }
+  T52_HP_ADDR     = $0046C180;
+  T52_TIMING_ADDR = $0046C1A4;
+  T52_COUNT_ADDR  = $0046C18C;
+  T52_SPEED_ADDR  = $0046C198;
+  T52_HP:     array[0..2] of Integer = (-30, -20, -10);  { all negative }
+  T52_TIMING: array[0..2] of Integer = (120, 60, 30);
+  T52_COUNT:  array[0..2] of Integer = (2, 3, 4);
+  T52_SPEED:  array[0..2] of Integer = (2, 3, 3);
+  T52_ENTRY_DROP = $1E0;    { it starts by falling into view }
+  T52_ENTRY_VX = -$80;
+  T52_HP_PACE_DIV = $28;    { hp div 40 ... }
+  T52_HP_PACE_MUL = 100;    { ... times 100, added to the wait }
+  T52_INSET_CIRCLE = 70;    { a small target while it circles ... }
+  T52_INSET_DIVE = 20;      { ... and a large one while it dives }
+  T52_CIRCLE_FRAME = 2;
+  T52_DIVE_FRAME = 3;
+  T52_TURN_STEP = $10;      { a quarter turn per frame }
+  T52_CIRCLE_TICKS = $3C;
+  T52_DIVE_VY = -$20;
+  T52_GRAVITY = 2;
+  T52_LAND_VY = $1F;
+  T52_CHARGE_VX = $80;      { forced when the aim comes out zero }
+  T52_SUMMON_BEAT = 3;      { the beat on which it summons instead of diving }
+  T52_MINION_TYPE = $35;    { 53, the charger }
+  T52_MINION_AHEAD = $600;  { 48 px }
+  T52_MINION_BELOW = $A0;   { 5 px }
+  T52_SND_SUMMON = $24;
+  T52_SND_SPAWN  = $25;
+  T52_SND_LAND   = 4;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1174,8 +1250,14 @@ const
   TYPE26_LIFT       = $10;  { 16 sub-pixels a frame, straight up }
   TYPE26_LIFETIME   = $1E;  { destroyed when the count EXCEEDS 30 }
   TYPE26_TABLE_ADDR = $0046BE14;
-  TYPE26_VARIANTS   = 2;    { only 0 and 1 are ever spawned }
-  TYPE26_SPRITES: array[0..TYPE26_VARIANTS - 1] of Integer = (83, 99);
+  { The handler indexes this by EF_VARIANT with NO bound check, so all four
+    entries are reachable even though the shipped data only ever spawns 0 and
+    1. It was recorded here as two - the observed use - until the table sweep
+    in --selftest-entities pinned the extent at four from the next table's
+    start. Recorded at its extent now, which is what the binary holds. }
+  TYPE26_VARIANTS   = 4;
+  TYPE26_SPRITES: array[0..TYPE26_VARIANTS - 1] of Integer =
+    (83, 99, 102, 103);
 
   { --- Types 16 and 22, the one-sprite entities -------------------------
     Two of the shortest handlers in the game. Each writes ONE anim id and
@@ -1396,6 +1478,10 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045C678. The boss: circle, dive, dive, summon. See the T52_ block. }
+procedure EntityUpdate_Type52(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
 procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
@@ -2190,6 +2276,148 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type52(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Sign, Slot, PlayerX: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T52_SPRITES[0])) then
+    Frame := 0;
+  { By the SIGN, two ifs and no else, so a stalled one keeps its sprite. }
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T52_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T52_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  PlayerX := World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X);
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    { Negative on every difficulty - the type table holds the hard figure. }
+    Inc(E.Raw[EF_HP], T52_HP[D]);
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T52_ENTRY_DROP);
+    E.Raw[EF_VEL_X] := T52_ENTRY_VX;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T52_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T52_FRAMES;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    { Paced off its OWN health: the more you have hurt it, the sooner. }
+    if (E.Raw[EF_HP] div T52_HP_PACE_DIV) * T52_HP_PACE_MUL + T52_TIMING[D]
+       < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_INSET_PCT_Y] := T52_INSET_CIRCLE;
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      Inc(E.Raw[EF_CHILD_B]);
+      if E.Raw[EF_CHILD_B] = T52_SUMMON_BEAT then
+        World.PlaySound(T52_SND_SUMMON);
+      { Only HARD re-aims. }
+      if D = 2 then
+        E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX) shl 7;
+      if E.Raw[EF_VEL_X] = 0 then
+        E.Raw[EF_VEL_X] := T52_CHARGE_VX;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]));
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + T52_TURN_STEP) mod DIR_COUNT;
+    E.Raw[EF_FLAG1C] := T52_CIRCLE_FRAME;
+
+    if E.Raw[EF_CHILD_B] < T52_SUMMON_BEAT then
+    begin
+      Inc(E.Raw[EF_CHILD_A]);
+      if E.Raw[EF_CHILD_A] > T52_CIRCLE_TICKS then
+      begin
+        E.Raw[EF_INSET_PCT_Y] := T52_INSET_DIVE;
+        E.Raw[EF_STATE] := 3;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_CHILD_A] := 0;
+        E.Raw[EF_VEL_Y] := T52_DIVE_VY;
+      end;
+    end;
+
+    if E.Raw[EF_CHILD_B] = T52_SUMMON_BEAT then
+    begin
+      Inc(E.Raw[EF_CHILD_A]);
+      if E.Raw[EF_CHILD_A] > T52_TIMING[D] then
+      begin
+        E.Raw[EF_CHILD_A] := 0;
+        Inc(E.Raw[EF_SHOTS]);
+        if E.Raw[EF_SHOTS] <= T52_COUNT[D] - 1 then
+        begin
+          World.PlaySound(T52_SND_SPAWN);
+          Sign := Compare(0, E.Raw[EF_VEL_X]);
+          Slot := World.Spawn(EKIND_MINOR, T52_MINION_TYPE,
+                              Sign * T52_MINION_AHEAD
+                                + E.Raw[EF_POS_X] - POSITION_BIAS
+                                - World.Layer.DeltaX,
+                              E.Raw[EF_POS_Y] - POSITION_BIAS
+                                + T52_MINION_BELOW
+                                - World.Layer.DeltaY);
+          { DirVelX(0) is 32, so the chargers run at 64, 96 or 96. }
+          World.SetSpawnField(Slot, EF_VEL_X,
+                              Compare(0, E.Raw[EF_VEL_X])
+                                * DirVelX(0) * T52_SPEED[D]);
+        end;
+      end;
+
+      if T52_COUNT[D] <= E.Raw[EF_SHOTS] then
+      begin
+        E.Raw[EF_STATE] := 1;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_CHILD_A] := 0;
+        E.Raw[EF_CHILD_B] := 0;
+        E.Raw[EF_SHOTS] := 0;
+        E.Raw[EF_FLAG1C] := 0;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    E.Raw[EF_FLAG1C] := T52_DIVE_FRAME;
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := 0;
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    Inc(E.Raw[EF_VEL_Y], T52_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T52_LAND_VY then
+    begin
+      World.PlaySound(T52_SND_LAND);
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+      E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX) shl 7;
+      if E.Raw[EF_VEL_X] = 0 then
+        E.Raw[EF_VEL_X] := T52_CHARGE_VX;
+      E.Raw[EF_VEL_Y] := 0;
+    end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
 end;
 
 procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
@@ -4739,12 +4967,13 @@ begin
       51: EntityUpdate_Type51(E^, AGameState, World);
       53: EntityUpdate_Type53(E^, AGameState, World);
       56: EntityUpdate_Type56(E^, AGameState, World);
+      52: EntityUpdate_Type52(E^, AGameState, World);
       59: EntityUpdate_Type59(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 26 arms are in HANDLER_ADDR, untranslated }
+      { the other 25 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
