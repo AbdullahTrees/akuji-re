@@ -53,6 +53,9 @@
       0x0045AF2C  type 34  type 31's shot
       0x0045AFA8  type 35  type 31's telegraph - and what moves it to state 4
       0x00459A0C  type 2   the PLAYER'S SHOT
+      0x0045B0CC  type 38  a turret, and the second thing to use a child as
+                           its own state machine
+      0x0045B260  type 39  its shot, which charges before it flies
 
   And the dispatcher they hang off:
 
@@ -603,6 +606,68 @@ const
   T2_SPARKS       = 6;
   T2_SPARK_SPEED_MAX = 2; { Random(2) + 1, so 1..2 - NOT type 33's 1..3 }
 
+  { --- Types 38 and 39, a turret and its shot ---------------------------
+    The same division of labour types 31 and 35 have, and seeing it twice is
+    what makes it a pattern rather than a quirk: the parent holds a state it
+    cannot leave on its own, and the CHILD is what moves it on.
+
+    TYPE 38 faces by its VARIANT - facing is variant shifted left five, so 0
+    is heading 0 and 1 is heading 32, the two opposite directions - and the
+    variant is also its sprite row. Five states:
+
+      0  settle 1 px and take the facing from the variant
+      1  wait, but ONLY while on screen. Entity_IsOffScreen(self, 2) gates the
+         counter, so a turret you cannot see never counts down and never
+         fires. The wait itself is difficulty-keyed: 120, 60 or 30 frames
+      2  wind up, four frames at five ticks
+      3  after 30 more frames, spawn the shot eight direction-steps ahead and
+         0xC0 above, hand it this entity as its owner and its own heading as
+         the shot's velocity, then go to 4
+      4  held. Nothing here leaves it - the shot does
+      5  wind the animation back down and return to 1
+
+    TYPE 39 charges before it flies. In state 0 it plays four frames at a
+    difficulty-keyed rate of 4, 2 or 1 ticks - so on hard it charges four
+    times as fast - and at the end it plays sound 0x19 and, IF ITS OWN HP IS
+    ZERO, puts its owner into state 5. That condition is the interesting one:
+    a shot that still has HP leaves its parent stuck in state 4.
+
+    In state 1 it flies at a difficulty-keyed multiple of its velocity - 2, 2
+    or 3 - looping frames 4..9, and ends either on a wall or after 60 frames.
+    Either way it leaves a type-7 puff with VARIANT 1, which is that type's
+    second sprite row. }
+  T38_VARIANTS = 2;
+  T38_FRAMES = 4;  T38_TICKS = 4;
+  T38_TABLE_ADDR = $0046BF24;
+  T38_SPRITES: array[0..T38_VARIANTS - 1, 0..T38_FRAMES - 1] of Integer =
+    ((110, 111, 112, 113), (106, 107, 108, 109));
+  T38_WAIT_ADDR = $0046BF44;
+  T38_WAIT: array[0..2] of Integer = (120, 60, 30);
+  T38_SETTLE = $20;
+  T38_FACING_SHIFT = 5;      { variant 0 -> heading 0, variant 1 -> heading 32 }
+  T38_OFFSCREEN_MARGIN = 2;
+  T38_FIRE_DELAY = $1E;      { 30 frames after the wind-up }
+  T38_SHOT_TYPE = $27;       { 39 }
+  T38_SHOT_AHEAD = 8;        { direction steps in front }
+  T38_SHOT_LIFT = $C0;
+
+  T39_FRAMES = 10;
+  T39_CHARGE_FRAMES = 4;
+  T39_FLIGHT_FIRST = 4;      { the flight loop is 4..9 }
+  T39_FLIGHT_TICKS = 2;
+  T39_TABLE_ADDR = $0046BF50;
+  T39_SPRITES: array[0..T39_FRAMES - 1] of Integer =
+    (227, 228, 229, 230, 246, 247, 248, 249, 250, 251);
+  T39_WIND_ADDR  = $0046BF84;
+  T39_SPEED_ADDR = $0046BF78;
+  T39_WIND:  array[0..2] of Integer = (4, 2, 1);
+  T39_SPEED: array[0..2] of Integer = (2, 2, 3);
+  T39_LAUNCH_SOUND = $19;
+  T39_OWNER_WIND_DOWN = 5;
+  T39_RANGE = $3C;           { 60 frames }
+  T39_PUFF_TYPE = 7;
+  T39_PUFF_VARIANT = 1;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -852,6 +917,14 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045B0CC. A turret. Waits only while on screen, then fires a type 39. }
+procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045B260. Type 38's shot: charges, then flies. }
+procedure EntityUpdate_Type39(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x00459A0C. The player's shot. See the T2_ block above. }
 procedure EntityUpdate_Type02(var E: TEntity; AGameState: Integer;
@@ -1579,6 +1652,168 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Row, D, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T38_FRAMES) then
+    Frame := 0;
+  Row := E.Raw[EF_VARIANT];
+  if (Row < 0) or (Row >= T38_VARIANTS) then
+    Row := 0;
+  E.Raw[EF_ANIM_ID] := T38_SPRITES[Row][Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T38_SETTLE);
+    { The variant is both the sprite row and the direction. }
+    E.Raw[EF_FACING] := E.Raw[EF_VARIANT] shl T38_FACING_SHIFT;
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    { OFF SCREEN, NO COUNTDOWN. A turret you cannot see never fires. }
+    if not IsOffScreen(E, T38_OFFSCREEN_MARGIN) then
+    begin
+      Inc(E.Raw[EF_CHILD_A]);
+      if E.Raw[EF_CHILD_A] > T38_WAIT[D] then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_CHILD_A] := 0;
+        E.Raw[EF_STATE] := 2;
+        E.Raw[EF_FLAG1C] := 0;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T38_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+    end;
+    if E.Raw[EF_FLAG1C] > T38_FRAMES - 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_FLAG1C] := T38_FRAMES - 1;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T38_FIRE_DELAY then
+    begin
+      Slot := World.Spawn(EKIND_MINOR, T38_SHOT_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS - World.Layer.DeltaX
+                            + DirVelX(E.Raw[EF_FACING]) * T38_SHOT_AHEAD,
+                          E.Raw[EF_POS_Y] - World.Layer.DeltaY - POSITION_BIAS
+                            - T38_SHOT_LIFT);
+      World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+      { The shot's velocity is one direction step, and the speed multiplier is
+        applied at the far end by type 39 itself. }
+      World.SetSpawnField(Slot, EF_VEL_X, DirVelX(E.Raw[EF_FACING]));
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_STATE] := 4;
+    end;
+  end;
+
+  { State 4 is a hold. Type 39 is what leaves it. }
+
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T38_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Dec(E.Raw[EF_FLAG1C]);
+    end;
+    if E.Raw[EF_FLAG1C] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_STATE] := 1;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type39(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T39_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T39_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T39_WIND[D] then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T39_CHARGE_FRAMES - 1 then
+      begin
+        { ONLY a shot with no HP releases its parent. One with HP left leaves
+          the turret stuck in state 4. }
+        if (E.Raw[EF_HP] = 0) and (World.Pool <> nil) then
+          World.Pool.SetField(E.Raw[EF_OWNER], EF_STATE, T39_OWNER_WIND_DOWN);
+        E.Raw[EF_STATE] := 1;
+        World.PlaySound(T39_LAUNCH_SOUND);
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_BLOCK_B] > T39_FLIGHT_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T39_FRAMES - 1 then
+        E.Raw[EF_FLAG1C] := T39_FLIGHT_FIRST;
+    end;
+
+    Inc(E.Raw[EF_POS_X], T39_SPEED[D] * E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], T39_SPEED[D] * E.Raw[EF_VEL_Y]);
+
+    if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+       or (E.Raw[EF_CHILD_A] > T39_RANGE) then
+    begin
+      Slot := World.Spawn(EKIND_MINOR, T39_PUFF_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(Slot, EF_VARIANT, T39_PUFF_VARIANT);
+      World.DestroyEntity(E, False);
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type02(var E: TEntity; AGameState: Integer;
@@ -2818,11 +3053,13 @@ begin
       34: EntityUpdate_Type34(E^, AGameState, World);
       35: EntityUpdate_Type35(E^, AGameState, World);
       37: EntityUpdate_Type37(E^, AGameState, World);
+      38: EntityUpdate_Type38(E^, AGameState, World);
+      39: EntityUpdate_Type39(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 43 arms are in HANDLER_ADDR, untranslated }
+      { the other 41 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
