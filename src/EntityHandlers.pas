@@ -23,6 +23,7 @@
       0x00457880  Entity_PlayerTouch - the dispatcher over all seven kinds
       0x00457AB4  Entity_TakeProjectileHits
       0x0045A5D4  type 32  the invisible emitter
+      0x0045A698  type 33  the explosion it spawns
 
   And the dispatcher they hang off:
 
@@ -208,6 +209,28 @@ const
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
 
+  { --- Type 33, the explosion @ 0x0045A698 ------------------------------
+    Six frames of sprite on a seven-tick cycle, and on its FIRST update it
+    throws out six sparks of type 6.
+
+    Each spark takes one random heading of 64 and is given a velocity from
+    BOTH direction tables at that same index - which is what makes the burst
+    radial rather than axis-aligned, and is the detail an earlier reading of
+    this function already had. The two speed multipliers are drawn
+    SEPARATELY though, so a spark's X and Y speeds are independent: the
+    scatter is an ellipse of random eccentricity, not a circle.
+
+    Its sprite table is six consecutive ids with one reader, and the handler
+    cycles exactly six frames - flush from both directions. }
+  BOOM_FRAMES     = 6;
+  BOOM_TICKS      = 6;    { advance when the count EXCEEDS it, so every 7 }
+  BOOM_TABLE_ADDR = $0046BE3C;
+  BOOM_TABLE_PTR  = $0046CE30;
+  BOOM_SPRITES: array[0..BOOM_FRAMES - 1] of Integer = (93, 94, 95, 96, 97, 98);
+  BOOM_SPARK_TYPE = 6;
+  BOOM_SPARKS     = 6;
+  BOOM_SPEED_MAX  = 3;    { RandomBelow(3) + 1, so 1..3, per axis }
+
   { --- Type 32, the emitter @ 0x0045A5D4 --------------------------------
     An invisible spawner - one of the three types with no sprite - that reads
     its whole configuration out of block A and keeps its state in block B.
@@ -375,6 +398,10 @@ procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
   which only variant 8 has. }
 procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
+
+{ 0x0045A698. The explosion. See BOOM_SPRITES above. }
+procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
+                                        World: TEntityWorld);
 
 { 0x0045A5D4. The invisible emitter. See EMIT_EVERY above for the block-A
   configuration it runs off. }
@@ -940,6 +967,53 @@ begin
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
 end;
 
+procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
+                                        World: TEntityWorld);
+var
+  I, Slot, Facing, Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  { The original indexes unchecked. It cannot actually run past the end - the
+    frame that would do it is the one that destroys the entity, and the sprite
+    is set before that - so this clamp is unreachable rather than corrective. }
+  if (Frame < 0) or (Frame >= BOOM_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := BOOM_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    for I := 1 to BOOM_SPARKS do
+    begin
+      Slot := World.Spawn(EKIND_MINOR, BOOM_SPARK_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 1, 0);
+
+      { One heading, both tables - a radial burst. The two speeds are drawn
+        separately, so the spread is an ellipse rather than a circle. }
+      Facing := World.RandomBelow(DIR_COUNT);
+      World.SetSpawnField(Slot, EF_FACING, Facing);
+      World.SetSpawnField(Slot, EF_VEL_X,
+        (World.RandomBelow(BOOM_SPEED_MAX) + 1) * HalfExtent(DirVelX(Facing)));
+      World.SetSpawnField(Slot, EF_VEL_Y,
+        (World.RandomBelow(BOOM_SPEED_MAX) + 1) * HalfExtent(DirVelY(Facing)));
+    end;
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > BOOM_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+  end;
+  if E.Raw[EF_FLAG1C] > BOOM_FRAMES - 1 then
+    World.DestroyEntity(E, False);
+end;
+
 procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
                                       World: TEntityWorld);
 var
@@ -1168,7 +1242,8 @@ begin
       25: EntityUpdate_Type25(E^);
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
-      { the other 72 arms are in HANDLER_ADDR, untranslated }
+      33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
+      { the other 71 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
