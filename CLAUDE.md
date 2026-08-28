@@ -801,12 +801,45 @@ is worse than none. Four ways it has happened here, all found by mutation:
 build can leave you running the old binary, which makes a live mutation look
 survived — or a restored file look still broken.
 
-What this does **not** cover is game logic behaviour - entity movement,
-collision, scoring. Establishing that needs differential tracing against the
-running original, which has not been set up. A cheap way in when it matters:
-`kbgm32.dll` is an ordinary DLL with 13 named exports, so a logging proxy would
-give exact ground truth for the music layer. It needs a 32-bit toolchain, which
-this machine does not currently have.
+### Tier 0: running the original — `tools/emudiff.py`
+
+There is now a stronger tier than any of the three above, and it should be the
+first thing reached for on game logic: **execute akuji.exe's own machine code
+and diff it against the reconstruction.**
+
+    python tools/emudiff.py [case-set ...]
+
+`ghidra_scripts/EmuDiff.java` calls a function in the original under Delphi's
+`__register` convention and reports EAX; `akuji.exe --emudiff` reads the results
+back, recomputes each case in Pascal, and requires agreement. The spec and the
+results are **one file** — the emulator echoes each input line with its answer
+appended — so the two halves cannot drift apart and a failing case can be re-run
+from its own line.
+
+**This was recorded for a long time as blocked on a 32-bit toolchain, and that
+was wrong.** What needs one is a logging *proxy DLL*, because a 32-bit process
+can only load 32-bit DLLs. *Executing* 32-bit code needs no 32-bit compiler:
+Ghidra ships a p-code emulator and `analyzeHeadless` runs scripts with no GUI.
+The mistake cost real verification strength — check whether a blocker is the
+technique or one *instance* of it.
+
+**The honest boundary.** The emulator models the instruction set, not the
+process: no Windows, no imports, no VCL. A function that calls the RTL or
+touches a handle faults, and is reported as faulted rather than skipped. Leaf
+routines and arithmetic run fine, which is exactly where the risk is. BSS is not
+in the PE, so anything reached through a global has to be written first with a
+`mem=` entry.
+
+Currently 530 cases across `Compare`, `Angle_Between` and
+`Entity_TileEdgeDistX/Y` — 0 disagree. Mutation-checked: dropping the `-1` from
+the right-edge arm makes 96 of 384 disagree, with the original's value printed
+beside the reconstruction's.
+
+For later, not needed now: akuji.exe is i386, ImageBase `0x00400000`, no ASLR,
+relocs intact, so a 32-bit host could map its sections at the preferred base and
+call functions natively — real globals, real x87. Worth doing only if a function
+this project needs turns out to fault under emulation, or if p-code's x87 model
+proves untrustworthy.
 
 ## 14a. Behaviour, and how far it is checked
 

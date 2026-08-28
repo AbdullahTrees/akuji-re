@@ -3801,24 +3801,94 @@ end;
 
 function EmuDiff(Log: TStringList): Integer;
 var
-  Src: TStringList;
-  I, J, Arrow, Addr, Got, Want, Bad, Ran, Skipped: Integer;
-  F: TStringList;
+  Src, F: TStringList;
+  I, J, Arrow, Addr, Got, Want, Bad, Ran, Faulted, NoRef: Integer;
   Line, Name: string;
-  A: array[0..7] of Integer;
-  NArg: Integer;
+  Stk: array[0..7] of Integer;
+  NStk: Integer;
+  E: TEntity;
+  L: TLayerInfo;
 
   function Num(const S: string): Integer;
   begin
     if (Length(S) > 2) and (S[1] = '0') and (LowerCase(S[2]) = 'x') then
       Result := StrToInt('$' + Copy(S, 3, MaxInt))
+    else if (Length(S) > 3) and (S[1] = '-') and (S[2] = '0')
+         and (LowerCase(S[3]) = 'x') then
+      Result := -StrToInt('$' + Copy(S, 4, MaxInt))
     else
       Result := StrToInt(S);
   end;
 
+  { The value of key=... on this line, or Def when it is absent. }
+  function Key(const K: string; Def: Integer): Integer;
+  var
+    N: Integer;
+  begin
+    Result := Def;
+    for N := 0 to F.Count - 1 do
+      if Copy(F[N], 1, Length(K) + 1) = K + '=' then
+      begin
+        Result := Num(Copy(F[N], Length(K) + 2, MaxInt));
+        Exit;
+      end;
+  end;
+
+  procedure ReadStack;
+  var
+    N, P: Integer;
+    V, Part: string;
+  begin
+    NStk := 0;
+    for N := 0 to F.Count - 1 do
+      if Copy(F[N], 1, 4) = 'stk=' then
+      begin
+        V := Copy(F[N], 5, MaxInt);
+        while V <> '' do
+        begin
+          P := Pos(',', V);
+          if P = 0 then
+          begin
+            Part := V;
+            V := '';
+          end
+          else
+          begin
+            Part := Copy(V, 1, P - 1);
+            V := Copy(V, P + 1, MaxInt);
+          end;
+          if (Part <> '') and (NStk <= High(Stk)) then
+          begin
+            Stk[NStk] := Num(Part);
+            Inc(NStk);
+          end;
+        end;
+        Exit;
+      end;
+  end;
+
+  { Rebuild the entity and layer the case was generated from, out of the f.*
+    fields carried on the line. The emulator got the same values as raw bytes;
+    this is the same setup expressed as records. }
+  procedure BuildEntityAndLayer;
+  begin
+    FillChar(E, SizeOf(E), 0);
+    FillChar(L, SizeOf(L), 0);
+    E.Raw[EF_POS_X]    := Key('f.pos', 0);
+    E.Raw[EF_POS_Y]    := Key('f.pos', 0);
+    E.Raw[EF_EXTENT_X] := Key('f.ext', 0);
+    E.Raw[EF_EXTENT_Y] := Key('f.ext', 0);
+    E.Raw[EF_BOX_OFS_X] := Key('f.ofs', 0);
+    E.Raw[EF_BOX_OFS_Y] := Key('f.ofs', 0);
+    L.OriginX := Key('f.ox', 0);
+    L.OriginY := Key('f.oy', 0);
+    L.TileW   := Key('f.tile', 32);
+    L.TileH   := Key('f.tile', 32);
+  end;
+
 begin
   Result := 0;
-  Bad := 0; Ran := 0; Skipped := 0;
+  Bad := 0; Ran := 0; Faulted := 0; NoRef := 0;
   if not FileExists(ParamStr(2)) then
   begin
     Log.Add('FAILED: no emulator output at ' + ParamStr(2));
@@ -3842,50 +3912,53 @@ begin
       F.Delimiter := ' ';
       F.StrictDelimiter := False;
       F.DelimitedText := Line;
+      if (F.Count < 4) or (F[0] <> 'CASE') then
+        Continue;
+
       Arrow := -1;
       for J := 0 to F.Count - 1 do
         if F[J] = '->' then Arrow := J;
-      if (Arrow < 5) then
-      begin
-        Log.Add('  unparsable: ' + Line);
-        Inc(Bad);
+      if Arrow < 0 then
         Continue;
-      end;
       if F[Arrow + 1] = 'FAULT' then
       begin
-        Inc(Skipped);
+        Inc(Faulted);
+        Continue;
+      end;
+      if F[Arrow + 1] = 'BADSPEC' then
+      begin
+        Log.Add('  bad spec line: ' + Line);
+        Inc(Result);
         Continue;
       end;
 
-      Name := F[0];
-      Addr := Num(F[1]);
-      NArg := 0;
-      for J := 2 to Arrow - 1 do
-      begin
-        A[NArg] := Num(F[J]);
-        Inc(NArg);
-        if NArg > High(A) then Break;
-      end;
+      Name := F[1];
+      Addr := Num(F[2]);
+      ReadStack;
       Want := AsSigned(StrToInt64(F[Arrow + 1]));
 
-      { The dispatch. Args arrive in the original's own order: EAX, EDX, ECX,
-        then whatever was pushed, left to right. }
       case Addr of
-        $004513E0:                      { Angle_Between }
-          Got := AngleBetween(A[0], A[1], A[2], A[3]);
-        $0045114C:                      { Compare(a, b) }
+        $004513E0:
+          Got := AngleBetween(Key('eax', 0), Key('edx', 0),
+                              Key('ecx', 0), Stk[0]);
+        $0045114C:
           begin
-            if A[1] < A[0] then Got := -1
-            else if A[0] < A[1] then Got := 1
+            if Key('edx', 0) < Key('eax', 0) then Got := -1
+            else if Key('eax', 0) < Key('edx', 0) then Got := 1
             else Got := 0;
           end;
-        $0045117C:                      { ApproachZero - a var parameter }
+        $00457150:
           begin
-            Got := A[0];
-            ApproachZero(Got, A[1]);
+            BuildEntityAndLayer;
+            Got := TileEdgeDistX(E, L, Key('f.delta', 0));
+          end;
+        $00457228:
+          begin
+            BuildEntityAndLayer;
+            Got := TileEdgeDistY(E, L, Key('f.delta', 0));
           end;
       else
-        Inc(Skipped);
+        Inc(NoRef);
         Continue;
       end;
 
@@ -3893,14 +3966,19 @@ begin
       if Got <> Want then
       begin
         if Bad < 15 then
-          Log.Add(Format('  %-22s original %d, reconstruction %d',
+          Log.Add(Format('  %-26s original %d, reconstruction %d',
             [Name, Want, Got]));
         Inc(Bad);
       end;
     end;
 
-    Log.Add(Format('%d cases compared, %d disagree  (%d skipped: no Pascal '
-      + 'counterpart, or the emulator faulted)', [Ran, Bad, Skipped]));
+    Log.Add(Format('%d cases compared, %d disagree', [Ran, Bad]));
+    if Faulted > 0 then
+      Log.Add(Format('%d faulted in the emulator - it models the instruction '
+        + 'set, not the process', [Faulted]));
+    if NoRef > 0 then
+      Log.Add(Format('%d had no Pascal counterpart to compare against',
+        [NoRef]));
     Inc(Result, Bad);
     if Ran = 0 then
     begin
