@@ -18,6 +18,9 @@
       0x0045A540  type 27  the save point
       0x00458274  Entity_TouchPickup - the Mana Stone
       0x00458490  Entity_TouchHeal
+      0x00458404  Entity_TouchLife
+      0x00458138  Player_TakeDamage
+      0x00457880  Entity_PlayerTouch - the dispatcher over all seven kinds
 
   And the dispatcher they hang off:
 
@@ -160,6 +163,49 @@ const
   PICKUP_FX_LEVELUP = 1;
   PICKUP_FX_HEAL    = 3;
 
+  { --- Entity_PlayerTouch @ 0x00457880 ----------------------------------
+    Seven touch kinds, dispatched after one box test. Three guards come first
+    and all three matter:
+
+      the player must not be invulnerable, UNLESS the kind is 3 - so kind 3
+        reaches through invulnerability where nothing else does
+      the entity's own EF_TIMER must be 0
+      a kind of 0 is not a touch at all
+
+    Opcode 1 - "walk up and press" - needs the player STANDING (EF_VEL_Y = 0),
+    Up held, and Inp.AxisYNegative still clear, which is the edge. The latch is
+    set on the frame after, so holding Up does not retrigger.
+
+    The original's return value is a local that is never assigned, so callers
+    read whatever was on the stack. Entity_UpdateAll ignores it, and this is a
+    procedure. }
+  TOUCH_KIND_HURT       = 1;
+  TOUCH_KIND_MANA       = 2;
+  TOUCH_KIND_THRU_INVULN = 3;
+  TOUCH_KIND_LIFE       = 4;
+  TOUCH_KIND_HEAL       = 5;
+  TOUCH_KIND_STOMP      = 6;
+  TOUCH_KIND_HURT_HARD  = 7;
+
+  { --- Player_TakeDamage @ 0x00458138 -----------------------------------
+    Ninety frames of invulnerability, knocked into state 8, thrown up and
+    away from whichever way it is facing.
+
+    The lost-life particles spawn at the HUD LIFE ICON, not at the player:
+    x = Lives * 16 + 20 pixels, y = 16. They are type 13, which the type table
+    marks screen-space, so they do not scroll - the icon is visibly knocked off
+    the display. Three per life lost, and the loop stops early if lives run
+    out before the damage does. }
+  PLAYER_HIT_INVULN = $5A;    { 90 frames, in BOTH timers }
+  PLAYER_HIT_STATE  = 8;      { knockback }
+  PLAYER_HIT_LIFT   = -$40;
+  PLAYER_HIT_PUSH   = $40;
+  PLAYER_HIT_FX     = 8;      { spawned only out of a glide or air dash }
+  SOULS_PER_LIFE    = 3;
+  HUD_LIFE_X0       = 20;     { pixels }
+  HUD_LIFE_STEP     = 16;
+  HUD_LIFE_Y        = 16;
+
   { --- Entity_UpdateDying ------------------------------------------------- }
   DEATH_CLASS_SMALL  = 1;
   DEATH_CLASS_BIG    = 2;
@@ -211,6 +257,20 @@ procedure EntityTouchPickup(var E: TEntity; var P: TPlayerState;
 { 0x00458490. A full heal, and nothing else. }
 procedure EntityTouchHeal(var E: TEntity; var P: TPlayerState;
                           World: TEntityWorld);
+
+{ 0x00458404. The life pickup. Its variant comes from EF_FLAG1C, which is the
+  very field Entity_MaybeDropItem sets from its rarity roll - so a dropped
+  item's rare flag is what decides +1 life against a full refill. }
+procedure EntityTouchLife(var E: TEntity; var P: TPlayerState;
+                          World: TEntityWorld);
+
+{ 0x00458138. The player takes a hit. }
+procedure PlayerTakeDamage(var Player: TEntity; var P: TPlayerState;
+                           Damage: Integer; World: TEntityWorld);
+
+{ 0x00457880. The touch dispatcher. }
+procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
+                      var Inp: TInputState; World: TEntityWorld);
 
 { 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
   which only variant 8 has. }
@@ -282,18 +342,22 @@ const
   TYPE_TOUCH_IN_STATE_3 = $44;   { 68 }
 
 type
-  { Entity_PlayerTouch @ 0x00457880 and Entity_TakeProjectileHits @ 0x00457AB4
-    are not translated yet. The call sites stay where the original has them and
-    dispatch through these, which are nil until the functions exist.
+  { The touch pass. This is a variable rather than a direct call for one
+    reason: --selftest-entities swaps a counting stub in to check the slot
+    boundary and the type-68 special case in isolation. It is NOT a
+    placeholder any more - the initialization section points it at the real
+    PlayerTouch. }
+  TTouchProc = procedure(var E, Player: TEntity; var P: TPlayerState;
+                         var Inp: TInputState; World: TEntityWorld);
 
-    Leaving the calls in place rather than omitting them is what keeps the
-    omission visible - and it also makes the dispatcher testable on its own: a
-    counting stub installed here is how --selftest-entities checks the slot
-    boundary and the type-68 special case without needing either function. }
+  { Entity_TakeProjectileHits @ 0x00457AB4 is still not translated. Its call
+    site stays where the original has it and dispatches through this, which is
+    nil until the function exists - leaving the call in place rather than
+    omitting it is what keeps the omission visible. }
   TEntityCallback = procedure(var E: TEntity; World: TEntityWorld);
 
 var
-  EntityPlayerTouch:        TEntityCallback = nil;
+  EntityPlayerTouch:        TTouchProc = nil;
   EntityTakeProjectileHits: TEntityCallback = nil;
 
 { 0x004608BC. Walks slots 0..$FF - not the whole pool, see ENTITY_UPDATE_COUNT -
@@ -466,6 +530,109 @@ begin
   Slot := PickupCommon(E, World);
   World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_HEAL);
   World.DestroyEntity(E, False);
+end;
+
+procedure EntityTouchLife(var E: TEntity; var P: TPlayerState;
+                          World: TEntityWorld);
+var
+  Slot, Variant: Integer;
+begin
+  { EF_FLAG1C, not EF_VARIANT - the field a dropped item carries its rarity in. }
+  Variant := E.Raw[EF_FLAG1C];
+  if Variant = 0 then
+    Inc(P.Lives)
+  else if Variant = 1 then
+    P.Lives := P.MaxLives;
+  { Note there is no clamp on the +1 path. Lives can exceed MaxLives here and
+    the original does not stop it; whatever bounds it does so elsewhere. }
+  World.PlaySound(SND_GET01);
+  Slot := PickupCommon(E, World);
+  World.SetSpawnField(Slot, EF_VARIANT, Variant + 2);
+  World.DestroyEntity(E, False);
+end;
+
+procedure PlayerTakeDamage(var Player: TEntity; var P: TPlayerState;
+                           Damage: Integer; World: TEntityWorld);
+var
+  Left, I, Slot: Integer;
+begin
+  { Being hit out of a glide or an air dash leaves a puff behind. }
+  if (Player.Raw[EF_STATE] = 6) or (Player.Raw[EF_STATE] = 7) then
+    World.Spawn(EKIND_MINOR, PLAYER_HIT_FX,
+                Player.Raw[EF_POS_X] - POSITION_BIAS,
+                Player.Raw[EF_POS_Y] - POSITION_BIAS);
+
+  World.PlaySound(SND_VOICE01);
+  Player.Raw[EF_TIMER] := PLAYER_HIT_INVULN;
+  Player.Raw[EF_DEATH_TIMER] := PLAYER_HIT_INVULN;
+  Player.Raw[EF_STATE] := PLAYER_HIT_STATE;
+  Player.Raw[EF_VEL_Y] := PLAYER_HIT_LIFT;
+  { Thrown backwards relative to the way it faces. }
+  if Player.Raw[EF_FACING] = 0 then
+    Player.Raw[EF_VEL_X] := -PLAYER_HIT_PUSH
+  else
+    Player.Raw[EF_VEL_X] := PLAYER_HIT_PUSH;
+
+  if Damage <= 0 then
+    Exit;
+  Left := Damage;
+  repeat
+    for I := 0 to SOULS_PER_LIFE - 1 do
+    begin
+      { At the HUD icon, in screen space - the life being knocked off. }
+      Slot := World.Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
+                          (P.Lives * HUD_LIFE_STEP + HUD_LIFE_X0) * 32,
+                          HUD_LIFE_Y * 32);
+      World.SetSpawnField(Slot, EF_FACING,
+                          World.RandomBelow(4) + I * 8 + 8);
+      World.SetSpawnField(Slot, EF_VEL_Y,
+                          World.RandomBelow($10) + Abs(1 - I) * $10 - $20);
+    end;
+    Dec(P.Lives);
+    Dec(Left);
+  until (P.Lives = 0) or (Left = 0);
+end;
+
+procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
+                      var Inp: TInputState; World: TEntityWorld);
+var
+  Kind, EventId, Op: Integer;
+begin
+  Kind := E.Raw[EF_TOUCH_KIND];
+  if (Player.Raw[EF_ALIVE] and $FF) = 0 then
+    Exit;
+  { Invulnerability blocks everything except kind 3. }
+  if (Player.Raw[EF_TIMER] <> 0) and (Kind <> TOUCH_KIND_THRU_INVULN) then
+    Exit;
+  if Kind = 0 then
+    Exit;
+  if E.Raw[EF_TIMER] <> 0 then
+    Exit;
+
+  if not EntitiesOverlap(Player, E, 1, 1) then
+    Exit;
+
+  EventId := E.Raw[EF_EVENT_ID];
+  if EventId <> -1 then
+  begin
+    Op := World.EventOpcode(EventId);
+    if (Op = 0)
+    or ((Op = 1) and (Player.Raw[EF_VEL_Y] = 0)
+        and (Inp.AxisY < 0) and (not Inp.AxisYNegative)) then
+      World.BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
+  end;
+
+  case Kind of
+    TOUCH_KIND_HURT:      PlayerTakeDamage(Player, P, 1, World);
+    TOUCH_KIND_MANA:      EntityTouchPickup(E, P, World);
+    TOUCH_KIND_LIFE:      EntityTouchLife(E, P, World);
+    TOUCH_KIND_HEAL:      EntityTouchHeal(E, P, World);
+    TOUCH_KIND_STOMP:
+      { Only while coming DOWN on it - the stomp. }
+      if Player.Raw[EF_VEL_Y] > 0 then
+        E.Raw[EF_STATE] := 2;
+    TOUCH_KIND_HURT_HARD: PlayerTakeDamage(Player, P, 2, World);
+  end;
 end;
 
 procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
@@ -801,7 +968,7 @@ begin
     if (Slot >= SLOT_MINOR_FIRST) and IsAlive(E^) then
     begin
       if Assigned(EntityPlayerTouch) then
-        EntityPlayerTouch(E^, World);
+        EntityPlayerTouch(E^, Pool.Entity(0)^, P, Inp, World);
       if Assigned(EntityTakeProjectileHits) then
         EntityTakeProjectileHits(E^, World);
     end;
@@ -809,7 +976,7 @@ begin
     if (E^.Raw[EF_TYPE] = TYPE_TOUCH_IN_STATE_3) and (E^.Raw[EF_STATE] = 3)
        and IsAlive(E^) then
       if Assigned(EntityPlayerTouch) then
-        EntityPlayerTouch(E^, World);
+        EntityPlayerTouch(E^, Pool.Entity(0)^, P, Inp, World);
 
     { A touch can change the game state - start an event script, kill the
       player - and when it does the original ABANDONS the rest of the pool for
@@ -826,5 +993,10 @@ begin
   end;
 end;
 
+
+initialization
+  { The touch pass is real now. It stays a variable only so a test can put a
+    counting stub in its place. }
+  EntityPlayerTouch := @PlayerTouch;
 
 end.

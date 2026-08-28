@@ -2549,7 +2549,8 @@ var
   TouchAbortAt: Integer;
   EntityTestState: Integer;
 
-procedure CountTouch(var E: TEntity; World: TEntityWorld);
+procedure CountTouch(var E, Player: TEntity; var P: TPlayerState;
+                     var Inp: TInputState; World: TEntityWorld);
 begin
   Inc(TouchCount);
   TouchSlots := TouchSlots + Format('%d ', [E.Raw[EF_SLOT]]);
@@ -4425,7 +4426,8 @@ begin
     end;
 
   finally
-    EntityPlayerTouch := nil;
+    { Put the real one back, not nil - it is the default now. }
+    EntityPlayerTouch := @PlayerTouch;
     EntityTakeProjectileHits := nil;
     S.Free;
     W.Free;
