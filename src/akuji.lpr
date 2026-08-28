@@ -3763,6 +3763,162 @@ begin
 end;
 
 
+{ ---------------------------------------------------------------------------
+  --emudiff <emu-output> : diff the reconstruction against the ORIGINAL.
+
+  This is the verification tier the project did not have. Everything else here
+  checks the reconstruction against EVIDENCE - two readers agreeing, structure
+  that validates itself, mutations that must be caught. None of it can say the
+  Pascal computes what akuji.exe computes. Only running both can.
+
+  The record said that needed a 32-bit toolchain. That was wrong, and the error
+  is worth keeping: what needs one is a logging PROXY DLL, because a 32-bit
+  process can only load 32-bit DLLs. Executing 32-bit code needs no 32-bit
+  compiler - Ghidra ships a p-code emulator and analyzeHeadless runs scripts
+  without a GUI, so the original's own bytes can be run with chosen inputs.
+
+  ghidra_scripts/EmuDiff.java produces a file of
+
+      <name> <hexaddr> <eax> <edx> <ecx> [stack args]  -> <result>
+
+  where the result is what the ORIGINAL returned. This reads that back,
+  recomputes each case with the reconstruction, and requires them to agree.
+  tools/emudiff.py drives both halves.
+
+  WHAT IT CANNOT REACH. The emulator models the instruction set, not the
+  process: no Windows, no imports, no VCL. A function that calls the RTL or
+  touches a handle faults, and that is an honest boundary rather than a bug.
+  Leaf routines and arithmetic run fine, which is where the risk actually is.
+  --------------------------------------------------------------------------- }
+
+{ Delphi returns in EAX; the emulator reports it as an unsigned 32-bit value. }
+function AsSigned(V: Int64): Integer;
+begin
+  if V > $7FFFFFFF then
+    V := V - $100000000;
+  Result := Integer(V);
+end;
+
+function EmuDiff(Log: TStringList): Integer;
+var
+  Src: TStringList;
+  I, J, Arrow, Addr, Got, Want, Bad, Ran, Skipped: Integer;
+  F: TStringList;
+  Line, Name: string;
+  A: array[0..7] of Integer;
+  NArg: Integer;
+
+  function Num(const S: string): Integer;
+  begin
+    if (Length(S) > 2) and (S[1] = '0') and (LowerCase(S[2]) = 'x') then
+      Result := StrToInt('$' + Copy(S, 3, MaxInt))
+    else
+      Result := StrToInt(S);
+  end;
+
+begin
+  Result := 0;
+  Bad := 0; Ran := 0; Skipped := 0;
+  if not FileExists(ParamStr(2)) then
+  begin
+    Log.Add('FAILED: no emulator output at ' + ParamStr(2));
+    Exit(1);
+  end;
+
+  Src := TStringList.Create;
+  F := TStringList.Create;
+  try
+    Src.LoadFromFile(ParamStr(2));
+    Log.Add('=== the reconstruction against the original ===');
+    Log.Add('');
+
+    for I := 0 to Src.Count - 1 do
+    begin
+      Line := Trim(Src[I]);
+      if (Line = '') or (Line[1] = '#') then
+        Continue;
+
+      F.Clear;
+      F.Delimiter := ' ';
+      F.StrictDelimiter := False;
+      F.DelimitedText := Line;
+      Arrow := -1;
+      for J := 0 to F.Count - 1 do
+        if F[J] = '->' then Arrow := J;
+      if (Arrow < 5) then
+      begin
+        Log.Add('  unparsable: ' + Line);
+        Inc(Bad);
+        Continue;
+      end;
+      if F[Arrow + 1] = 'FAULT' then
+      begin
+        Inc(Skipped);
+        Continue;
+      end;
+
+      Name := F[0];
+      Addr := Num(F[1]);
+      NArg := 0;
+      for J := 2 to Arrow - 1 do
+      begin
+        A[NArg] := Num(F[J]);
+        Inc(NArg);
+        if NArg > High(A) then Break;
+      end;
+      Want := AsSigned(StrToInt64(F[Arrow + 1]));
+
+      { The dispatch. Args arrive in the original's own order: EAX, EDX, ECX,
+        then whatever was pushed, left to right. }
+      case Addr of
+        $004513E0:                      { Angle_Between }
+          Got := AngleBetween(A[0], A[1], A[2], A[3]);
+        $0045114C:                      { Compare(a, b) }
+          begin
+            if A[1] < A[0] then Got := -1
+            else if A[0] < A[1] then Got := 1
+            else Got := 0;
+          end;
+        $0045117C:                      { ApproachZero - a var parameter }
+          begin
+            Got := A[0];
+            ApproachZero(Got, A[1]);
+          end;
+      else
+        Inc(Skipped);
+        Continue;
+      end;
+
+      Inc(Ran);
+      if Got <> Want then
+      begin
+        if Bad < 15 then
+          Log.Add(Format('  %-22s original %d, reconstruction %d',
+            [Name, Want, Got]));
+        Inc(Bad);
+      end;
+    end;
+
+    Log.Add(Format('%d cases compared, %d disagree  (%d skipped: no Pascal '
+      + 'counterpart, or the emulator faulted)', [Ran, Bad, Skipped]));
+    Inc(Result, Bad);
+    if Ran = 0 then
+    begin
+      Log.Add('FAILED: nothing was actually compared');
+      Inc(Result);
+    end;
+  finally
+    F.Free;
+    Src.Free;
+  end;
+
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - the reconstruction agrees with akuji.exe on every case run')
+  else
+    Log.Add('FAILED');
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -3795,6 +3951,8 @@ begin
         Result := SelfTestTrace(Log)
       else if ParamStr(1) = '--selftest-entities' then
         Result := SelfTestEntities(Log)
+      else if ParamStr(1) = '--emudiff' then
+        Result := EmuDiff(Log)
       else
         Result := SelfTestArchive(Log);
     except
@@ -3820,7 +3978,8 @@ begin
      (ParamStr(1) = '--selftest-stages') or
      (ParamStr(1) = '--selftest-player') or
      (ParamStr(1) = '--selftest-trace') or
-     (ParamStr(1) = '--selftest-entities') then
+     (ParamStr(1) = '--selftest-entities') or
+     (ParamStr(1) = '--emudiff') then
   begin
     ExitCode := RunSelfTest;
     Exit;
