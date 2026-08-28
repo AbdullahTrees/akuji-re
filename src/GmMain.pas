@@ -22,7 +22,8 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState;
+  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
+  Entities, GameSession, SpritePool;
 
 type
   TFrm_main = class(TForm)
@@ -32,6 +33,7 @@ type
     DDSD1: TDDSD;
     procedure FormDestroy(Sender: TObject);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure DDDD1Init(Sender: TObject);
     procedure TitleSound(Index: Integer);
   private
@@ -46,7 +48,11 @@ type
     FStages: TStageTable;
     FMap: TTileMap;
     FStageLoaded: Integer;
-    FPlayer: TPlayerState;
+    FStartHost: TStartHost;
+    { The running game. Everything that used to be inlined here - the player
+      state, the camera, the entity pool, the events - lives in it now, so
+      FPlayer below is gone and FSession.Player is the one copy. }
+    FSession: TGameSession;
     FDataDir: string;
     FMoveY: Integer;
     FMoveX: Integer;
@@ -62,6 +68,7 @@ type
     procedure PollInput;
     procedure DispatchState;
     procedure FormPaint(Sender: TObject);
+    procedure DrawScene;
   end;
 
 var
@@ -136,6 +143,15 @@ begin
     FMap := TTileMap.Create;
     FStageLoaded := -1;
 
+    { The running game. It borrows the stage table and the map; the form keeps
+      owning both, and the surfaces and sprite sheets with them. }
+    FSession := TGameSession.Create(DataDir, FStages, FMap);
+    { Game_StartOrLoad's presentation hooks. The base class does nothing,
+      which is right until Opening_Update and the playlist are translated -
+      an opening that never runs is a cutscene that finishes instantly, and
+      that is a truthful stub rather than a skipped step. }
+    FStartHost := TStartHost.Create;
+
     Sheet := FSurfaces[0];
     if Sheet <> nil then
       FFont := TGameFont.Create(Sheet);
@@ -208,11 +224,56 @@ begin
 end;
 
 { Step 2-3: the original polled Joy through one of three device paths chosen by
-  Settings+0x34, then read 4 buttons through p_KeyMap. Key state currently
-  arrives from FormKeyDown instead. }
+  Settings+0x34, then read 4 buttons through p_KeyMap into p_InputState+0x1C.
+
+  The axes are the two-key form the original's are: left and right both held
+  cancel to zero rather than one winning, which is what a real d-pad does and
+  what the controller's double-tap window assumes. }
 procedure TFrm_main.PollInput;
+var
+  I: Integer;
 begin
   Joy.Update;
+
+  { The previous frame's buttons become the latch, which is what turns a held
+    key into an edge. Player_Update reads both. }
+  for I := 0 to 3 do
+    FSession.Input.ButtonLatch[I] := FSession.Input.Button[I];
+
+  FSession.Input.AxisX := Ord(Joy.IsDown(abRight)) - Ord(Joy.IsDown(abLeft));
+  FSession.Input.AxisY := Ord(Joy.IsDown(abDown)) - Ord(Joy.IsDown(abUp));
+  FSession.Input.Moving := (FSession.Input.AxisX <> 0)
+                           or (FSession.Input.AxisY <> 0);
+
+  FSession.Input.Button[0] := Joy.IsDown(abAction1);
+  FSession.Input.Button[1] := Joy.IsDown(abAction2);
+  FSession.Input.Button[2] := Joy.IsDown(abAction3);
+  FSession.Input.Button[3] := Joy.IsDown(abAux1);
+
+  { The double-tap window. Player_Update opens it and this counts it down. }
+  if FSession.Input.HoldTimer > 0 then
+  begin
+    Dec(FSession.Input.HoldTimer);
+    if FSession.Input.HoldTimer = 0 then
+    begin
+      FSession.Input.HeldX := 0;
+      FSession.Input.HeldY := 0;
+    end;
+  end;
+end;
+
+{ The map, then the sprites, then the HUD. The camera is the session's layer
+  origin, not the player state's ScrollX/Y - those are only the value the
+  stage STARTED at, and reading them here is why the view never scrolled. }
+procedure TFrm_main.DrawScene;
+begin
+  if (FMap <> nil) and (FStages <> nil) then
+    FMap.Draw(DDDD1.Canvas, FSurfaces,
+              FStages.SurfaceSet[Settings.CurrentStage],
+              PixelOf(FSession.Layer.OriginX), PixelOf(FSession.Layer.OriginY),
+              SCREEN_W, SCREEN_H);
+  FSession.Sprites.DrawAll(DDDD1.Canvas, FSurfaces);
+  DrawHud;
 end;
 
 { Load_Stage_Assets @ 0x00465A1C. The record's rec[0] selects the surface set,
@@ -291,16 +352,16 @@ begin
     DDDD1.DrawSprite(Sheet, 7, $12, Rect($60, 0, $74, 10));
 
   Target := 0;
-  if (FPlayer.TargetIndex >= 0) and
-     (FPlayer.TargetIndex <= High(COUNTER_TARGETS)) then
-    Target := COUNTER_TARGETS[FPlayer.TargetIndex];
+  if (FSession.Player.TargetIndex >= 0) and
+     (FSession.Player.TargetIndex <= High(COUNTER_TARGETS)) then
+    Target := COUNTER_TARGETS[FSession.Player.TargetIndex];
   FFont.TextOut(DDDD1.Canvas, 8, $20,
-    '@ ' + Format('%3d/%-3d', [FPlayer.Counter, Target]), 0);
+    '@ ' + Format('%3d/%-3d', [FSession.Player.Counter, Target]), 0);
 
   { Variant 2 for the label, 0 for the digits - the original passes exactly
     these as Game_DrawText's fifth argument. }
   FFont.TextOut(DDDD1.Canvas, $D0, $E0, 'TIME', 2);
-  Secs := FPlayer.ElapsedSec;
+  Secs := FSession.Player.ElapsedSec;
   FFont.TextOut(DDDD1.Canvas, $F8, $E0,
     Format('%.2d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]), 0);
 
@@ -316,18 +377,18 @@ begin
 
   { The original clamps the stored lives here rather than at the point of
     damage, so a corrupt save is corrected by drawing the HUD. }
-  if FPlayer.Lives < 0 then
-    FPlayer.Lives := 0;
-  if FPlayer.MaxLives < FPlayer.Lives then
-    FPlayer.Lives := FPlayer.MaxLives;
+  if FSession.Player.Lives < 0 then
+    FSession.Player.Lives := 0;
+  if FSession.Player.MaxLives < FSession.Player.Lives then
+    FSession.Player.Lives := FSession.Player.MaxLives;
 
   if Sheet = nil then Exit;
   { Lit icons run 1..Lives, unlit ones Lives+1..MaxLives, both at i*0x10 + 9. }
-  for I := 1 to FPlayer.Lives do
+  for I := 1 to FSession.Player.Lives do
     DDDD1.DrawSprite(Sheet, I * LIFE_ICON_STEP + 9, LIFE_ICON_Y,
       Rect(FLifeAnimX + LIFE_ICON_X0, 0,
            FLifeAnimX + LIFE_ICON_X0 + LIFE_ICON_W, LIFE_ICON_H));
-  for I := FPlayer.Lives + 1 to FPlayer.MaxLives do
+  for I := FSession.Player.Lives + 1 to FSession.Player.MaxLives do
     DDDD1.DrawSprite(Sheet, I * LIFE_ICON_STEP + 9, LIFE_ICON_Y,
       Rect(LIFE_ICON_X0, 0, LIFE_ICON_X0 + LIFE_ICON_W, LIFE_ICON_H));
 end;
@@ -341,6 +402,8 @@ end;
 
 { Step 5: the state machine. Values and handler addresses in GameState.pas. }
 procedure TFrm_main.DispatchState;
+var
+  Mode: TStartMode;
 begin
   case GameStateValue of
     GS_TITLE_INIT:
@@ -380,42 +443,43 @@ begin
       end;
     GS_STAGE_BEGIN:
       begin
-        { Original: GameState_Reset, Load_Stage_Assets(Settings.CurrentStage),
-          spawn the player, then move to GS_PLAY. }
+        { Stage_Begin @ 0x00462210. The ASSETS are the form's - it owns the
+          surfaces and the sprite sheets - and everything after them is the
+          session's: terrain, events, camera, and the player entity. The
+          order is the original's and it matters, because the session reads
+          the map and the frames the load has just replaced. }
         LoadStage(Settings.CurrentStage);
-        GameStateValue := GS_PLAY;
+        FSession.SetFrames(FSprites);
+        FSession.BeginStage(Settings.CurrentStage, GameStateValue);
       end;
     GS_PLAYER_INIT:
       begin
-        { Game_StartOrLoad 0x00462F40. Sub-mode 0 is NEW GAME, 1 is CONTINUE.
-          The original also runs the opening cutscene here on a new game and
-          only proceeds once it finishes; that is not translated yet. }
+        { Game_StartOrLoad @ 0x00462F40. This used to be an inlined
+          approximation - load the save or start fresh, then go. The real one
+          is in PlayerState.pas and does considerably more: the settings
+          unlocks, the music, the session flags AFTER the load, and the
+          opening cutscene gate on a new game. }
         if FTitleScreen.SubMode = 1 then
-        begin
-          if LoadSave(FPlayer, FDataDir + 'data' + PathDelim + 'save.dat') then
-            Settings.CurrentStage := FPlayer.SavedStage
-          else
-            InitNewGame(FPlayer, Settings.GameLevel);
-        end
+          Mode := smContinue
         else
-        begin
-          InitNewGame(FPlayer, Settings.GameLevel);
-          Settings.CurrentStage := 1;
-        end;
-        GameStateValue := GS_STAGE_BEGIN;
+          Mode := smNewGame;
+        GameStartOrLoad(FSession.Player, Settings, Mode, FStartHost, True,
+                        FDataDir + 'data' + PathDelim + 'save.dat',
+                        GameStateValue);
       end;
     GS_PLAY,
     GS_PLAY_ALT,
     GS_STATE_140:
       begin
-        { TODO the real update. Rendering the map proves the stage pipeline:
-          stage.dat -> surface set -> map layer -> tiles on screen. }
-        { Scroll position comes from the player state, as in the original. }
-        FMap.Draw(DDDD1.Canvas, FSurfaces, FStages.SurfaceSet[Settings.CurrentStage],
-                  FPlayer.ScrollX, FPlayer.ScrollY, SCREEN_W, SCREEN_H);
-        DrawHud;
+        FSession.Frame(GameStateValue);
+        DrawScene;
       end;
-    GS_PAUSE:       ;  { TODO PauseMenu_Update      0x00461EE4 }
+    GS_PAUSE:
+      { PauseMenu_Update @ 0x00461EE4 is not translated. What IS wrong to do
+        is nothing at all: the frame is cleared at the top of every AppIdle,
+        so a state that paints nothing leaves a black screen - which is what
+        pausing looked like. Redraw the frozen scene and step no logic. }
+      DrawScene;
     GS_OPENING:     ;  { TODO Opening_Update       0x00463154 }
     GS_QUIT:
       begin
@@ -485,6 +549,16 @@ begin
   Joy.KeyDown(Key);
 end;
 
+{ There was no OnKeyUp at all, so Joy.Down only ever gained bits and a key
+  pressed once stayed down for the rest of the session. That did not show
+  while nothing read Joy.Down; the moment the controller did, it would have
+  meant walking right forever. }
+procedure TFrm_main.FormKeyUp(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  Joy.KeyUp(Key);
+end;
+
 { ---------------------------------------------------------------------------
   FormDestroy @ 0x00466644 - which is really the settings writer.
 
@@ -504,6 +578,8 @@ begin
     SaveSettings(FDataDir);
   FFont.Free;
   FTitleScreen.Free;
+  FSession.Free;
+  FStartHost.Free;
   FMap.Free;
   FStages.Free;
   FSprites.Free;
