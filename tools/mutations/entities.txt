@@ -249,3 +249,37 @@ src/EntityHandlers.pas
       25: EntityUpdate_Type25(E^);
 --->
       25: EntityUpdate_Type14(E^, AGameState);
+===
+the save point's table is off by one int
+src/EntityHandlers.pas
+---
+  SAVE_POINT_ADDR   = $0046BE24;
+--->
+  SAVE_POINT_ADDR   = $0046BE28;
+===
+the save point animates one frame faster
+src/EntityHandlers.pas
+---
+  SAVE_POINT_TICKS  = 8;   { advance when the count EXCEEDS it, so every 9 }
+--->
+  SAVE_POINT_TICKS  = 7;   { advance when the count EXCEEDS it, so every 9 }
+===
+the save point animates while the game is paused
+src/EntityHandlers.pas
+---
+  E.Raw[EF_ANIM_ID] := SAVE_POINT_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+--->
+  E.Raw[EF_ANIM_ID] := SAVE_POINT_SPRITES[Frame];
+
+  if AGameState = -1 then
+    Exit;
+===
+the save point is dispatched to the wrong handler
+src/EntityHandlers.pas
+---
+      27: EntityUpdate_Type27(E^, AGameState);
+--->
+      27: EntityUpdate_Type14(E^, AGameState);

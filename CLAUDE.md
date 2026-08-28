@@ -672,6 +672,19 @@ self-tests write `src/selftest.log` and print nothing to stdout. Check the log
 then `$?` is the pipe's status, not the program's. That mistake made a failing
 `--selftest` look green.
 
+### Analysis tools in `tools/`
+
+Three of these came out of specific mistakes and are worth reaching for before
+repeating the mistake:
+
+| tool | what it answers |
+|---|---|
+| `table_bounds.py` | **where does this const array END?** Partitions a region by the pointer globals that address it, since Delphi lays typed constants out consecutively. `--ptr X --readers` also counts code references — one reader means no other caller can need more rows. Written after a table was recorded at 16 rows and turned out to be 2 |
+| `entity_usage.py` | **which types does the shipped data actually place, and with what arguments?** Prioritises the remaining handlers by how much of the game they buy, and cross-checks table lengths: an argument range of exactly 0..N-1 against an N-entry table agrees from both directions. `--paramb` groups by script, which is what identified the save point |
+| `x87_sim.py` | **what would the original's FPU have produced?** Exact rational simulation of an x87 sequence at 64-bit significands. FPC on x86-64 has no 80-bit type, so some integer arithmetic done through the FPU cannot be reproduced with floats at all and has to be modelled in integers; this is the reference that says the model is right, and regenerates the golden table the self-test asserts |
+| `mutate.sh` | section 14 — the mutation harness |
+| `coverage.py` | how much of the game layer has a Pascal counterpart |
+
 Raw disassembly without Ghidra:
 `objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`
 (msys2 at `/c/msys64/mingw64/bin`). Ghidra scripts can be compile-checked with

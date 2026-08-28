@@ -3075,6 +3075,7 @@ begin
     CheckTable('type 24 beat', ITEM24_BEAT_PTR, ITEM24_BEAT_ADDR,
                ITEM24_BEAT_FRAMES);
     CheckTable('type 25', ITEM25_TABLE_PTR, ITEM25_TABLE_ADDR, ITEM25_VARIANTS);
+    CheckTable('type 27', SAVE_POINT_PTR, SAVE_POINT_ADDR, SAVE_POINT_FRAMES);
     Log.Add(Format('four tables, pointer and extent: %d wrong', [Bad]));
     Inc(Result, Bad);
 
@@ -3154,6 +3155,34 @@ begin
       end;
     end;
     Log.Add(Format('type 25: %d variants, sprite only', [ITEM25_VARIANTS]));
+
+    { Type 27 alternates two frames every nine, and freezes outside play. }
+    Fresh(0);
+    Frames := '';
+    for I := 1 to 20 do
+    begin
+      EntityUpdate_Type27(E, GS_PLAY);
+      Frames := Frames + Format('%d', [E.Raw[EF_FLAG1C]]);
+    end;
+    Log.Add(Format('type 27 over 20 frames: %s', [Frames]));
+    if Frames <> '00000000111111111000' then
+    begin
+      Log.Add('FAILED: the save point should flip every 9 frames');
+      Inc(Result);
+    end;
+    Fresh(0);
+    for I := 1 to 20 do
+      EntityUpdate_Type27(E, GS_PAUSE);
+    if (E.Raw[EF_FLAG1C] <> 0) or (E.Raw[EF_BLOCK_B] <> 0) then
+    begin
+      Log.Add('FAILED: the save point animated while the game was not in play');
+      Inc(Result);
+    end;
+    if E.Raw[EF_ANIM_ID] <> SAVE_POINT_SPRITES[0] then
+    begin
+      Log.Add('FAILED: the save point should still set its sprite outside play');
+      Inc(Result);
+    end;
 
     { Type 24 bobs, and the bob CLOSES. DIR_COS sums to zero over its 64
       entries, so 64 frames of DirVelY must return the entity to exactly where
@@ -3460,6 +3489,7 @@ begin
     Pool.Entity($21)^.Raw[EF_VARIANT] := 2;
     Place($22, 24, SPRITE_NONE, 160, 120);
     Pool.Entity($22)^.Raw[EF_VARIANT] := 3;
+    Place($23, 27, SPRITE_NONE, 160, 120);
     Run(GS_PLAY);
     Log.Add('');
     Log.Add(Format('dispatch: type 25 var 2 -> sprite %d (want %d), '
@@ -3474,6 +3504,11 @@ begin
     if Pool.Entity($22)^.Raw[EF_ANIM_ID] <> ITEM24_SPRITES[3] then
     begin
       Log.Add('FAILED: the type 24 arm did not reach EntityUpdate_Type24');
+      Inc(Result);
+    end;
+    if Pool.Entity($23)^.Raw[EF_ANIM_ID] <> SAVE_POINT_SPRITES[0] then
+    begin
+      Log.Add('FAILED: the type 27 arm did not reach EntityUpdate_Type27');
       Inc(Result);
     end;
 

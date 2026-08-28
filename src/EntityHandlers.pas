@@ -15,6 +15,7 @@
       0x0045A3E0  type 14  animated pickup
       0x0045A43C  type 24  bobbing pickup, sixteen variants
       0x0045A4F0  type 25  static scenery - the smallest handler in the game
+      0x0045A540  type 27  the save point
 
   And the dispatcher they hang off:
 
@@ -112,6 +113,26 @@ const
   ITEM25_TABLE_PTR  = $0046CF00;
   ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
 
+  { --- Type 27 @ 0x0045A540, the save point -----------------------------
+    Two frames alternating on a nine-frame cycle, and nothing else. The handler
+    does not know it is a save point - what makes it one is the EVENT, and the
+    data says so about as loudly as data can: type 27 appears exactly ONCE in
+    each of 43 stages, always with opcode 1 (touch plus a button), always with
+    no ParamA argument, and with a ParamB that is byte-identical in all 43:
+
+        0000-03-0000 / 0003-13 / 0003-03-0001
+
+    which is: say line 0; then if flag 3 is set, sub-op 13 - SAVE; then say
+    line 1. Forty-three stages, one save point each, the same script every time.
+
+    Its table has one reader and two entries, and the handler cycles the frame
+    mod 2, so the extent is flush from both directions. }
+  SAVE_POINT_FRAMES = 2;
+  SAVE_POINT_ADDR   = $0046BE24;
+  SAVE_POINT_PTR    = $0046D18C;
+  SAVE_POINT_SPRITES: array[0..SAVE_POINT_FRAMES - 1] of Integer = (84, 85);
+  SAVE_POINT_TICKS  = 8;   { advance when the count EXCEEDS it, so every 9 }
+
   { The one-shot drop applied on the first update, in 1/32 pixel - five pixels.
     Events place things on a tile boundary and this settles them onto it. }
   ITEM_SETTLE_DROP = $A0;
@@ -173,6 +194,10 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A4F0. One table lookup. It takes no game state because it does not read
   any - it is the only handler that runs identically whatever the game is doing. }
 procedure EntityUpdate_Type25(var E: TEntity);
+
+{ 0x0045A540. The save point's idle animation. See SAVE_POINT_SPRITES for why
+  it is the save point, which is not visible from this function at all. }
+procedure EntityUpdate_Type27(var E: TEntity; AGameState: Integer);
 
 { ==========================================================================
   Entity_UpdateAll @ 0x004608BC - the per-frame loop over the entity pool.
@@ -420,6 +445,26 @@ begin
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
 end;
 
+procedure EntityUpdate_Type27(var E: TEntity; AGameState: Integer);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= SAVE_POINT_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := SAVE_POINT_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > SAVE_POINT_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod SAVE_POINT_FRAMES;
+  end;
+end;
+
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
 var
   Variant, Frame: Integer;
@@ -591,7 +636,8 @@ begin
       14: EntityUpdate_Type14(E^, AGameState);
       24: EntityUpdate_Type24(E^, AGameState, World);
       25: EntityUpdate_Type25(E^);
-      { the other 74 arms are in HANDLER_ADDR, untranslated }
+      27: EntityUpdate_Type27(E^, AGameState);
+      { the other 73 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
