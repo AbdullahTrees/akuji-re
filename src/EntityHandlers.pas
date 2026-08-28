@@ -25,6 +25,8 @@
       0x0045A5D4  type 32  the invisible emitter
       0x0045A698  type 33  the explosion it spawns
       0x0045A7BC  type 36  the falling item a kill drops
+      0x0045A944  type 16  the sign
+      0x0045AA60  type 22  a one-sprite entity that can die
 
   And the dispatcher they hang off:
 
@@ -229,6 +231,27 @@ const
   DROP_TABLE_PTR    = $0046CE18;
   DROP_SPRITES: array[0..DROP_SPRITE_COUNT - 1] of Integer = (100, 101);
 
+  { --- Types 16 and 22, the one-sprite entities -------------------------
+    Two of the shortest handlers in the game. Each writes ONE anim id and
+    stops; neither animates, and neither reads its own state.
+
+    Their sprite is not a literal - it is the first int of a table, reached
+    through a pointer, exactly as the animated types' tables are. Both tables
+    sit in the same run at 0x0046BE3C onwards:
+
+        0x0046BE74  54   type 16, the sign
+        0x0046BE84  60   type 22
+
+    Only element 0 is ever read, because the handler indexes nothing. That
+    makes the extent of these two tables unknowable from their readers, and
+    unimportant: a single unconditional read cannot run off the end. Recorded
+    rather than guessed at - see tools/table_bounds.py on why a length that
+    nothing pins is not a length. }
+  SIGN_SPRITE       = 54;
+  SIGN_SPRITE_ADDR  = $0046BE74;
+  TYPE22_SPRITE     = 60;
+  TYPE22_SPRITE_ADDR = $0046BE84;
+
   { --- Type 33, the explosion @ 0x0045A698 ------------------------------
     Six frames of sprite on a seven-tick cycle, and on its FIRST update it
     throws out six sparks of type 6.
@@ -422,6 +445,26 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045A944. The sign - what the player reads. Two instructions of
+  substance, and no game-state guard at all: it writes its sprite whether the
+  game is playing, paused or running a script.
+
+  It then computes GameState - GS_PLAY into EAX and returns, which nothing
+  reads - the dispatcher calls every arm as a procedure. That is the tail of a
+  comparison whose branch is gone, and it is left as a comment rather than
+  written as code, the same way Entity_CheckKillTiles's constant False is.
+
+  Until this existed the sign kept the anim id Entity_Spawn gave it, which is
+  the type table's column 0 - and that column is 0 for every type in the game,
+  so an untranslated entity wears sprite 0. Sprite 0 is Akuji standing, which
+  is why the signs looked like the player. }
+procedure EntityUpdate_Type16_Sign(var E: TEntity);
+
+{ 0x0045AA60. One sprite, and it can die - the only difference from the sign
+  is the Entity_UpdateDying call, whose result this one also discards. }
+procedure EntityUpdate_Type22(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045A698. The explosion. See BOOM_SPRITES above. }
 procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
@@ -1023,6 +1066,19 @@ begin
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
 end;
 
+procedure EntityUpdate_Type16_Sign(var E: TEntity);
+begin
+  E.Raw[EF_ANIM_ID] := SIGN_SPRITE;
+end;
+
+procedure EntityUpdate_Type22(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+begin
+  E.Raw[EF_ANIM_ID] := TYPE22_SPRITE;
+  { The original ignores what this answers, so this does too. }
+  EntityUpdateDying(E, AGameState, World);
+end;
+
 procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
                                         World: TEntityWorld);
 var
@@ -1299,8 +1355,10 @@ begin
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
       33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
+      16: EntityUpdate_Type16_Sign(E^);
+      22: EntityUpdate_Type22(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 70 arms are in HANDLER_ADDR, untranslated }
+      { the other 68 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

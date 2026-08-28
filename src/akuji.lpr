@@ -6741,6 +6741,27 @@ begin
     Want(S.Pool.Field(0, EF_EXTENT_X) > 0,
          'the player has zero width - Entity_UpdateAll is not reading the '
          + 'sprite');
+
+    { A translated handler gives its entity a sprite of its own. An
+      UNtranslated one leaves the anim id Entity_Spawn wrote, which is the
+      type table's column 0 - and that column is 0 for all 81 types, so an
+      untranslated entity wears sprite 0, which is Akuji standing. Stage 1
+      places three type-16 signs; before that handler existed they looked
+      exactly like the player, and nothing here could tell. }
+    Slot := -1;
+    for I := 1 to 63 do
+      if S.Pool.Alive[I] and (S.Pool.Field(I, EF_TYPE) = 16) then
+        Slot := I;
+    if Slot < 0 then
+      Log.Add('  (stage 1 placed no sign; the sprite check is skipped)')
+    else
+    begin
+      Want(S.Pool.Field(Slot, EF_ANIM_ID) = 54,
+           Format('the sign is on sprite %d, want 54 - sprite 0 means its '
+             + 'handler never ran', [S.Pool.Field(Slot, EF_ANIM_ID)]));
+      Want(S.Pool.Field(Slot, EF_ANIM_ID) <> S.Pool.Field(0, EF_ANIM_ID),
+           'the sign and the player are on the same sprite');
+    end;
     Log.Add('');
 
     Fell := S.Pool.PosY(0) - StartY;
