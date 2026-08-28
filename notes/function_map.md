@@ -284,6 +284,42 @@ primitive, not a component's.
 | `0x460924` | `Entity_UpdateAll`'s **jump table**, 81 entries |
 | `0x4610C0` | the Single `100.0` the box percentages divide by |
 
+## Corrections found by running the game (2026-08-28)
+
+Three entries here were wrong, and all three were caught by playing rather than
+by reading. Kept with the reason, because each shows a different way a
+plausible reading survives review.
+
+| addr | name | what it really is |
+|---|---|---|
+| `0x0044DAE0` | `TileMap_DefineTile` | `(Self, Index, Surface, Transparent, SrcY, SrcX)` - Y before X |
+| `0x00456698` | `PowerUp_Show` | the ability pickup screen, not dialogue |
+| `0x004568D0` | `Overlay_Update` | the message overlay - and it is what calls `EventScript_AdvanceStep` |
+
+**The tileset was never transposed.** `TileMap_DefineTile` takes Y before X -
+its body builds `Rect(arg6, arg5, arg6 + TileW, arg5 + TileH)`, so arg5 is the
+top. Reading arg5 as X gave `TileMaps.pas` a transposed cell formula, and the
+game drew scattered tiles on black. `Load_Map` registers with
+`((i / SheetCols) * TileHeight, (i % SheetCols) * TileWidth)` - ordinary
+row-major.
+
+That error was then "confirmed" from `Terrain_Configure`, which hard-codes the
+tile id AND the source coordinates of thirty animation frames. It confirmed
+nothing: the two hypotheses differ by *also* swapping which pushed argument is
+which, so the same thirty frames fit both. A table that fits two hypotheses
+distinguishes neither. What settled it was rendering map 001 each way and
+looking at the two images.
+
+**`PowerUp_Show` is not dialogue.** It grants by the event entity's
+`EF_VARIANT`: 0/1/2 set the weapon, 3 raises `JumpStrength` to `0x84`, and 4..7
+set `Head[4..7]` - the dash, wall kick, air dash and glide block already named
+in `PlayerState.pas`, now confirmed from the writing side. Sub-op 10 calls it.
+
+**`Overlay_Update` is why a sign could hang the game.** Sub-op 3 raises the
+overlay and waits; nothing in the interpreter advances the step. The overlay
+does, when it closes. A reconstruction with no message box sits in
+`GS_STATE_140` for ever.
+
 ## Lessons this file exists to preserve
 
 1. **Never name a function after the Win32 API it calls.** That produced 19

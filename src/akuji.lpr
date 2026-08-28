@@ -1397,8 +1397,9 @@ end;
 function TestTerrainAnim(Log: TStrings): Integer;
 const
   { Read straight off 0x004645B0, in the order the arms declare them:
-    terrain, then track, then frame. Each pair is (srcX, srcY) - the two
-    values pushed to 0x0044E25C, whose third argument is 8 every time. }
+    terrain, then track, then frame. Each pair is (srcY, srcX) - the two
+    values pushed to MyBgAnime_AddFrame @ 0x0044E25C, whose third argument is
+    8 every time. Y comes first, as it does in Load_Map. }
   LITERALS: array[0..29, 0..1] of Integer = (
     { terrain 1, tile 7  } ($00, $E0), ($00, $100), ($00, $120), ($00, $100),
     { terrain 1, tile 17 } ($20, $E0), ($20, $100), ($20, $120), ($20, $100),
@@ -1462,10 +1463,11 @@ begin
         Id   := A.Tracks[Track].Frames[Frame];
         GotX := TileSrcX(Id, TILE_PX, SHEET_COLS);
         GotY := TileSrcY(Id, TILE_PX, SHEET_COLS);
-        if (GotX <> LITERALS[N][0]) or (GotY <> LITERALS[N][1]) then
+        { LITERALS[N][0] is the FIRST pushed value, which is srcY. }
+        if (GotY <> LITERALS[N][0]) or (GotX <> LITERALS[N][1]) then
         begin
           Log.Add(Format('FAILED: terrain %d track %d frame %d is tile %d ->'
-            + ' (%d, %d), but 0x004645B0 pushes (%d, %d)',
+            + ' (x %d, y %d), but 0x004645B0 pushes (y %d, x %d)',
             [Terr, Track, Frame, Id, GotX, GotY,
              LITERALS[N][0], LITERALS[N][1]]));
           Inc(Bad);
@@ -1488,14 +1490,19 @@ begin
     Inc(Bad);
   end;
 
-  { And the obvious axis reading must NOT reproduce them, or the comparison
-    above would be true of both and could not tell them apart.
+  { And the TRANSPOSED reading must not reproduce them, or the comparison
+    above would be true of both and could not tell them apart. It reproduces
+    exactly one of the thirty, and that one cannot be helped: tile 77 sits on
+    the sheet's DIAGONAL, where div and mod are equal, so both readings put it
+    at (224, 224). Asserting "the transposed reading matches nothing" would be
+    false; asserting "it matches only where the tile is diagonal" is the
+    actual invariant, and no accident can satisfy it.
 
-    It reproduces exactly one of the thirty, and that one cannot be helped:
-    tile 77 sits on the sheet's DIAGONAL, where div and mod are equal, so both
-    readings put it at (224, 224). Asserting "the obvious reading matches
-    nothing" would be false; asserting "it matches only where the tile is
-    diagonal" is the actual invariant, and no accident can satisfy it. }
+    This ran the OTHER WAY ROUND and passed, which is why the reconstruction
+    drew a transposed map for so long. The two hypotheses differ only by also
+    swapping which pushed argument is which, so this table alone could never
+    decide between them - it fits both. Rendering map 001 with each reading
+    and looking at it could, and did. }
   N := 0;
   Obvious := 0;
   for Terr := 1 to TERRAIN_MAX do
@@ -1505,6 +1512,7 @@ begin
       for Frame := 0 to A.Tracks[Track].FrameCount - 1 do
       begin
         Id := A.Tracks[Track].Frames[Frame];
+        { The transposed reading: srcY from mod, srcX from div. }
         if ((Id mod SHEET_COLS) * TILE_PX = LITERALS[N][0])
            and ((Id div SHEET_COLS) * TILE_PX = LITERALS[N][1]) then
         begin
@@ -1520,8 +1528,8 @@ begin
         Inc(N);
       end;
   end;
-  Log.Add(Format('the transposed reading places all %d; the obvious one places'
-    + ' %d, and only on the diagonal', [N, Obvious]));
+  Log.Add(Format('the row-major reading places all %d; the transposed one'
+    + ' places %d, and only on the diagonal', [N, Obvious]));
 
   { --- the switch itself --------------------------------------------- }
   for Terr := 1 to TERRAIN_MAX do

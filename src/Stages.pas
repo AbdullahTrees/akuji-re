@@ -149,18 +149,22 @@
   --selftest-stages recomputes the coordinates and compares them against the
   sixty literals read out of 0x004645B0. Seven tracks, thirty frames.
 
-  It also settles the transposed axis order TileMaps.pas had flagged as an
-  open question. A tile id's cell is
+  The frame's two coordinates are pushed Y FIRST, then X - the same order
+  Load_Map uses when it registers a tile - so a frame is
 
-      x = (id div SheetCols) * TileW        y = (id mod SheetCols) * TileH
+      SrcY = (id div SheetCols) * TileH      SrcX = (id mod SheetCols) * TileW
 
-  which is the wrong way round from the obvious reading, and was believed only
-  because the drawing code says so. These sixty numbers say so too, from a
-  function that draws nothing. All thirty frames land where the binary says
-  under this reading; under the obvious one exactly ONE does, and that one is
-  tile 77, which sits on the sheet's diagonal where div and mod are equal.
-  --selftest-stages asserts both halves - all thirty under the transposed
-  reading, and under the obvious one only where the tile is diagonal.
+  the ordinary row-major reading. --selftest-stages recomputes all thirty
+  frames that way and requires every one to match the literal.
+
+  This was written up the other way round and used as "independent
+  confirmation" that a tile's source rect was TRANSPOSED. It was not
+  independent and it was not confirmation. Both readings fit these numbers -
+  the transposed one only if you also swap which pushed argument is which -
+  and the swap chosen was the one that agreed with the code already written.
+  Rendering the map settled it; see TileMaps.pas. The lesson kept here: a
+  table that fits two hypotheses distinguishes neither, and the time to notice
+  that is before calling it corroboration.
 
   What the tracks turn out to be, once decoded, is seven short cycles of
   consecutive ids at 8 ticks a frame. Five ping-pong - (a, a+1, a+2, a+1) -

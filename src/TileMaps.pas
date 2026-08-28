@@ -19,24 +19,41 @@
   001.map is 30x24 tiles of 32x32 - a 960x768 level from a 10x10 tileset.
 
   The original registers SheetCols*SheetRows tile graphics from a surface,
-  cutting cell (i mod SheetCols, i div SheetCols), then fills the map. Note it
-  computes the source cell as
+  cutting cell (i mod SheetCols, i div SheetCols), then fills the map:
 
-      x = (i div SheetCols) * TileWidth
-      y = (i mod SheetCols) * TileHeight
+      x = (i mod SheetCols) * TileWidth
+      y = (i div SheetCols) * TileHeight
 
-  i.e. the axes are the other way round from the obvious reading. That is what
-  the decompilation shows, and it is reproduced here rather than "corrected".
+  which is the ordinary row-major reading, and Load_Map @ 0x00466340 is where
+  it comes from:
 
-  This was recorded with "if tiles come out transposed, this is the line to
-  revisit". It is settled now, from a second function that has nothing to do
-  with drawing. Terrain_Configure @ 0x004645B0 builds the animated tiles for
-  terrains 1..4, and for each one it hard-codes BOTH the tile id and the
-  source pixel coordinates of every frame - six tracks, thirty frames, sixty
-  numbers. Only the div/mod order above reproduces them; the obvious reading
-  reproduces none. Stages.pas carries the table and --selftest-stages checks
-  every pair, so the two functions now agree without either having been
-  written from the other. }
+      TileMap_DefineTile(map, i, surface, 1,
+                         (i / SheetCols) * TileHeight,   <- Y
+                         (i % SheetCols) * TileWidth)    <- X
+
+  Note that Y is passed BEFORE X. TileMap_DefineTile hands the pair straight
+  to the Rect builder as Rect(arg6, arg5, arg6 + TileW, arg5 + TileH), so
+  arg5 is the top and arg6 the left, with no ambiguity.
+
+  ## The transposition that was not there
+
+  This header used to claim the opposite - x from div, y from mod - and call
+  it "the other way round from the obvious reading, reproduced rather than
+  corrected". That was wrong, and it is worth recording how it survived so
+  long. The prose above it always said "cutting cell (i mod, i div)", which is
+  right; only the formula below disagreed, because arg5 was read as X. Two
+  contradictory statements sat in one comment and nothing compared them.
+
+  It was then "confirmed" from Terrain_Configure, which hard-codes both the
+  tile id and the source coordinates of thirty animation frames. Both readings
+  fit those numbers - the transposed one only if you ALSO swap which pushed
+  argument is which - and the swap that agreed with this file was chosen
+  instead of testing both. That is confirmation bias, not evidence.
+
+  What settled it was rendering map 001 with each reading and looking: the
+  row-major one produces the room the game shows, and the transposed one
+  produces scattered tiles on black, which is exactly what the reconstruction
+  was drawing. }
 
 unit TileMaps;
 
@@ -50,11 +67,9 @@ uses
 const
   MAP_HEADER_SIZE = 24;
 
-{ Where a tile id's picture sits in its tileset. The div and the mod are the
-  way round the original has them - see the unit header - and they are here
-  rather than inline because two unrelated things need them: the drawing code
-  below, and Stages.pas's terrain animation table, which is what pinned the
-  order in the first place. }
+{ Where a tile id's picture sits in its tileset - row-major, from Load_Map
+  @ 0x00466340. Here rather than inline because two unrelated things need
+  them: the drawing code below, and Stages.pas's terrain animation table. }
 function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
 function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
 
@@ -103,14 +118,14 @@ function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
 begin
   if SheetCols = 0 then
     Exit(0);
-  Result := (TileId div SheetCols) * TileW;
+  Result := (TileId mod SheetCols) * TileW;
 end;
 
 function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
 begin
   if SheetCols = 0 then
     Exit(0);
-  Result := (TileId mod SheetCols) * TileH;
+  Result := (TileId div SheetCols) * TileH;
 end;
 
 function TTileMap.Load(const AGameDir: string; MapIndex: Integer): Boolean;
@@ -201,7 +216,6 @@ begin
       if Idx >= FSheetCols * FSheetRows then
         Continue;
 
-      { Axis order as in the original - see the unit header. }
       SrcX := TileSrcX(Idx, FTileW, FSheetCols);
       SrcY := TileSrcY(Idx, FTileH, FSheetCols);
 

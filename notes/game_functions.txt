@@ -24,8 +24,8 @@
 0045509c  EventScript_AdvanceStep
 00455210  EventScript_Execute
 00456038  TitleMenu_Update
-00456698  FUN_00456698
-004568d0  FUN_004568d0
+00456698  PowerUp_Show
+004568d0  Overlay_Update
 00456b14  FUN_00456b14
 00456b4c  Entity_SolidCollideX
 00456e0c  Entity_SolidCollideY
