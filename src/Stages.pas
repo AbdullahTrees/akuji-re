@@ -129,7 +129,44 @@
     * tile 29 appears in only 7 of the 65 maps, and the single map where it
       appears without being lethal is the single terrain-9 stage.
 
-  Terrains 1..4 additionally build an animated background entity; 5..9 do not.
+  ## The animated tiles
+
+  Terrains 1..4 also build a TMYBGANIME - the class name is in the binary at
+  0x0044E1AA - and 5..9 do not. It is constructed as
+
+      TMYBGANIME.Create(TileMaps[0], TrackCount, Surfaces[stage.rec[5]])
+
+  so it is bound to layer 0's map and to that layer's TILESET, which is what
+  says it animates tiles rather than drawing anything of its own: it has the
+  sheet, and every instance of a tile id shares one picture in it.
+
+  Each track is then declared by two calls, and both hard-code more than they
+  need to. 0x0044E224 takes the tile id and how many frames follow;
+  0x0044E25C adds one frame as (ticks, srcY, srcX) - the ticks are 8 in all
+  thirty frames, and the coordinates are spelled out in the code rather than
+  computed. That redundancy is what makes the table checkable: the ids and the
+  coordinates have to agree, and TERRAIN_ANIM below stores only the ids while
+  --selftest-stages recomputes the coordinates and compares them against the
+  sixty literals read out of 0x004645B0. Seven tracks, thirty frames.
+
+  It also settles the transposed axis order TileMaps.pas had flagged as an
+  open question. A tile id's cell is
+
+      x = (id div SheetCols) * TileW        y = (id mod SheetCols) * TileH
+
+  which is the wrong way round from the obvious reading, and was believed only
+  because the drawing code says so. These sixty numbers say so too, from a
+  function that draws nothing. All thirty frames land where the binary says
+  under this reading; under the obvious one exactly ONE does, and that one is
+  tile 77, which sits on the sheet's diagonal where div and mod are equal.
+  --selftest-stages asserts both halves - all thirty under the transposed
+  reading, and under the obvious one only where the tile is diagonal.
+
+  What the tracks turn out to be, once decoded, is seven short cycles of
+  consecutive ids at 8 ticks a frame. Five ping-pong - (a, a+1, a+2, a+1) -
+  and two run straight through five. Every track's first frame is its own
+  tile, seven times out of seven. Terrains 1 and 3 declare the SAME two tracks
+  in the opposite order.
 
   With that, every column of stage.dat is accounted for. rec[0], rec[1],
   rec[2..4], rec[5..7] and rec[18] all have their meaning from the code;
@@ -158,6 +195,16 @@ const
   TERRAIN_KILL_TILE: array[0..TERRAIN_MAX] of Integer =
     (0, 29, 29, 29, 29, 29, 29, 29, 29, 1000);
 
+  { The two globals Terrain_Configure writes, adjacent in BSS - which is what
+    "right beside the threshold" above means literally. }
+  ADDR_SOLID_THRESHOLD = $00484EF4;
+  ADDR_KILL_TILE       = $00484EF8;
+
+  { Every frame of every track holds for the same number of ticks. }
+  TERRAIN_ANIM_TICKS  = 8;
+  TERRAIN_ANIM_TRACKS = 2;    { the most any terrain declares }
+  TERRAIN_ANIM_FRAMES = 5;    { the most any track declares }
+
   { 10 x 10 tilesets throughout, so a valid id is 0..99. }
   TILESET_IDS  = 100;
   KILL_TILE    = 29;
@@ -165,6 +212,19 @@ const
   LAYER_NONE    = -1;
 
 type
+  { One animated tile: the id whose picture is replaced, and the ids its
+    picture is taken from in turn. }
+  TTileAnimation = record
+    TileId:     Integer;
+    FrameCount: Integer;
+    Frames:     array[0..TERRAIN_ANIM_FRAMES - 1] of Integer;
+  end;
+
+  TTerrainAnim = record
+    TrackCount: Integer;
+    Tracks:     array[0..TERRAIN_ANIM_TRACKS - 1] of TTileAnimation;
+  end;
+
   TStageRecord = record
     Raw: array[0..STAGE_RECORD - 1] of Integer;
   end;
@@ -199,6 +259,32 @@ type
     { rec[5 + layer] - the surface slot holding that layer's tiles. }
     property Tileset[StageIndex, Layer: Integer]: Integer read GetTileset;
   end;
+
+const
+  { Verbatim from the nine arms of Terrain_Configure @ 0x004645B0, as tile ids.
+    Index 0 is the placeholder row and terrains 5..9 declare nothing. }
+  TERRAIN_ANIM: array[0..TERRAIN_MAX] of TTerrainAnim = (
+    { 0 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 1 } (TrackCount: 2; Tracks: ((TileId:  7; FrameCount: 4; Frames: ( 7, 8, 9, 8,0)),
+                                   (TileId: 17; FrameCount: 4; Frames: (17,18,19,18,0)))),
+    { 2 } (TrackCount: 1; Tracks: ((TileId: 75; FrameCount: 5; Frames: (75,76,77,78,79)),
+                                   (TileId:  0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 3 } (TrackCount: 2; Tracks: ((TileId: 17; FrameCount: 4; Frames: (17,18,19,18,0)),
+                                   (TileId:  7; FrameCount: 4; Frames: ( 7, 8, 9, 8,0)))),
+    { 4 } (TrackCount: 2; Tracks: ((TileId: 15; FrameCount: 5; Frames: (15,16,17,18,19)),
+                                   (TileId: 63; FrameCount: 4; Frames: (63,64,65,64,0)))),
+    { 5 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 6 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 7 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 8 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
+    { 9 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+                                   (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0))))
+  );
 
 implementation
 

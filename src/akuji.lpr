@@ -1379,6 +1379,148 @@ end;
   map files for rows 1..65, with row 0 the placeholder.
   --------------------------------------------------------------------------- }
 
+{ The animated tiles Terrain_Configure declares, checked against the literals
+  in the function itself.
+
+  Every one of the thirty frames is written into the binary TWICE over: once
+  as the tile id the track belongs to and its position in a run, and once as
+  the source pixel coordinates the drawing needs. TERRAIN_ANIM stores only the
+  ids; this recomputes the coordinates through TileMaps' TileSrcX/TileSrcY and
+  requires all sixty numbers to come back.
+
+  That makes it a real check in two directions at once. It pins the table, and
+  it pins the div/mod AXIS ORDER, which TileMaps.pas had believed on the
+  strength of the drawing code alone and flagged as the line to revisit if
+  tiles ever came out transposed. Under the obvious x/y reading not one of the
+  six tracks lands on its own tile. }
+function TestTerrainAnim(Log: TStrings): Integer;
+const
+  { Read straight off 0x004645B0, in the order the arms declare them:
+    terrain, then track, then frame. Each pair is (srcX, srcY) - the two
+    values pushed to 0x0044E25C, whose third argument is 8 every time. }
+  LITERALS: array[0..29, 0..1] of Integer = (
+    { terrain 1, tile 7  } ($00, $E0), ($00, $100), ($00, $120), ($00, $100),
+    { terrain 1, tile 17 } ($20, $E0), ($20, $100), ($20, $120), ($20, $100),
+    { terrain 2, tile 75 } ($E0, $A0), ($E0, $C0),  ($E0, $E0),  ($E0, $100),
+                           ($E0, $120),
+    { terrain 3, tile 17 } ($20, $E0), ($20, $100), ($20, $120), ($20, $100),
+    { terrain 3, tile 7  } ($00, $E0), ($00, $100), ($00, $120), ($00, $100),
+    { terrain 4, tile 15 } ($20, $A0), ($20, $C0),  ($20, $E0),  ($20, $100),
+                           ($20, $120),
+    { terrain 4, tile 63 } ($C0, $60), ($C0, $80),  ($C0, $A0),  ($C0, $80)
+  );
+  SHEET_COLS = 10;
+  TILE_PX    = 32;
+var
+  Terr, Track, Frame, N, Tracks, Frames, Obvious, Bad: Integer;
+  A: TTerrainAnim;
+  Id, GotX, GotY: Integer;
+begin
+  Bad := 0;
+  N := 0;
+  Tracks := 0;
+  Frames := 0;
+  Log.Add('');
+  Log.Add('--- Terrain_Configure''s animated tiles ---');
+
+  for Terr := 1 to TERRAIN_MAX do
+  begin
+    A := TERRAIN_ANIM[Terr];
+    Inc(Tracks, A.TrackCount);
+    for Track := 0 to A.TrackCount - 1 do
+    begin
+      { A track's first frame is always its own tile - the animation starts
+        from the picture that is already there. Six of six. }
+      if A.Tracks[Track].Frames[0] <> A.Tracks[Track].TileId then
+      begin
+        Log.Add(Format('FAILED: terrain %d track %d animates tile %d but'
+          + ' starts on %d', [Terr, Track, A.Tracks[Track].TileId,
+                              A.Tracks[Track].Frames[0]]));
+        Inc(Bad);
+      end;
+
+      for Frame := 0 to A.Tracks[Track].FrameCount - 1 do
+      begin
+        Inc(Frames);
+        if N > High(LITERALS) then
+        begin
+          Log.Add('FAILED: more frames in the table than the function declares');
+          Inc(Bad);
+          Break;
+        end;
+        Id   := A.Tracks[Track].Frames[Frame];
+        GotX := TileSrcX(Id, TILE_PX, SHEET_COLS);
+        GotY := TileSrcY(Id, TILE_PX, SHEET_COLS);
+        if (GotX <> LITERALS[N][0]) or (GotY <> LITERALS[N][1]) then
+        begin
+          Log.Add(Format('FAILED: terrain %d track %d frame %d is tile %d ->'
+            + ' (%d, %d), but 0x004645B0 pushes (%d, %d)',
+            [Terr, Track, Frame, Id, GotX, GotY,
+             LITERALS[N][0], LITERALS[N][1]]));
+          Inc(Bad);
+        end;
+        Inc(N);
+      end;
+    end;
+  end;
+
+  Log.Add(Format('tracks: %d   frames: %d   coordinate pairs compared: %d',
+    [Tracks, Frames, N]));
+
+  { Pinned so that a table which quietly lost its contents could not pass by
+    comparing nothing. Seven tracks over four terrains - 2, 1, 2, 2 - and
+    thirty frames is what the function has. }
+  if (Tracks <> 7) or (N <> 30) then
+  begin
+    Log.Add(Format('FAILED: expected 7 tracks and 30 frames, got %d and %d',
+      [Tracks, N]));
+    Inc(Bad);
+  end;
+
+  { And the obvious axis reading must NOT reproduce them, or the comparison
+    above would be true of both and could not tell them apart.
+
+    It reproduces exactly one of the thirty, and that one cannot be helped:
+    tile 77 sits on the sheet's DIAGONAL, where div and mod are equal, so both
+    readings put it at (224, 224). Asserting "the obvious reading matches
+    nothing" would be false; asserting "it matches only where the tile is
+    diagonal" is the actual invariant, and no accident can satisfy it. }
+  N := 0;
+  Obvious := 0;
+  for Terr := 1 to TERRAIN_MAX do
+  begin
+    A := TERRAIN_ANIM[Terr];
+    for Track := 0 to A.TrackCount - 1 do
+      for Frame := 0 to A.Tracks[Track].FrameCount - 1 do
+      begin
+        Id := A.Tracks[Track].Frames[Frame];
+        if ((Id mod SHEET_COLS) * TILE_PX = LITERALS[N][0])
+           and ((Id div SHEET_COLS) * TILE_PX = LITERALS[N][1]) then
+        begin
+          Inc(Obvious);
+          if (Id div SHEET_COLS) <> (Id mod SHEET_COLS) then
+          begin
+            Log.Add(Format('FAILED: tile %d is off the diagonal yet both axis'
+              + ' readings place it at (%d, %d)',
+              [Id, LITERALS[N][0], LITERALS[N][1]]));
+            Inc(Bad);
+          end;
+        end;
+        Inc(N);
+      end;
+  end;
+  Log.Add(Format('the transposed reading places all %d; the obvious one places'
+    + ' %d, and only on the diagonal', [N, Obvious]));
+  if Obvious <> 1 then
+  begin
+    Log.Add(Format('FAILED: expected exactly one diagonal frame (tile 77),'
+      + ' found %d', [Obvious]));
+    Inc(Bad);
+  end;
+
+  Result := Bad;
+end;
+
 function SelfTestStages(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -1601,6 +1743,8 @@ begin
   finally
     T.Free;
   end;
+
+  Inc(Result, TestTerrainAnim(Log));
 
   if Result = 0 then
     Log.Add('OK - every documented relationship in Stages.pas still holds')

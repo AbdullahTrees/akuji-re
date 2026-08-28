@@ -26,8 +26,17 @@
       y = (i mod SheetCols) * TileHeight
 
   i.e. the axes are the other way round from the obvious reading. That is what
-  the decompilation shows, and it is reproduced here rather than "corrected" -
-  if tiles come out transposed, this is the line to revisit. }
+  the decompilation shows, and it is reproduced here rather than "corrected".
+
+  This was recorded with "if tiles come out transposed, this is the line to
+  revisit". It is settled now, from a second function that has nothing to do
+  with drawing. Terrain_Configure @ 0x004645B0 builds the animated tiles for
+  terrains 1..4, and for each one it hard-codes BOTH the tile id and the
+  source pixel coordinates of every frame - six tracks, thirty frames, sixty
+  numbers. Only the div/mod order above reproduces them; the obvious reading
+  reproduces none. Stages.pas carries the table and --selftest-stages checks
+  every pair, so the two functions now agree without either having been
+  written from the other. }
 
 unit TileMaps;
 
@@ -40,6 +49,14 @@ uses
 
 const
   MAP_HEADER_SIZE = 24;
+
+{ Where a tile id's picture sits in its tileset. The div and the mod are the
+  way round the original has them - see the unit header - and they are here
+  rather than inline because two unrelated things need them: the drawing code
+  below, and Stages.pas's terrain animation table, which is what pinned the
+  order in the first place. }
+function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
+function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
 
 type
   TTileMap = class
@@ -81,6 +98,20 @@ type
   end;
 
 implementation
+
+function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
+begin
+  if SheetCols = 0 then
+    Exit(0);
+  Result := (TileId div SheetCols) * TileW;
+end;
+
+function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
+begin
+  if SheetCols = 0 then
+    Exit(0);
+  Result := (TileId mod SheetCols) * TileH;
+end;
 
 function TTileMap.Load(const AGameDir: string; MapIndex: Integer): Boolean;
 begin
@@ -171,8 +202,8 @@ begin
         Continue;
 
       { Axis order as in the original - see the unit header. }
-      SrcX := (Idx div FSheetCols) * FTileW;
-      SrcY := (Idx mod FSheetCols) * FTileH;
+      SrcX := TileSrcX(Idx, FTileW, FSheetCols);
+      SrcY := TileSrcY(Idx, FTileH, FSheetCols);
 
       DX := TX * FTileW - OffsetX;
       DY := TY * FTileH - OffsetY;
