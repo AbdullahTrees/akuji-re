@@ -1645,7 +1645,8 @@ var
   L: TLayerInfo;
   P: TPlayerState;
   I, J, K, V, Step, Before, Bad, Checked: Integer;
-  Want, Got, Overlaps: Integer;
+  Want, Got, Overlaps, SndId: Integer;
+  Nm: string;
   Exe: TMemoryStream;
   ExeName: string;
   Table: array of Integer;
@@ -1875,6 +1876,42 @@ begin
   if SPR_KNOCKBACK[0] - SPR_KNOCKBACK[1] <> SPRITE_FACING_STRIDE then Inc(Bad);
   if SPR_DEATH[0] - SPR_DEATH[1] <> SPRITE_FACING_STRIDE then Inc(Bad);
   Log.Add(Format('right sprite = left + 10 in the base set: %d violations', [Bad]));
+  Inc(Result, Bad);
+
+
+  { --- every sound constant matches its recovered file name -----------------
+    The numbers come from the call sites in Player_Update and
+    Entity_UpdateDying; the names come from a static AnsiString array at
+    0x00468D50 whose length was read off the unit finalisation. Two entirely
+    separate recoveries, so requiring each constant to land on a plausibly-named
+    file is a real cross-check rather than a restatement. }
+  Bad := 0;
+  for I := 0 to 12 do
+  begin
+    case I of
+      0: begin SndId := SND_JUMP;        Nm := 'jump';    end;
+      1: begin SndId := SND_LAND_HARD;   Nm := 'yuka';    end;
+      2: begin SndId := SND_ATTACK;      Nm := 'shot';    end;
+      3: begin SndId := SND_CHARGE_FULL; Nm := 'power';   end;
+      4: begin SndId := SND_CHARGED;     Nm := 'shot';    end;
+      5: begin SndId := SND_LAND_SOFT;   Nm := 'yuka';    end;
+      6: begin SndId := SND_GLIDE;       Nm := 'pon';     end;
+      7: begin SndId := SND_AIRDASH;     Nm := 'pon';     end;
+      8: begin SndId := SND_DEATH;       Nm := 'voice';   end;
+      9: begin SndId := SND_DASH_START;  Nm := 'puu';     end;
+     10: begin SndId := SND_BOM03;       Nm := 'bom03';   end;
+     11: begin SndId := 17;              Nm := 'hit01';   end;
+    else begin SndId := $10;             Nm := 'get01';   end;
+    end;
+    if (SndId < 0) or (SndId >= SOUND_COUNT) or (Pos(Nm, SoundNames[SndId]) = 0) then
+    begin
+      Log.Add(Format('  sound %d is %s, expected a name containing "%s"',
+        [SndId, SoundNames[SndId], Nm]));
+      Inc(Bad);
+    end;
+  end;
+  Log.Add(Format('sound constants match their recovered names: %d wrong of 13',
+    [Bad]));
   Inc(Result, Bad);
 
   { --- 5. the shipped save ------------------------------------------------ }

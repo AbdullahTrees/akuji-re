@@ -11,6 +11,7 @@
 
   Handlers translated so far:
 
+      0x004615A8  Entity_UpdateDying - the shared guard, not a handler
       0x0045A3E0  type 14  animated pickup
 
   The other ~49 created handlers are named in notes/game_functions.txt but
@@ -24,7 +25,7 @@ unit EntityHandlers;
 interface
 
 uses
-  SysUtils, Entities, GameState;
+  SysUtils, Entities, GameState, SoundTable;
 
 const
   { --- Type 14's sprite table @ 0x0046BDA0 -------------------------------
@@ -72,6 +73,38 @@ const
   EF_ANIM_ID = $05;
   EF_VARIANT = $06;
 
+  { --- Entity_UpdateDying ------------------------------------------------- }
+  DEATH_CLASS_SMALL  = 1;
+  DEATH_CLASS_BIG    = 2;
+  DEATH_CLASS_DEBRIS = 6;
+  EMITTER_TYPE       = $20;   { type 32, the invisible spawner }
+  SND_BOM03          = $22;   { 34 }
+
+
+{ 0x004615A8. The death guard, called from THIRTY sites - the top of nearly
+  every per-type handler. Returns True when it has taken over, and the caller
+  must then skip its normal update.
+
+  It only engages for EF_CLASS 1, 2 and 6. The original writes that test as an
+  UNSIGNED (class - 1) compared against 2 and 5, which is the compiler's way of
+  saying "class in [1, 2, 6]" - not three separate comparisons.
+
+  The per-class setup was recorded as "spawns an effect entity" before this was
+  read. It is more specific than that: classes 1 and 2 both spawn a TYPE 32
+  emitter - the invisible spawner whose configuration lives in its block A -
+  and seed four of its block-A slots with different numbers, which is how one
+  emitter type produces two different death effects.
+
+      class 1   death timer  30, timer  60, emitter A[1..4] = 8, 2, 1, 2
+      class 2   death timer 180, timer 240, emitter A[1..4] = 4, 32, 4, 1
+      class 6   death timer   0, and Entity_SpawnDebris(e, 1) instead
+
+  Class 6 zeroing its death timer means it is destroyed on the same frame it
+  starts dying; 1 and 2 linger for their timer first. Class 2 also plays sound
+  34 (bom03) as it goes. }
+function EntityUpdateDying(var E: TEntity; AGameState: Integer;
+                           World: TEntityWorld): Boolean;
+
 { 0x0045A3E0. An animated pickup: four frames on a five-frame cycle, and a
   one-shot settle downward the first time it updates.
 
@@ -83,6 +116,70 @@ const
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
 
 implementation
+
+
+function EntityUpdateDying(var E: TEntity; AGameState: Integer;
+                           World: TEntityWorld): Boolean;
+var
+  Slot: Integer;
+begin
+  { Outside play the guard reports True without doing anything, so every
+    handler stops dead during an event script or the game-over screen. }
+  if AGameState <> GS_PLAY then
+    Exit(True);
+
+  Result := False;
+  if E.Raw[EF_HP] >= 1 then
+    Exit;
+  if not (E.Raw[EF_CLASS] in [DEATH_CLASS_SMALL, DEATH_CLASS_BIG,
+                              DEATH_CLASS_DEBRIS]) then
+    Exit;
+
+  if E.Raw[EF_DYING] = 0 then
+  begin
+    E.Raw[EF_DYING] := 1;
+    case E.Raw[EF_CLASS] of
+      DEATH_CLASS_SMALL:
+        begin
+          E.Raw[EF_DEATH_TIMER] := 30;
+          E.Raw[EF_TIMER] := 60;
+          Slot := World.Spawn(2, EMITTER_TYPE,
+                              E.Raw[EF_POS_X] - POSITION_BIAS,
+                              E.Raw[EF_POS_Y] - POSITION_BIAS - $20);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 1, 8);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 2, 2);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 3, 1);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 4, 2);
+        end;
+      DEATH_CLASS_BIG:
+        begin
+          E.Raw[EF_DEATH_TIMER] := 180;
+          E.Raw[EF_TIMER] := 240;
+          Slot := World.Spawn(2, EMITTER_TYPE,
+                              E.Raw[EF_POS_X] - POSITION_BIAS,
+                              E.Raw[EF_POS_Y] - POSITION_BIAS - $20);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 1, 4);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 2, $20);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 3, 4);
+          World.SetSpawnField(Slot, EF_BLOCK_A + 4, 1);
+        end;
+      DEATH_CLASS_DEBRIS:
+        begin
+          E.Raw[EF_DEATH_TIMER] := 0;
+          World.SpawnDebris(E, 1);
+        end;
+    end;
+  end;
+
+  if E.Raw[EF_DEATH_TIMER] = 0 then
+  begin
+    if E.Raw[EF_CLASS] = DEATH_CLASS_BIG then
+      World.PlaySound(SND_BOM03);
+    World.Destroy(E, True);
+  end;
+
+  Result := True;
+end;
 
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
 var

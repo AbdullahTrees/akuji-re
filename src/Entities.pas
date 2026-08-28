@@ -508,10 +508,6 @@ type
   end;
 
 type
-  { A collision box in screen pixels, in the order the original stores it: four
-    consecutive ints passed by pointer to Rect_Overlap. }
-  TBox = record L, T, R, B: Integer; end;
-
   { Kept as a raw int array for the same reason TStageRecord is: the layout is
     known exactly but most field meanings are not, and inventing names for them
     would make guesses look like decodes. }
@@ -519,6 +515,59 @@ type
     Raw: array[0..ENTITY_INTS - 1] of Integer;
   end;
   PEntity = ^TEntity;
+
+  { Everything an entity handler needs that it does not own: the tilemap, the
+    pool, the sound device. A test supplies a flat world; the game will supply
+    the real one.
+
+    This started as the player controller's private interface and was lifted
+    here the moment a second thing needed it. The surface is deliberately the
+    ORIGINAL's shape rather than a tidier one.
+
+    TileAt returns the tile index an entity would hit moving by Delta on that
+    axis, exactly as Entity_TileCollideX/Y do - the caller compares it against
+    SolidThreshold rather than being told yes or no, because the original does.
+    EdgeDist returns how far it may actually move.
+
+    SolidCollide* answer "did we hit a blocking entity"; how far to push out
+    comes back through PushX/PushY, and OnTopOfSolid says the hit was a
+    landing. That is the original's shape - three globals rather than out
+    parameters - and it is kept because the callers read them in that order. }
+  TEntityWorld = class
+  public
+    PushX, PushY: Integer;       { 0x00484FAC / 0x00484FB0 }
+    OnTopOfSolid: Boolean;       { 0x00484FB4 }
+    SolidThreshold: Integer;     { 0x00484EF4, set per terrain }
+    Fading: Boolean;             { suppresses the soft landing sound }
+
+    { Scrolling is an INPUT to the tile query, not just a consequence of it:
+      Entity_TileCollideX/Y take it as their fifth argument, because when the
+      layer moves instead of the entity the tile under the entity differs. }
+    function TileAtX(const E: TEntity; Delta: Integer;
+                     Scrolling: Boolean): Integer; virtual; abstract;
+    function TileAtY(const E: TEntity; Delta: Integer;
+                     Scrolling: Boolean): Integer; virtual; abstract;
+    function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
+    function EdgeDistY(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
+
+    function SolidCollideX(const E: TEntity; Delta: Integer;
+                           SkipSoft: Boolean): Boolean; virtual; abstract;
+    function SolidCollideY(const E: TEntity; Delta: Integer;
+                           SkipSoft: Boolean): Boolean; virtual; abstract;
+
+    function Spawn(Kind, TypeId, X, Y: Integer): Integer; virtual; abstract;
+    procedure Destroy(var E: TEntity; DropLoot: Boolean); virtual; abstract;
+    procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
+    procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual; abstract;
+    procedure PlaySound(Id: Integer); virtual; abstract;
+    function RandomBelow(N: Integer): Integer; virtual; abstract;
+  end;
+
+type
+  { A collision box in screen pixels, in the order the original stores it: four
+    consecutive ints passed by pointer to Rect_Overlap. }
+  TBox = record L, T, R, B: Integer; end;
+
 
   TEntityType = record
     Raw: array[0..ENTITY_TYPE_FIELDS - 1] of Integer;

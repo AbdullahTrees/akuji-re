@@ -122,7 +122,7 @@ which is why every number in the data is zero-padded.
 | `0x4608BC` | `Entity_UpdateAll` | read | the dispatcher: switches on `EF_TYPE` into 80 handlers. Walks **256** slots although the pool is 289 |
 | `0x4610C4` | `Entity_Spawn` | read | three ranges: slot 0 player, `1..$20` actors, `$21..$120` rest. Copies the type row into the entity |
 | `0x461400` | `Entity_Destroy` | corroborated | opcode-5 events set `Progress[StrToInt(Copy(ParamB,1,4))]`, matching the block at offset 10 |
-| `0x4615A8` | `Entity_UpdateDying` | corroborated | called from **30 sites**, more than anything else. Class 2's death plays sound 34 = `bom03.wav` |
+| `0x4615A8` | `Entity_UpdateDying` | read | the shared death guard, called from **30 sites** — more than anything else. Engages only for `EF_CLASS` 1, 2 and 6 (written as an unsigned `class-1` against 2 and 5). Classes 1 and 2 both spawn a **type 32 emitter** and seed four of its block-A slots differently — one emitter type, two death effects. Class 6 zeroes its death timer instead and calls `Entity_SpawnDebris(e, 1)`, so it dies the same frame. Class 2 plays sound 34 = `bom03.wav`. Implemented in `EntityHandlers.pas` |
 | `0x4617FC` | `Entity_MaybeDropItem` | read | `Random($100) > $B3` — a 76/256 drop, of which `> $F5` is a rarer variant |
 | `0x461874` | `Entity_SpawnDebris` | corroborated | five particles; the impact sound comes from `stage.dat` csv 15 (terrain 3 → `water01`, 4 → `water02`) |
 | `0x461738` | `Entity_SteerToPlayer` | read | homes on slot 0 read straight off the array base — this is what proved slot 0 is the player |
