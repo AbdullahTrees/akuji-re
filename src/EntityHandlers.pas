@@ -39,6 +39,13 @@
       0x0045A1C0  type 11  a four-frame loop that never ends
       0x0045A20C  type 12  the same, slower
       0x0045A24C  type 13  debris - four states, four motions
+      0x0045A95C  type 15  a switch, thrown once
+      0x0045A9D4  type 17  nothing at all
+      0x0045A9D0  type 19  nothing at all
+      0x0045AA10  type 21  an oscillating platform
+      0x0045AA78  type 23  a torch, and the two flames it holds
+      0x0045A580  type 28  four frames, gated on its variant
+      0x0045AB64  type 29  an idle that speeds up when the player is close
 
   And the dispatcher they hang off:
 
@@ -368,6 +375,72 @@ const
   T13_TERRAIN_SHARD3 = 3;
   T13_TERRAIN_SHARD4 = 4;
 
+  { --- Types 15, 21, 23, 28 and 29, the furniture -----------------------
+    Five things that sit in a room rather than fly through it, and two more -
+    17 and 19 - whose handlers are a single RET. Those two are not missing:
+    the switch has an arm for them and the arm returns immediately, which is
+    a different fact from having no arm at all, and HANDLER_ADDR distinguishes
+    them from types 0, 18 and 20.
+
+    TYPE 15 is a switch, and it is the only handler that writes to the EVENT
+    TABLE. Thrown, it plays a sound, changes to its second sprite, and sets
+    its own event's opcode to 9 - which triggers nothing - so a switch stays
+    thrown without needing a progress flag.
+
+    TYPE 21 oscillates. EF_FACING is not a direction index here, it is a
+    signed SPEED, and it is negated every block-A[1] frames; EF_STATE picks
+    the axis, 0 for vertical and 1 for horizontal. That is exactly what
+    ParamA's 'R' letter configures - it sets EF_FACING and block A[1] - so a
+    placement carries the speed and the half-period of the swing.
+
+    TYPE 23 is a torch. On state 1 it spawns TWO children, types 11 and 12,
+    16 and 22 pixels above itself, and remembers them in EF_CHILD_A and
+    EF_CHILD_B; on state 3 it destroys them both. That is why types 11 and 12
+    loop for ever with no Entity_Destroy of their own - they are the flame,
+    and the torch owns their lifetime.
+
+    Both spawns subtract the LAYER DELTA from the position. The children are
+    placed after Entity_UpdateAll has already carried this frame's scroll into
+    the parent, so without it they would be carried twice and lag the torch by
+    one frame's scroll.
+
+    TYPE 28 does nothing at all unless its variant is 0 - both the sprite and
+    the animation are inside that test - so a variant-1 placement is inert.
+
+    TYPE 29 animates at two speeds: ten ticks a frame normally, four when the
+    player's box overlaps its own, tested at three times width and one times
+    height. It also drops itself 2 pixels on its very first frame. }
+  T15_TABLE_ADDR = $0046BE78;
+  T15_SPRITES: array[0..1] of Integer = (61, 62);
+  T15_SOUND = $0E;
+  T15_THROWN_OPCODE = 9;
+
+  T21_TABLE_ADDR = $0046BE80;
+  T21_SPRITE = 59;
+  T21_AXIS_VERTICAL   = 0;
+  T21_AXIS_HORIZONTAL = 1;
+
+  T23_TABLE_ADDR = $0046BE88;
+  T23_SPRITE = 63;
+  T23_FLAME_LOW_TYPE  = 11;
+  T23_FLAME_HIGH_TYPE = 12;
+  T23_FLAME_LOW_LIFT  = $200;    { 16 px above the torch }
+  T23_FLAME_HIGH_LIFT = $2C0;    { 22 px }
+
+  T28_FRAMES = 4;  T28_TICKS = 8;
+  T28_TABLE_ADDR = $0046BE2C;
+  T28_SPRITES: array[0..T28_FRAMES - 1] of Integer = (279, 280, 281, 282);
+  T28_DEATH_TIMER = 2;
+
+  T29_FRAMES = 4;
+  T29_TICKS_IDLE  = 10;
+  T29_TICKS_CLOSE = 4;
+  T29_TABLE_ADDR = $0046BE8C;
+  T29_SPRITES: array[0..T29_FRAMES - 1] of Integer = (87, 86, 88, 86);
+  T29_SETTLE = $40;              { 2 px, once, on its first frame }
+  T29_NEAR_SCALE_X = 3;
+  T29_NEAR_SCALE_Y = 1;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -617,6 +690,34 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045A95C. A switch. The only handler that writes to the event table. }
+procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A9D4 and 0x0045A9D0. Both are a single RET. The switch HAS an arm for
+  these two types and the arm does nothing, which is not the same as types 0,
+  18 and 20, which have no arm at all. Written out so the difference survives
+  in code rather than only in HANDLER_ADDR. }
+procedure EntityUpdate_Type17(var E: TEntity);
+procedure EntityUpdate_Type19(var E: TEntity);
+
+{ 0x0045AA10. An oscillating platform - see the T21_ block above for why
+  EF_FACING is a speed here and not a heading. }
+procedure EntityUpdate_Type21(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045AA78. A torch: it owns the two flame entities above it. }
+procedure EntityUpdate_Type23(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A580. Four frames, and inert unless its variant is 0. }
+procedure EntityUpdate_Type28(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045AB64. An idle that animates faster when the player is close. }
+procedure EntityUpdate_Type29(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x00459EB4. A moving puff whose sprite row is chosen by which way it is
   going - and by the SIGN of its velocity, so a puff with no horizontal speed
@@ -1290,6 +1391,174 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > 1) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T15_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { Two states in sequence, in two separate ifs - so the frame that sets
+    state 2 also runs the state-2 arm. One throw, one frame. }
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    World.PlaySound(T15_SOUND);
+    E.Raw[EF_STATE] := 2;
+  end;
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_FLAG1C] := 1;
+    World.SetEventOpcode(E.Raw[EF_EVENT_ID], T15_THROWN_OPCODE);
+  end;
+end;
+
+procedure EntityUpdate_Type17(var E: TEntity);
+begin
+end;
+
+procedure EntityUpdate_Type19(var E: TEntity);
+begin
+end;
+
+procedure EntityUpdate_Type21(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+begin
+  E.Raw[EF_ANIM_ID] := T21_SPRITE;
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  { The half-period is block A[1], which ParamA's 'R' letter sets. }
+  if E.Raw[EF_BLOCK_B] > E.Raw[EF_BLOCK_A + 1] then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FACING] := -E.Raw[EF_FACING];
+  end;
+
+  if E.Raw[EF_STATE] = T21_AXIS_VERTICAL then
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_FACING])
+  else if E.Raw[EF_STATE] = T21_AXIS_HORIZONTAL then
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
+end;
+
+procedure EntityUpdate_Type23(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Slot: Integer;
+begin
+  E.Raw[EF_ANIM_ID] := T23_SPRITE;
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    { Minus the layer delta: this frame's scroll has already been carried into
+      the torch, and a child placed from its position would otherwise take it
+      a second time. }
+    Slot := World.Spawn(EKIND_MINOR, T23_FLAME_LOW_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS - World.Layer.DeltaX,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS - World.Layer.DeltaY
+                          - T23_FLAME_LOW_LIFT);
+    E.Raw[EF_CHILD_A] := Slot;
+    Slot := World.Spawn(EKIND_MINOR, T23_FLAME_HIGH_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS - World.Layer.DeltaX,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS - World.Layer.DeltaY
+                          - T23_FLAME_HIGH_LIFT);
+    E.Raw[EF_CHILD_B] := Slot;
+    E.Raw[EF_STATE] := 2;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    { Slot 0 counts as "none" here, which is the original's test - and slot 0
+      is the player, so a child can never legitimately be there. }
+    if (E.Raw[EF_CHILD_A] <> 0) and (World.Pool <> nil) then
+    begin
+      World.DestroyEntity(World.Pool.Entity(E.Raw[EF_CHILD_A])^, False);
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+    if (E.Raw[EF_CHILD_B] <> 0) and (World.Pool <> nil) then
+    begin
+      World.DestroyEntity(World.Pool.Entity(E.Raw[EF_CHILD_B])^, False);
+      E.Raw[EF_CHILD_B] := 0;
+    end;
+    E.Raw[EF_STATE] := 0;
+  end;
+end;
+
+procedure EntityUpdate_Type28(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  { Everything, including the sprite, is inside the variant test. A variant
+    other than 0 makes this entity completely inert. }
+  if E.Raw[EF_VARIANT] <> 0 then
+    Exit;
+
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T28_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T28_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  if E.Raw[EF_DEATH_TIMER] = 0 then
+    E.Raw[EF_DEATH_TIMER] := T28_DEATH_TIMER;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T28_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+    if E.Raw[EF_FLAG1C] > T28_FRAMES - 1 then
+      World.DestroyEntity(E, False);
+  end;
+end;
+
+procedure EntityUpdate_Type29(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Ticks: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T29_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T29_SPRITES[Frame];
+
+  { Settles two pixels on its first frame, and this happens whatever the game
+    state is - it is outside the guard below. }
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T29_SETTLE);
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Ticks := T29_TICKS_IDLE;
+  if (World.Pool <> nil)
+     and EntitiesOverlap(E, World.Pool.Entity(SLOT_SINGLE_FIRST)^,
+                         T29_NEAR_SCALE_X, T29_NEAR_SCALE_Y) then
+    Ticks := T29_TICKS_CLOSE;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > Ticks then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T29_FRAMES;
+  end;
 end;
 
 { The one-shot latch types 4..7 share: mark it done and arm the death timer.
@@ -1968,11 +2237,18 @@ begin
       11: EntityUpdate_Type11(E^, AGameState);
       12: EntityUpdate_Type12(E^, AGameState);
       13: EntityUpdate_Type13(E^, AGameState, World);
+      15: EntityUpdate_Type15(E^, AGameState, World);
+      17: EntityUpdate_Type17(E^);
+      19: EntityUpdate_Type19(E^);
+      21: EntityUpdate_Type21(E^, AGameState, World);
+      23: EntityUpdate_Type23(E^, AGameState, World);
+      28: EntityUpdate_Type28(E^, AGameState, World);
+      29: EntityUpdate_Type29(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 56 arms are in HANDLER_ADDR, untranslated }
+      { the other 49 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

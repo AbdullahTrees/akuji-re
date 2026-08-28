@@ -226,6 +226,9 @@ type
     function Load(const ADataDir: string; StageIndex: Integer): Integer;
 
     procedure SetActive(Index: Integer; Value: Boolean);
+    { EntityUpdate_Type15's throw. Distinct from Disable, which also moves the
+      record off the map - a thrown switch keeps its tile and its entity. }
+    procedure SetOpcode(Index, Value: Integer);
     procedure SetInWindow(Index: Integer; Value: Boolean);
     procedure SetEntity(Index, Slot: Integer);
 
@@ -310,6 +313,12 @@ begin
   FEvents[Index].Opcode := EVOP_DISABLED;
   FEvents[Index].TileX := EVENT_DISABLED_TILE;
   FEvents[Index].TileY := EVENT_DISABLED_TILE;
+end;
+
+procedure TEventScript.SetOpcode(Index, Value: Integer);
+begin
+  if (Index >= 0) and (Index < Length(FEvents)) then
+    FEvents[Index].Opcode := Value;
 end;
 
 procedure TEventScript.SetActive(Index: Integer; Value: Boolean);

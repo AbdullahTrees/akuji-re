@@ -877,6 +877,11 @@ type
     procedure BeginEvent(EventId, Arg: Integer); virtual;
     procedure ClearEventEntity(EventId: Integer); virtual;
     procedure SetProgress(Index: Integer); virtual;
+    { EntityUpdate_Type15 rewrites its own event's OPCODE - a switch that has
+      been thrown becomes opcode 9, which no longer triggers anything. The
+      event table is the entity system's, not the interpreter's, so it comes
+      through the world like the rest. }
+    procedure SetEventOpcode(EventId, Opcode: Integer); virtual;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
     { 0x00461874. Real, not abstract: this is the whole function. }
     procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual;
@@ -1663,6 +1668,10 @@ begin
 end;
 
 procedure TEntityWorld.SetProgress(Index: Integer);
+begin
+end;
+
+procedure TEntityWorld.SetEventOpcode(EventId, Opcode: Integer);
 begin
 end;
 

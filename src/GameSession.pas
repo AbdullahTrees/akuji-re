@@ -84,6 +84,7 @@ type
     procedure BeginEvent(EventId, Arg: Integer); override;
     procedure ClearEventEntity(EventId: Integer); override;
     procedure SetProgress(Index: Integer); override;
+    procedure SetEventOpcode(EventId, Opcode: Integer); override;
 
     { The input the push-against opcodes test. }
     function AxisX: Integer; override;
@@ -281,6 +282,14 @@ procedure TGameWorld.SetProgress(Index: Integer);
 begin
   if (Index >= 0) and (Index < PROGRESS_LENGTH) then
     FSession.Player.Progress[Index] := 1;
+end;
+
+procedure TGameWorld.SetEventOpcode(EventId, Opcode: Integer);
+begin
+  if (FSession.Events = nil) or (EventId < 0)
+     or (EventId >= FSession.Events.Count) then
+    Exit;
+  FSession.Events.SetOpcode(EventId, Opcode);
 end;
 
 function TGameWorld.AxisX: Integer;
