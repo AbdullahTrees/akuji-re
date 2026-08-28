@@ -54,7 +54,7 @@ unit Camera;
 interface
 
 uses
-  SysUtils;
+  SysUtils, Entities;
 
 const
   { The dead zone, read out of the two ShouldScroll functions. The comparisons
@@ -69,25 +69,6 @@ const
     integer; see the header. }
   VIEW_TILES_X: Single = 10.0;
   VIEW_TILES_Y: Single = 7.5;
-
-type
-  { p_LayerInfo @ 0x00483BF4. A plain global struct, not a pointer - the
-    original indexes it directly.
-
-    Origin is in the same biased 1/32-pixel units as an entity position, so
-    PixelOf applies to it unchanged. Delta is what the layer moved THIS frame,
-    in 1/32 pixel, and exists so the parallax and the riding code can follow a
-    scroll they did not cause. }
-  TLayerInfo = record
-    OriginX:    Integer;   // +0x00
-    OriginY:    Integer;   // +0x04
-    DeltaX:     Integer;   // +0x08
-    DeltaY:     Integer;   // +0x0C
-    TileW:      Integer;   // +0x10
-    TileH:      Integer;   // +0x14
-    MapTilesX:  Integer;   // +0x18
-    MapTilesY:  Integer;   // +0x1C
-  end;
 
 { How far the layer origin may travel before the view leaves the map. }
 function MaxScrollX(const L: TLayerInfo): Integer;
@@ -107,21 +88,6 @@ procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 
 implementation
-
-uses
-  Entities;
-
-{ The original rounds the layer origin with `if x < 0 then x := x + 31` and no
-  bias subtraction, where an entity position gets the biased form. The bias
-  cancels in the subtraction that follows it, so this is not a discrepancy -
-  but it is why this is written out rather than reusing PixelOf. }
-function OriginPixel(Raw: Integer): Integer;
-begin
-  if Raw < 0 then
-    Result := (Raw + 31) shr POSITION_SHIFT
-  else
-    Result := Raw shr POSITION_SHIFT;
-end;
 
 function MaxScrollX(const L: TLayerInfo): Integer;
 begin

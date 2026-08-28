@@ -489,6 +489,25 @@ const
   ENTITY_TYPE_FIELDS = 18;
 
 type
+  { p_LayerInfo @ 0x00483BF4. A plain global struct, not a pointer - the
+    original indexes it directly.
+
+    Origin is in the same biased 1/32-pixel units as an entity position, so
+    PixelOf applies to it unchanged. Delta is what the layer moved THIS frame,
+    in 1/32 pixel, and exists so the parallax and the riding code can follow a
+    scroll they did not cause. }
+  TLayerInfo = record
+    OriginX:    Integer;   // +0x00
+    OriginY:    Integer;   // +0x04
+    DeltaX:     Integer;   // +0x08
+    DeltaY:     Integer;   // +0x0C
+    TileW:      Integer;   // +0x10
+    TileH:      Integer;   // +0x14
+    MapTilesX:  Integer;   // +0x18
+    MapTilesY:  Integer;   // +0x1C
+  end;
+
+type
   { A collision box in screen pixels, in the order the original stores it: four
     consecutive ints passed by pointer to Rect_Overlap. }
   TBox = record L, T, R, B: Integer; end;
@@ -640,6 +659,41 @@ function EntityPixelY(const E: TEntity): Integer;
   extent, so a bigger sprite gets a proportionally bigger margin. }
 function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
 
+{ The layer origin's pixel value. Rounds with a bare +31 for negatives and does
+  NOT remove POSITION_BIAS, unlike an entity position. }
+function OriginPixel(Raw: Integer): Integer;
+
+{ 0x00457150 / 0x00457228. How far the entity may move on that axis before it
+  is flush against the tile boundary it is heading for, in 1/32 pixel. The
+  callers use it to land exactly on an edge after Entity_TileCollide* has said
+  something is in the way.
+
+  The two are an exact pair: every field the X one reads at offset N, the Y one
+  reads at N+4, and they take LayerInfo +0x00/+0x10 against +0x04/+0x14. That
+  pairing over six independent fields is what established EF_EXTENT_*,
+  EF_BOX_OFS_* and EF_TILE_OFS_* in the first place.
+
+  TWO THINGS THAT LOOK WRONG AND ARE NOT.
+
+  The entity position is converted with a bare +31 for negatives, WITHOUT
+  removing POSITION_BIAS - unlike everywhere else. The bias survives into the
+  world coordinate, but 0x10000 in 1/32 pixel is 2048 pixels, and 2048 is
+  exactly 64 tiles of 32, so it shifts the coordinate by a whole number of
+  tiles and the distance to a tile edge is unchanged. It would stop being true
+  for any tile width that does not divide 2048; every shipped map is 32.
+
+  DELTA = 0 RETURNS RUBBISH. The original initialises its result to the entity
+  POINTER and only overwrites it in the Delta < 0 and Delta > 0 branches, so a
+  zero delta returns an address cast to an integer. Callers reach it only after
+  a collision was reported, which normally implies a non-zero delta - but
+  Entity_TileCollide* can report one for an entity already inside a solid tile,
+  and then the original assigns a pointer to a velocity. Reproducing that is
+  neither possible nor desirable here; this returns 0. }
+function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
+                       Delta: Integer): Integer;
+function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
+                       Delta: Integer): Integer;
+
 { 0x0045117C. Move V toward zero by Step without ever crossing it. Used for
   friction - the air dash bleeds off through this - and called from several
   places rather than inlined. }
@@ -653,6 +707,82 @@ function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
 
 implementation
 
+
+{ The original rounds the layer origin with `if x < 0 then x := x + 31` and no
+  bias subtraction, where an entity position gets the biased form. The bias
+  cancels in the subtraction that follows it, so this is not a discrepancy -
+  but it is why this is written out rather than reusing PixelOf. }
+function OriginPixel(Raw: Integer): Integer;
+begin
+  if Raw < 0 then
+    Result := (Raw + 31) shr POSITION_SHIFT
+  else
+    Result := Raw shr POSITION_SHIFT;
+end;
+
+
+{ E.Raw[Extent] div 2, rounded toward zero the way the original's
+  shift-and-correct does it. }
+function HalfExtent(V: Integer): Integer;
+begin
+  Result := V div 2;
+end;
+
+function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
+                       Delta: Integer): Integer;
+var
+  CamPx, TileW, EntPx, Half, World: Integer;
+begin
+  Result := 0;                          { see the header: Delta = 0 }
+  if Delta = 0 then
+    Exit;
+  CamPx := OriginPixel(L.OriginX);
+  TileW := L.TileW;
+  if TileW = 0 then
+    Exit;
+  EntPx := OriginPixel(E.Raw[EF_POS_X]);
+  Half := HalfExtent(E.Raw[EF_EXTENT_X]);
+  if Delta < 0 then
+  begin
+    World := (CamPx mod TileW) + (EntPx - Half)
+             + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X];
+    Result := ((World div TileW) * TileW - World) shl POSITION_SHIFT;
+  end
+  else
+  begin
+    World := (CamPx mod TileW) + ((EntPx + Half) - E.Raw[EF_BOX_OFS_X])
+             + E.Raw[EF_TILE_OFS_X] - 1;
+    Result := (((World div TileW + 1) * TileW - 1) - World) shl POSITION_SHIFT;
+  end;
+end;
+
+function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
+                       Delta: Integer): Integer;
+var
+  CamPx, TileH, EntPx, Half, World: Integer;
+begin
+  Result := 0;
+  if Delta = 0 then
+    Exit;
+  CamPx := OriginPixel(L.OriginY);
+  TileH := L.TileH;
+  if TileH = 0 then
+    Exit;
+  EntPx := OriginPixel(E.Raw[EF_POS_Y]);
+  Half := HalfExtent(E.Raw[EF_EXTENT_Y]);
+  if Delta < 0 then
+  begin
+    World := (CamPx mod TileH) + (EntPx - Half)
+             + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y];
+    Result := ((World div TileH) * TileH - World) shl POSITION_SHIFT;
+  end
+  else
+  begin
+    World := (CamPx mod TileH) + ((EntPx + Half) - E.Raw[EF_BOX_OFS_Y])
+             + E.Raw[EF_TILE_OFS_Y] - 1;
+    Result := (((World div TileH + 1) * TileH - 1) - World) shl POSITION_SHIFT;
+  end;
+end;
 
 procedure ApproachZero(var V: Integer; Step: Integer);
 begin

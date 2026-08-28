@@ -131,8 +131,8 @@ which is why every number in the data is zero-padded.
 
 | Address | Name | Grade | Notes |
 |---|---|---|---|
-| `0x457150` | `Entity_TileEdgeDistX` | corroborated | how far it may move; used by the falling-item handler to land flush |
-| `0x457228` | `Entity_TileEdgeDistY` | corroborated | exact X/Y mirror — six fields at `+4`, and `LayerInfo +0/+10` vs `+4/+14` |
+| `0x457150` | `Entity_TileEdgeDistX` | read | how far it may move before the box edge is flush against a tile boundary. Implemented in `Entities.pas`; the invariant is swept over 137842 cases |
+| `0x457228` | `Entity_TileEdgeDistY` | read | exact X/Y mirror — six fields at `+4`, and `LayerInfo +0/+10` vs `+4/+14`. **Delta = 0 returns the entity POINTER** in the original, because the result is initialised to `param_1` and only the two non-zero branches overwrite it |
 | `0x457300` | `Entity_TileCollideX` | read | tile index hit moving that far, vs the terrain threshold |
 | `0x4574DC` | `Entity_TileCollideY` | read | the mirror; also the tile-lookup argument order swaps |
 | `0x457F98` | `Entity_BoxesOverlap` | read | entity-vs-entity AABB, using the `+0xA8/+0xAC` insets |

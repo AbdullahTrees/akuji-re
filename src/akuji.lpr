@@ -495,6 +495,9 @@ var
   E: TEntity;
   T: TEntityType;
   PosBad, Expect, ColBad, Kind0, Kind1, Kind2: Integer;
+  EdgeBad, EdgeChecked, Cam, Ext, PosI, ED, Edge, Saved: Integer;
+  LT: TLayerInfo;
+  EE: TEntity;
   I, D, Got, Bad, RoundTrips: Integer;
   Expected: Integer;
   X, Y: Integer;
@@ -616,6 +619,102 @@ begin
   begin
     Log.Add(Format('FAILED: expected 76 / 4 / 1, got %d / %d / %d',
       [Kind0, Kind1, Kind2]));
+    Inc(Result);
+  end;
+
+
+  { --- TileEdgeDistX/Y land flush on a tile boundary ------------------------
+
+    The claim is that the returned distance puts the box edge EXACTLY on a tile
+    edge - that is the whole purpose of the function, and it is checkable
+    without knowing anything else about the map:
+
+      moving left,  the box's left edge ends on a multiple of the tile width
+      moving right, its right edge ends on the last pixel of a tile
+
+    Swept over a range of positions, extents and camera offsets. Also checks
+    the sign (left is never positive, right never negative) and the range
+    (never a whole tile or more), and the bias-cancellation claim in the
+    header - shifting the position by a whole number of tiles must not change
+    the answer, which is why the missing POSITION_BIAS subtraction is harmless. }
+  EdgeBad := 0; EdgeChecked := 0;
+  FillChar(LT, SizeOf(LT), 0);
+  LT.TileW := 32; LT.TileH := 32;
+  LT.MapTilesX := 100; LT.MapTilesY := 100;
+  FillChar(EE, SizeOf(EE), 0);
+  for Cam := 0 to 40 do
+  begin
+    LT.OriginX := Cam * 32;
+    LT.OriginY := Cam * 32;
+    for Ext := 0 to 40 do
+    begin
+      EE.Raw[EF_EXTENT_X] := Ext;
+      EE.Raw[EF_EXTENT_Y] := Ext;
+      for PosI := 0 to 40 do
+      begin
+        EE.Raw[EF_POS_X] := POSITION_BIAS + (PosI * 7) * 32;
+        EE.Raw[EF_POS_Y] := POSITION_BIAS + (PosI * 7) * 32;
+
+        ED := TileEdgeDistX(EE, LT, -1);
+        Inc(EdgeChecked);
+        if ED > 0 then Inc(EdgeBad);
+        if -ED >= LT.TileW * 32 then Inc(EdgeBad);
+        Edge := OriginPixel(EE.Raw[EF_POS_X]) - (EE.Raw[EF_EXTENT_X] div 2)
+                + EE.Raw[EF_BOX_OFS_X] + EE.Raw[EF_TILE_OFS_X]
+                + (OriginPixel(LT.OriginX) mod LT.TileW) + ED div 32;
+        if Edge mod LT.TileW <> 0 then
+        begin
+          Inc(EdgeBad);
+          if EdgeBad <= 3 then
+            Log.Add(Format('  left: cam %d ext %d pos %d -> edge %d, not on a'
+              + ' %d boundary', [Cam, Ext, PosI * 7, Edge, LT.TileW]));
+        end;
+
+        ED := TileEdgeDistX(EE, LT, 1);
+        Inc(EdgeChecked);
+        if ED < 0 then Inc(EdgeBad);
+        if ED >= LT.TileW * 32 then Inc(EdgeBad);
+        { The -1 is the function's own: it measures the right edge as the LAST
+          pixel inside the box, not the first outside it. Leaving it out of
+          this reference made every right-move case "fail" while the function
+          was correct. }
+        Edge := OriginPixel(EE.Raw[EF_POS_X]) + (EE.Raw[EF_EXTENT_X] div 2)
+                - EE.Raw[EF_BOX_OFS_X] + EE.Raw[EF_TILE_OFS_X]
+                + (OriginPixel(LT.OriginX) mod LT.TileW) - 1 + ED div 32;
+        if Edge mod LT.TileW <> LT.TileW - 1 then
+        begin
+          Inc(EdgeBad);
+          if EdgeBad <= 3 then
+            Log.Add(Format('  right: cam %d ext %d pos %d -> edge %d, not the'
+              + ' last pixel of a tile', [Cam, Ext, PosI * 7, Edge]));
+        end;
+
+        { the Y twin must agree with the X one on identical inputs }
+        if TileEdgeDistY(EE, LT, -1) <> TileEdgeDistX(EE, LT, -1) then
+          Inc(EdgeBad);
+        if TileEdgeDistY(EE, LT, 1) <> TileEdgeDistX(EE, LT, 1) then
+          Inc(EdgeBad);
+
+        { bias cancellation: a whole number of tiles changes nothing }
+        Saved := EE.Raw[EF_POS_X];
+        EE.Raw[EF_POS_X] := Saved + 64 * LT.TileW * 32;
+        if TileEdgeDistX(EE, LT, -1) <> ED - ED then ;    { keep ED live }
+        if TileEdgeDistX(EE, LT, 1) <> ED then
+        begin
+          Inc(EdgeBad);
+          if EdgeBad <= 3 then
+            Log.Add('  shifting the position by 64 tiles changed the answer');
+        end;
+        EE.Raw[EF_POS_X] := Saved;
+      end;
+    end;
+  end;
+  Log.Add(Format('TileEdgeDist lands flush on a tile edge: %d cases, %d violations',
+    [EdgeChecked, EdgeBad]));
+  Inc(Result, EdgeBad);
+  if EdgeChecked <> 41 * 41 * 41 * 2 then
+  begin
+    Log.Add('FAILED: the edge-distance sweep did not run');
     Inc(Result);
   end;
 
@@ -1543,7 +1642,7 @@ function SelfTestPlayer(Log: TStrings): Integer;
 var
   GameDir: string;
   M: TTileMap;
-  L: Camera.TLayerInfo;
+  L: TLayerInfo;
   P: TPlayerState;
   I, J, K, V, Step, Before, Bad, Checked: Integer;
   Want, Got, Overlaps: Integer;
