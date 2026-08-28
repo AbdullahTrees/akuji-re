@@ -29,7 +29,7 @@ section 15.
 AND the placement machinery around it: what makes an event spawn, what makes it
 stop existing for good, and how difficulty selects placements. Section 8b.
 
-**Coverage** (`python tools/coverage.py`): 42 of 149 game-layer functions have
+**Coverage** (`python tools/coverage.py`): 55 of 149 game-layer functions have
 a Pascal counterpart, and 102 of the 149 carry real names. The denominator has
 moved twice - 48 hidden handlers created (section 12), then the game-layer floor
 corrected from `0x455000` to `0x454790`. The work did not grow either time.
@@ -43,8 +43,10 @@ self-tests, three reference implementations, a records check and a negative
 control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
 
-**Next:** the ~100 entity-type handlers. Read and write each one together -
-they are the same task, and `Player.pas` now gives them somewhere to plug in.
+**Next:** the 74 remaining entity-type handlers. Read and write each one
+together - they are the same task, and `EntityHandlers.EntityUpdateAll` now
+gives them somewhere to plug in. `HANDLER_ADDR` is the to-do list, and it comes
+out of the binary's own jump table rather than being transcribed by hand.
 The event system has no open questions left.
 
 ## 2. The three layers — most important section
@@ -469,7 +471,7 @@ visible only at screen edges — `--selftest-dir` pins it over 8001 values.
 
 | function | what it does |
 |---|---|
-| `Entity_TileCollideX/Y` `0x457300`/`0x4574DC` | tile index hit moving that far, vs the terrain's solid threshold |
+| `Entity_TileCollideX/Y` `0x457300`/`0x4574DC` | the first solid tile the **leading edge** meets, swept across every tile the box spans on the other axis. A delta of **zero returns nothing** — a stationary entity is never blocked |
 | `Entity_TileEdgeDistX/Y` `0x457150`/`0x457228` | how far it may actually move, to land flush |
 | `Entity_BoxesOverlap` `0x457F98` | entity-vs-entity AABB |
 | `Entity_IsOffScreen` `0x4580BC` | culling, margin × the entity's own extent |
@@ -480,6 +482,19 @@ the sprite at `position − half-extent` on both axes.
 **Two different inset pairs**: `+0xA0/+0xA4` for tile collision, `+0xA8/+0xAC`
 for entity-vs-entity. The solid-tile threshold is set per terrain by
 `Terrain_Configure` — so terrain decides which tiles are solid.
+
+Tile indices are biased by **128 tiles**, not 64, because the layer origin and
+the entity position *both* carry `POSITION_BIAS` — 4096 pixels between them,
+which is 128 tiles of 32. That is independent evidence for the layer origin's
+bias, which until then rested only on the two rounding idioms looking alike.
+
+The `Scrolling` argument is a **rounding** decision, not a semantic one: both
+terms land in the same sum, and it only decides which of them carries the
+1/32-pixel remainder. It changes the tile solely where that crosses a boundary.
+
+`TileMap_Get` `0x44DB5C` has **no bounds check** — it is one line, and an X
+outside the map indexes into the neighbouring row, so the map wraps horizontally
+for anything that walks off the side.
 
 Gravity is **8** per frame for loose objects, **4** for the player, both capped
 at `$200`.
@@ -758,6 +773,16 @@ is worse than none. Four ways it has happened here, all found by mutation:
 * A sprite-table check compared constants against constants; the compiler folded
   it and warned "unreachable code" on every branch. It now reads the tables out
   of `akuji.exe`.
+* Reading it out of `akuji.exe` was still not enough. The check read
+  `ITEM_VARIANTS * ITEM_FRAMES` ints and compared them — so the **length it
+  verified was the constant under test**, and the table was wrong by a factor of
+  eight for several commits. Shrinking 16 rows to 2 just makes it read fewer
+  values and pass again. **To pin a length you need a fact from outside the
+  table**; here it is the next table's pointer, since the region is const arrays
+  laid end to end.
+* A check on an early `Exit` passed against a build with the `Exit` deleted,
+  because the loop stopped doing the observable thing either way. **Observe
+  something that happens *before* the guard you are testing.**
 
 **Force a full rebuild (`lazbuild -B`) when mutation testing.** An incremental
 build can leave you running the old binary, which makes a live mutation look
@@ -836,11 +861,45 @@ of which any existing check would have caught:
 That is a 3-defect yield on the first audited function, which is the measure of
 how much the old process was costing.
 
-`Entities.pas` is next: `Entity_Spawn`, `Entity_TileEdgeDistX/Y` and
-`Entity_UpdateDying` are the parts written from notes rather than from a live
-decompile.
+`Entities.pas` has now been audited the same way and is finished:
+`Entity_Spawn` was correct, `Entity_TileEdgeDistX/Y` was correct, and
+`Entity_UpdateDying` was **correct but vague** — "spawns an effect entity" turned
+out to be a type-32 emitter seeded with four different numbers per death class.
+
+The audit is not only for behaviour code. `EntityHandlers.ITEM_SPRITES` was
+recorded as **sixteen** rows of four and is **two**, and the evidence for sixteen
+was real but attached to the wrong type — the shipped data does place something
+with the `A` argument running 0..15, and it is **type 24**, whose table is a
+different one 32 bytes further on. Type 14's own 122 placements all use `A = 1`.
+
+The general lesson, now in section 14: a table's **extent** needs evidence from
+outside the table. Here the region is a run of const arrays laid end to end, each
+reached through its own pointer global with exactly one reader, so a table ends
+where the next pointer begins — and two of the four are flush with their use in
+both directions (type 24 is placed 16 times with `A` = 0..15, one of each; type
+25 uses 0..2 and has 3 entries).
 
 **Restore mutations by copying a file, never with `git checkout`.** Twice now
 that has misfired: once it reverted a whole file of uncommitted work, and once
 it silently did nothing because the file was untracked, leaving the mutation
 live in a run that then reported PASSED.
+
+### `tools/mutate.sh` — use it, do not hand-roll another one
+
+Mutations live in `tools/mutations/*.txt` as `name / file / --- / old / ---> /
+new` records. Every guard in the script is scar tissue:
+
+* a **lock**, because two copies once ran concurrently, each restoring the
+  other's mutation, leaving two live defects *and a backup that already
+  contained one* — recovery meant resetting to HEAD and replaying the patch
+  script that had generated the work
+* a **timeout**, because `while Row <= Row` does not fail, it **hangs**, and the
+  suite blocked for twenty minutes behind a stuck process that also held a lock
+  on `akuji.exe` and made every later build fail with "Can't create object
+  file", which looks like a compile error and is not
+* a **verified restore** that aborts the run rather than letting a bad restore
+  spread
+* **stray-process cleanup** before every build
+
+Calibrate it with a negative control — a comment-only change must SURVIVE.
+Without that, "everything was killed" can just mean everything failed to build.

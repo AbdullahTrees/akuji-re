@@ -180,3 +180,72 @@ src/TileMaps.pas
   if (X < 0) or (Y < 0) or (X >= FMapW) or (Y >= FMapH) then
     Exit(0);
   Idx := X + Y * FMapW;
+===
+type 14's table address is off by one table
+src/EntityHandlers.pas
+---
+  ITEM_SPRITE_TABLE_ADDR = $0046BDA0;
+--->
+  ITEM_SPRITE_TABLE_ADDR = $0046BDC0;
+===
+type 24's beat table starts one int late
+src/EntityHandlers.pas
+---
+  ITEM24_BEAT_ADDR    = $0046BE00;
+--->
+  ITEM24_BEAT_ADDR    = $0046BE04;
+===
+type 25 gets the wrong sprite for variant 2
+src/EntityHandlers.pas
+---
+  ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
+--->
+  ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 106);
+===
+type 24's bob phase never advances
+src/EntityHandlers.pas
+---
+  E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+--->
+  E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 0) mod DIR_COUNT;
+===
+type 24 bobs on the X axis instead
+src/EntityHandlers.pas
+---
+  Inc(E.Raw[EF_POS_Y], DirVelY(WrapDir(E.Raw[EF_FACING])));
+--->
+  Inc(E.Raw[EF_POS_X], DirVelY(WrapDir(E.Raw[EF_FACING])));
+===
+type 24 bobs while the game is paused
+src/EntityHandlers.pas
+---
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { The bob. EF_FACING is a phase here, not a heading: one step of 64 per frame
+--->
+  if AGameState = -1 then
+    Exit;
+
+  { The bob. EF_FACING is a phase here, not a heading: one step of 64 per frame
+===
+the heartbeat fires twice as often
+src/EntityHandlers.pas
+---
+  ITEM24_BEAT_TICKS   = $3C;   { 60; the sound fires when the count EXCEEDS it }
+--->
+  ITEM24_BEAT_TICKS   = $1E;   { 60; the sound fires when the count EXCEEDS it }
+===
+variant 8's frames stop alternating
+src/EntityHandlers.pas
+---
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod ITEM24_BEAT_FRAMES;
+--->
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 0) mod ITEM24_BEAT_FRAMES;
+===
+type 25 is dispatched to the wrong handler
+src/EntityHandlers.pas
+---
+      25: EntityUpdate_Type25(E^);
+--->
+      25: EntityUpdate_Type14(E^, AGameState);

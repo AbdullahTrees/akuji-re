@@ -159,12 +159,32 @@ body. Those whose bodies have been read carry a suffix:
 | Address | Name | Grade | Notes |
 |---|---|---|---|
 | `0x4585A8` | `Player_Update` | corroborated | type 1. The dash is a double tap in a 30-frame window, and `tk001.dat` says "Press the arrow key twice to perform a Dash move". Every sound matches its name |
+| `0x45A3E0` | `EntityUpdate_Type14` | translated | animated pickup, four frames on a five-frame cycle. Its sprite table is **2** variants, not the 16 once recorded — see below |
+| `0x45A43C` | `EntityUpdate_Type24` | translated | a **bobbing** pickup: adds `DirVelY(EF_FACING)` each play frame and advances the phase one step of 64, so it traces a full sine period a second long and nets to exactly zero. Sixteen variants, flat table. **Variant 8** animates between two frames every frame and plays `kodou.wav` — heartbeat — every 61 frames |
+| `0x45A4F0` | `EntityUpdate_Type25` | translated | the smallest handler in the game: 28 bytes, one table lookup, nothing else. The most-placed entity in the game (160 records across all 65 stages) and it is pure scenery |
 | `0x45A5D4` | `EntityUpdate_Type32_Emitter` | read | invisible spawner; config in block A, state in block B |
 | `0x45A698` | `EntityUpdate_Type33_Explosion` | corroborated | six particles using **both** direction tables at the same index |
 | `0x45A7BC` | `EntityUpdate_Type36_FallingItem` | read | gravity 8 capped at `$200`, then snap-to-edge on landing |
 | `0x4593B0` | `Player_UpdateGlide` | read | state 6. Gravity 2, `-0x20` of lift on each fresh jump **press** (an edge, not a hold), steering capped at `±0x40`, four-frame flap. Gated on ability byte `Head[7]` |
 | `0x459624` | `Player_UpdateAirDash` | read | state 7. **No gravity term at all**; launched at `dir shl 3` and bled off by `ApproachZero`. Phases through solids whose `EF_VULN_KIND` is `0x5C`. Gated on `Head[6]` |
 | `0x459828` | `Player_UpdateKnockback` | read | state 8. Reads no input. On landing → state 3; if `Lives` is 0 it spawns three souls at headings 0/`0x14`/`0x28` and enters state 9 |
+
+### The four adjacent sprite tables at `0x46BDA0`
+
+A run of const arrays laid end to end, each reached through its own pointer
+global with **exactly one reader** in the binary — which is what fixes their
+lengths, since a table ends where the next one begins.
+
+| ptr | base | ints | used by |
+|---|---|---|---|
+| `0x46CBA0` | `0x46BDA0` | 8 | type 14, as 2 rows of 4 frames (stride 16) |
+| `0x46D0E4` | `0x46BDC0` | 16 | type 24, flat — one sprite per variant |
+| `0x46D32C` | `0x46BE00` | 2 | type 24 variant 8's two-frame animation |
+| `0x46CF00` | `0x46BE08` | 3 | type 25, flat |
+
+Type 14's was recorded as **16 rows** and is 2. The evidence for 16 was real but
+belonged to type 24, whose table is the next one along and *is* indexed 0..15.
+Two of the four are flush with their use in both directions.
 
 There is a real bug in `Player_UpdateGlide` worth knowing about before
 "correcting" it: the vertical clamp writes the **horizontal** velocity —

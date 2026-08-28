@@ -13,6 +13,8 @@
 
       0x004615A8  Entity_UpdateDying - the shared guard, not a handler
       0x0045A3E0  type 14  animated pickup
+      0x0045A43C  type 24  bobbing pickup, sixteen variants
+      0x0045A4F0  type 25  static scenery - the smallest handler in the game
 
   And the dispatcher they hang off:
 
@@ -29,42 +31,86 @@ unit EntityHandlers;
 interface
 
 uses
-  SysUtils, Entities, GameState, SoundTable, PlayerState, Player;
+  SysUtils, Entities, GameState, SoundTable, PlayerState, Player, Directions;
 
 const
-  { --- Type 14's sprite table @ 0x0046BDA0 -------------------------------
-    Sixteen variants of four frames, indexed [Variant][Frame] with the variant
-    coming from the entity's int 6 - which is exactly what ParamA's 'A' letter
-    writes when the event places it. So `0024-A-0004` places a type 24 using
-    variant 4, and the A argument is an ART SELECTOR, not a quantity.
+  { --- Four adjacent sprite tables, and a correction ---------------------
 
-    That ties three things together that were decoded separately: the ParamA
-    grammar, the entity record, and this table. The A argument's observed range
-    across the shipped data is 0..15, and the table has exactly 16 rows - flush,
-    the same fit that pinned ENTITY_TYPE_COUNT at 81.
+    THE TYPE 14 TABLE WAS RECORDED AS SIXTEEN ROWS AND IT IS TWO. The mistake
+    is kept in view because the evidence for sixteen was real and simply
+    attached to the wrong type: the shipped data does place something with the
+    ParamA 'A' argument running 0..15, and it is TYPE 24, whose sprite table is
+    a different one starting 32 bytes further on. Type 14's own 122 placements
+    use A = 1 and nothing else.
 
-    Rows 0..3 are the plain ping-pong shape A-B-C-B; later rows are arbitrary
-    four-frame sequences, and several reuse frames from their neighbours. }
-  ITEM_VARIANTS = 16;
+    What settles an extent here is the LAYOUT, not the data. This whole region
+    is a run of small const arrays laid end to end, each reached through its own
+    pointer global, so a table ends where the next one begins:
+
+      ptr         base        ints  used by
+      0x0046CBA0  0x0046BDA0     8  type 14, as 2 rows of 4 frames (stride 16)
+      0x0046D0E4  0x0046BDC0    16  type 24, FLAT - one sprite per variant
+      0x0046D32C  0x0046BE00     2  type 24 variant 8's two-frame animation
+      0x0046CF00  0x0046BE08     3  type 25, flat
+
+    Every one of those four pointers has exactly ONE reader in the whole binary
+    - the handler named beside it - so no second type could need more rows. And
+    two of the four are flush with their use in both directions: type 24 is
+    placed exactly sixteen times with A = 0..15, one of each, and type 25 uses
+    A = 0, 1, 2 and nothing else.
+
+    The lesson for the self-test: reading N values out of akuji.exe and finding
+    they match proves the VALUES and says nothing about N - especially when N is
+    the constant under test, which is what the old check did. The extent is now
+    checked against the neighbouring pointer instead. }
+
+  ITEM_VARIANTS = 2;
   ITEM_FRAMES   = 4;
   ITEM_SPRITE_TABLE_ADDR = $0046BDA0;
+  ITEM_SPRITE_TABLE_PTR  = $0046CBA0;
   ITEM_SPRITES: array[0..ITEM_VARIANTS - 1, 0..ITEM_FRAMES - 1] of Integer = (
     ( 71,  72,  73,  72),
-    (118, 119, 120, 119),
-    ( 74,  75,  76,  77),
-    ( 78,  79,  80,  81),
-    (480, 482, 483, 484),
-    (485, 486, 487, 488),
-    (480, 481,  82, 104),
-    (105,  83,  99, 102),
-    (103,  84,  85, 279),
-    (280, 281, 282,  93),
-    ( 94,  95,  96,  97),
-    ( 98, 100, 101, 222),
-    (223, 224, 225, 226),
-    (222,  54,  61,  62),
-    ( 59,  60,  63,  87),
-    ( 86,  88,  86,  89));
+    (118, 119, 120, 119));
+
+  { --- Type 24 @ 0x0045A43C, a bobbing pickup ---------------------------
+    Sixteen variants, one sprite each, in a FLAT table - stride 4, not 16; this
+    one has no frames.
+
+    It bobs. Every play frame it adds DirVelY(EF_FACING) to its Y and advances
+    EF_FACING one step of 64, so over 64 frames it traces one full period of the
+    direction table's vertical component - a sine just over a second long. That
+    is a reuse of EF_FACING as a PHASE rather than a heading, and it is the only
+    place so far that does it.
+
+    Variant 8 is special twice over: its sprite comes from a two-frame table
+    instead, and it plays kodou.wav - Japanese for HEARTBEAT - every 61 frames.
+    A thing that bobs, pulses and beats about once a second. }
+  ITEM24_VARIANTS   = 16;
+  ITEM24_TABLE_ADDR = $0046BDC0;
+  ITEM24_TABLE_PTR  = $0046D0E4;
+  ITEM24_SPRITES: array[0..ITEM24_VARIANTS - 1] of Integer = (
+     74,  75,  76,  77,  78,  79,  80,  81,
+    480, 482, 483, 484, 485, 486, 487, 488);
+
+  ITEM24_BEAT_VARIANT = 8;
+  ITEM24_BEAT_ADDR    = $0046BE00;
+  ITEM24_BEAT_PTR     = $0046D32C;
+  ITEM24_BEAT_FRAMES  = 2;
+  ITEM24_BEAT_SPRITES: array[0..ITEM24_BEAT_FRAMES - 1] of Integer = (480, 481);
+  ITEM24_BEAT_TICKS   = $3C;   { 60; the sound fires when the count EXCEEDS it }
+
+  { --- Type 25 @ 0x0045A4F0 ---------------------------------------------
+    Twenty-eight bytes: one table lookup and nothing else. Three variants, one
+    sprite each, and the shipped data uses A = 0, 1 and 2 - flush again.
+
+    Type 25 is the most-placed entity in the game, 160 records spread across all
+    65 stages, and it does not move, animate or react to anything. It is
+    scenery. The compiler left a `GameState - 60` in EAX on the way out, the
+    remains of a comparison with an empty body; the caller ignores it. }
+  ITEM25_VARIANTS   = 3;
+  ITEM25_TABLE_ADDR = $0046BE08;
+  ITEM25_TABLE_PTR  = $0046CF00;
+  ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
 
   { The one-shot drop applied on the first update, in 1/32 pixel - five pixels.
     Events place things on a tile boundary and this settles them onto it. }
@@ -118,6 +164,15 @@ function EntityUpdateDying(var E: TEntity; AGameState: Integer;
   when the player walks into it is decided by EF_TOUCH_KIND from the type table,
   in Entity_PlayerTouch. }
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
+
+{ 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
+  which only variant 8 has. }
+procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A4F0. One table lookup. It takes no game state because it does not read
+  any - it is the only handler that runs identically whatever the game is doing. }
+procedure EntityUpdate_Type25(var E: TEntity);
 
 { ==========================================================================
   Entity_UpdateAll @ 0x004608BC - the per-frame loop over the entity pool.
@@ -302,6 +357,69 @@ begin
   Result := True;
 end;
 
+procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Variant, Frame: Integer;
+begin
+  Variant := E.Raw[EF_VARIANT];
+  Frame   := E.Raw[EF_FLAG1C];
+  { The original indexes both tables unchecked. Clamping is the one deviation,
+    and it cannot change behaviour for any shipped placement - the data's range
+    is 0..15 and the table has sixteen entries. }
+  if (Variant < 0) or (Variant >= ITEM24_VARIANTS) then
+    Variant := 0;
+  if (Frame < 0) or (Frame >= ITEM24_BEAT_FRAMES) then
+    Frame := 0;
+
+  if E.Raw[EF_VARIANT] <> ITEM24_BEAT_VARIANT then
+    E.Raw[EF_ANIM_ID] := ITEM24_SPRITES[Variant]
+  else
+    E.Raw[EF_ANIM_ID] := ITEM24_BEAT_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { The bob. EF_FACING is a phase here, not a heading: one step of 64 per frame
+    through the direction table's Y column is one full sine period. }
+  Inc(E.Raw[EF_POS_Y], DirVelY(WrapDir(E.Raw[EF_FACING])));
+  { `mod` and not `and`: the original writes AND 0x8000003F with the usual sign
+    fixup, which is a SIGNED mod 64. The two agree for every value this field
+    actually holds, but the faithful one costs nothing. }
+  E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+
+  if E.Raw[EF_VARIANT] <> ITEM24_BEAT_VARIANT then
+    Exit;
+
+  { The frame counter is compared against ZERO, so it resets on the very frame
+    it is incremented and the two frames alternate every frame. The counter is
+    vestigial rather than a speed control - that is what the original does, and
+    it is why this reads as a flicker rather than an animation. }
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > 0 then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod ITEM24_BEAT_FRAMES;
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B + 1]);
+  if E.Raw[EF_BLOCK_B + 1] > ITEM24_BEAT_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B + 1] := 0;
+    World.PlaySound(SND_KODOU);
+  end;
+end;
+
+procedure EntityUpdate_Type25(var E: TEntity);
+var
+  Variant: Integer;
+begin
+  Variant := E.Raw[EF_VARIANT];
+  if (Variant < 0) or (Variant >= ITEM25_VARIANTS) then
+    Variant := 0;
+  E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
+end;
+
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
 var
   Variant, Frame: Integer;
@@ -471,7 +589,9 @@ begin
     case E^.Raw[EF_TYPE] of
       1:  PlayerUpdate(E^, P, L, Inp, World, AGameState);
       14: EntityUpdate_Type14(E^, AGameState);
-      { the other 76 arms are in HANDLER_ADDR, untranslated }
+      24: EntityUpdate_Type24(E^, AGameState, World);
+      25: EntityUpdate_Type25(E^);
+      { the other 74 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

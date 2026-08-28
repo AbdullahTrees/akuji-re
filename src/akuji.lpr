@@ -2456,6 +2456,8 @@ type
   TCountingWorld = class(TEntityWorld)
   public
     Killed: Integer;
+    Sounds: Integer;
+    LastSound: Integer;
     function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
@@ -2519,7 +2521,10 @@ begin end;
 procedure TCountingWorld.SpawnDebris(const E: TEntity; Kind: Integer);
 begin end;
 procedure TCountingWorld.PlaySound(Id: Integer);
-begin end;
+begin
+  Inc(Sounds);
+  LastSound := Id;
+end;
 function TCountingWorld.RandomBelow(N: Integer): Integer;
 begin Result := 0; end;
 
@@ -2955,6 +2960,305 @@ begin
   end;
 end;
 
+{ --- 5. the four adjacent sprite tables, and their EXTENTS ---------------
+
+  This exists because of a real defect. Type 14's table was recorded as sixteen
+  rows of four and it is TWO, and the old check could not see it: it read
+  ITEM_VARIANTS * ITEM_FRAMES ints out of akuji.exe and compared them, so the
+  length it verified was the very constant under test. Shrinking sixteen to two
+  makes it read eight values instead of sixty-four, and it passes either way.
+
+  Reading N values and finding they match proves the VALUES. To pin N you need
+  a fact from outside the table, and here the layout supplies one: the region is
+  a run of small const arrays laid end to end, each reached through its own
+  pointer global, so a table ends exactly where the next one begins. This
+  collects every pointer into the region straight out of the binary and requires
+  the successor of each table's base to be base + length.
+
+  That would have caught the sixteen immediately - the next pointer after
+  0x0046BDA0 is 0x0046BDC0, thirty-two bytes on. }
+function TestSpriteTables(Log: TStringList; const GameDir: string): Integer;
+const
+  { Where the pointer globals live, and the span of table bodies they address.
+    Both are deliberately generous; a stray dword that happened to look like a
+    pointer could only ever make a table look SHORTER, never longer, so this
+    cannot pass something it should fail. }
+  PTRS_LO = $0046C400;  PTRS_HI = $0046D400;
+  BODY_LO = $0046B800;  BODY_HI = $0046C400;
+var
+  Exe: TMemoryStream;
+  ExeName: string;
+  Buf: array of Cardinal;
+  Starts: array of Cardinal;
+  I, J, K, Bad, Got: Integer;
+  V, Next: Cardinal;
+
+  { The smallest table start strictly greater than Base. }
+  function Successor(Base: Cardinal): Cardinal;
+  var
+    N: Integer;
+  begin
+    Result := High(Cardinal);
+    for N := 0 to High(Starts) do
+      if (Starts[N] > Base) and (Starts[N] < Result) then
+        Result := Starts[N];
+  end;
+
+  procedure CheckTable(const Name: string; Ptr, Base: Cardinal; Ints: Integer);
+  var
+    Held, Want: Cardinal;
+  begin
+    Exe.Position := Int64(Ptr) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Held, SizeOf(Held));
+    if Held <> Base then
+    begin
+      Log.Add(Format('  %s: [0x%.6X] holds 0x%.6X, not 0x%.6X',
+        [Name, Ptr, Held, Base]));
+      Inc(Bad);
+    end;
+    Want := Base + Cardinal(Ints) * 4;
+    if Successor(Base) <> Want then
+    begin
+      Log.Add(Format('  %s: claims %d ints, but the next table starts at '
+        + '0x%.6X, not 0x%.6X', [Name, Ints, Successor(Base), Want]));
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- the sprite tables at 0x0046BDA0 and their extents ---');
+
+  Exe := TMemoryStream.Create;
+  try
+    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    if not FileExists(ExeName) then
+    begin
+      Log.Add('FAILED: akuji.exe is not in the game directory');
+      Exit(1);
+    end;
+    Exe.LoadFromFile(ExeName);
+
+    { Every pointer global into the region, read out of the binary. }
+    SetLength(Buf, (PTRS_HI - PTRS_LO) div 4);
+    Exe.Position := Int64(PTRS_LO) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Buf[0], Length(Buf) * SizeOf(Cardinal));
+    SetLength(Starts, 0);
+    for I := 0 to High(Buf) do
+    begin
+      V := Buf[I];
+      if (V < BODY_LO) or (V >= BODY_HI) then
+        Continue;
+      K := -1;
+      for J := 0 to High(Starts) do
+        if Starts[J] = V then K := J;
+      if K < 0 then
+      begin
+        SetLength(Starts, Length(Starts) + 1);
+        Starts[High(Starts)] := V;
+      end;
+    end;
+    Log.Add(Format('%d distinct table starts between 0x%.6X and 0x%.6X',
+      [Length(Starts), BODY_LO, BODY_HI]));
+    if Length(Starts) < 20 then
+    begin
+      Log.Add('FAILED: too few table starts found - the scan window is wrong '
+        + 'and every extent below would pass vacuously');
+      Inc(Result);
+    end;
+
+    Bad := 0;
+    CheckTable('type 14', ITEM_SPRITE_TABLE_PTR, ITEM_SPRITE_TABLE_ADDR,
+               ITEM_VARIANTS * ITEM_FRAMES);
+    CheckTable('type 24', ITEM24_TABLE_PTR, ITEM24_TABLE_ADDR, ITEM24_VARIANTS);
+    CheckTable('type 24 beat', ITEM24_BEAT_PTR, ITEM24_BEAT_ADDR,
+               ITEM24_BEAT_FRAMES);
+    CheckTable('type 25', ITEM25_TABLE_PTR, ITEM25_TABLE_ADDR, ITEM25_VARIANTS);
+    Log.Add(Format('four tables, pointer and extent: %d wrong', [Bad]));
+    Inc(Result, Bad);
+
+    { And the values, now that the lengths mean something. }
+    Bad := 0;
+    SetLength(Buf, 64);
+    Exe.Position := Int64(ITEM24_TABLE_ADDR) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Buf[0], ITEM24_VARIANTS * SizeOf(Cardinal));
+    for I := 0 to ITEM24_VARIANTS - 1 do
+      if Integer(Buf[I]) <> ITEM24_SPRITES[I] then Inc(Bad);
+    Exe.Position := Int64(ITEM24_BEAT_ADDR) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Buf[0], ITEM24_BEAT_FRAMES * SizeOf(Cardinal));
+    for I := 0 to ITEM24_BEAT_FRAMES - 1 do
+      if Integer(Buf[I]) <> ITEM24_BEAT_SPRITES[I] then Inc(Bad);
+    Exe.Position := Int64(ITEM25_TABLE_ADDR) - DATA_VA_BIAS;
+    Exe.ReadBuffer(Buf[0], ITEM25_VARIANTS * SizeOf(Cardinal));
+    for I := 0 to ITEM25_VARIANTS - 1 do
+      if Integer(Buf[I]) <> ITEM25_SPRITES[I] then Inc(Bad);
+    Log.Add(Format('type 24 and 25 table values: %d wrong', [Bad]));
+    Inc(Result, Bad);
+
+    { Variant 8's single sprite in the flat table is the first frame of its
+      two-frame one. Two tables written independently agreeing on that is what
+      says variant 8 really is the entry the special case is about. }
+    if ITEM24_SPRITES[ITEM24_BEAT_VARIANT] <> ITEM24_BEAT_SPRITES[0] then
+    begin
+      Log.Add('FAILED: variant 8 disagrees with its own animation table');
+      Inc(Result);
+    end;
+  finally
+    Exe.Free;
+  end;
+end;
+
+{ --- 6. types 24 and 25 -------------------------------------------------- }
+function TestItemHandlers(Log: TStringList): Integer;
+var
+  W: TCountingWorld;
+  E: TEntity;
+  I, StartY, MinY, MaxY, Beats: Integer;
+  Frames: string;
+
+  procedure Fresh(Variant: Integer);
+  begin
+    FillChar(E, SizeOf(E), 0);
+    E.Raw[EF_ALIVE]   := 1;
+    E.Raw[EF_VARIANT] := Variant;
+    E.Raw[EF_POS_X]   := POSITION_BIAS;
+    E.Raw[EF_POS_Y]   := POSITION_BIAS;
+    W.Sounds := 0;
+    W.LastSound := -1;
+  end;
+
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- types 24 and 25 ---');
+  W := TCountingWorld.Create;
+  try
+    { Type 25 is scenery: one table lookup, and nothing else may move. }
+    for I := 0 to ITEM25_VARIANTS - 1 do
+    begin
+      Fresh(I);
+      EntityUpdate_Type25(E);
+      if E.Raw[EF_ANIM_ID] <> ITEM25_SPRITES[I] then
+      begin
+        Log.Add(Format('FAILED: type 25 variant %d gave sprite %d, want %d',
+          [I, E.Raw[EF_ANIM_ID], ITEM25_SPRITES[I]]));
+        Inc(Result);
+      end;
+      if (E.Raw[EF_POS_X] <> POSITION_BIAS)
+      or (E.Raw[EF_POS_Y] <> POSITION_BIAS)
+      or (E.Raw[EF_FACING] <> 0) or (E.Raw[EF_TIMER] <> 0) then
+      begin
+        Log.Add('FAILED: type 25 changed something other than its sprite');
+        Inc(Result);
+      end;
+    end;
+    Log.Add(Format('type 25: %d variants, sprite only', [ITEM25_VARIANTS]));
+
+    { Type 24 bobs, and the bob CLOSES. DIR_COS sums to zero over its 64
+      entries, so 64 frames of DirVelY must return the entity to exactly where
+      it started - a property of the direction table, not of this handler, which
+      is what makes it worth asserting. }
+    Fresh(0);
+    StartY := E.Raw[EF_POS_Y];
+    MinY := StartY;
+    MaxY := StartY;
+    for I := 1 to DIR_COUNT do
+    begin
+      EntityUpdate_Type24(E, GS_PLAY, W);
+      if E.Raw[EF_POS_Y] < MinY then MinY := E.Raw[EF_POS_Y];
+      if E.Raw[EF_POS_Y] > MaxY then MaxY := E.Raw[EF_POS_Y];
+    end;
+    Log.Add(Format('type 24 after a full 64-frame bob: net y %d, travelled %d '
+      + 'sub-pixels (%d px), facing %d',
+      [E.Raw[EF_POS_Y] - StartY, MaxY - MinY,
+       (MaxY - MinY) div 32, E.Raw[EF_FACING]]));
+    if E.Raw[EF_POS_Y] <> StartY then
+    begin
+      Log.Add('FAILED: a whole period of the bob should net to zero');
+      Inc(Result);
+    end;
+    if E.Raw[EF_FACING] <> 0 then
+    begin
+      Log.Add('FAILED: the phase should have wrapped back to 0');
+      Inc(Result);
+    end;
+    { The net-to-zero above is only interesting if it moved in between. It does
+      NOT move on the first frame - DirVelY(0) is DIR_COS[16], the sine's zero
+      crossing - so this looks at the whole excursion rather than one step. }
+    if MaxY - MinY = 0 then
+    begin
+      Log.Add('FAILED: the bob never moved at all');
+      Inc(Result);
+    end;
+
+    { Outside GS_PLAY it sets its sprite and freezes. }
+    Fresh(0);
+    EntityUpdate_Type24(E, GS_PAUSE, W);
+    if (E.Raw[EF_POS_Y] <> POSITION_BIAS) or (E.Raw[EF_FACING] <> 0) then
+    begin
+      Log.Add('FAILED: type 24 bobbed while the game was not in play');
+      Inc(Result);
+    end;
+    if E.Raw[EF_ANIM_ID] <> ITEM24_SPRITES[0] then
+    begin
+      Log.Add('FAILED: type 24 should still set its sprite outside play');
+      Inc(Result);
+    end;
+
+    { An ordinary variant is silent and does not animate. }
+    Fresh(0);
+    for I := 1 to 200 do
+      EntityUpdate_Type24(E, GS_PLAY, W);
+    if W.Sounds <> 0 then
+    begin
+      Log.Add(Format('FAILED: variant 0 played %d sound(s)', [W.Sounds]));
+      Inc(Result);
+    end;
+    if E.Raw[EF_FLAG1C] <> 0 then
+    begin
+      Log.Add('FAILED: variant 0 should not advance a frame');
+      Inc(Result);
+    end;
+
+    { Variant 8 alternates EVERY frame - its counter is compared against zero,
+      so it resets on the frame it is incremented - and beats every 61. }
+    Fresh(ITEM24_BEAT_VARIANT);
+    Frames := '';
+    for I := 1 to 6 do
+    begin
+      EntityUpdate_Type24(E, GS_PLAY, W);
+      Frames := Frames + Format('%d ', [E.Raw[EF_ANIM_ID]]);
+    end;
+    Log.Add(Format('type 24 variant 8, six frames: %s', [Trim(Frames)]));
+    if Trim(Frames) <> '480 481 480 481 480 481' then
+    begin
+      Log.Add('FAILED: variant 8 should alternate every single frame');
+      Inc(Result);
+    end;
+
+    Fresh(ITEM24_BEAT_VARIANT);
+    for I := 1 to 610 do
+      EntityUpdate_Type24(E, GS_PLAY, W);
+    Beats := W.Sounds;
+    Log.Add(Format('type 24 variant 8 over 610 frames: %d heartbeat(s), '
+      + 'last sound %d (%s)', [Beats, W.LastSound,
+      SoundNames[W.LastSound]]));
+    if Beats <> 10 then
+    begin
+      Log.Add('FAILED: want 10 beats - one every 61 frames');
+      Inc(Result);
+    end;
+    if W.LastSound <> SND_KODOU then
+    begin
+      Log.Add('FAILED: the beat should be kodou.wav');
+      Inc(Result);
+    end;
+  finally
+    W.Free;
+  end;
+end;
+
 function SelfTestEntities(Log: TStringList): Integer;
 var
   GameDir, ExeName: string;
@@ -3146,6 +3450,32 @@ begin
       Inc(Result);
     end;
     L.DeltaX := 0; L.DeltaY := 0;
+
+    { The dispatcher's arms actually reach the handlers they name. Every other
+      check of types 24 and 25 calls them DIRECTLY, so a case arm wired to the
+      wrong handler goes unnoticed - and one did, until this was added: pointing
+      type 25's arm at EntityUpdate_Type14 survived the whole suite. }
+    Pool.Clear;
+    Place($21, 25, SPRITE_NONE, 160, 120);
+    Pool.Entity($21)^.Raw[EF_VARIANT] := 2;
+    Place($22, 24, SPRITE_NONE, 160, 120);
+    Pool.Entity($22)^.Raw[EF_VARIANT] := 3;
+    Run(GS_PLAY);
+    Log.Add('');
+    Log.Add(Format('dispatch: type 25 var 2 -> sprite %d (want %d), '
+      + 'type 24 var 3 -> sprite %d (want %d)',
+      [Pool.Entity($21)^.Raw[EF_ANIM_ID], ITEM25_SPRITES[2],
+       Pool.Entity($22)^.Raw[EF_ANIM_ID], ITEM24_SPRITES[3]]));
+    if Pool.Entity($21)^.Raw[EF_ANIM_ID] <> ITEM25_SPRITES[2] then
+    begin
+      Log.Add('FAILED: the type 25 arm did not reach EntityUpdate_Type25');
+      Inc(Result);
+    end;
+    if Pool.Entity($22)^.Raw[EF_ANIM_ID] <> ITEM24_SPRITES[3] then
+    begin
+      Log.Add('FAILED: the type 24 arm did not reach EntityUpdate_Type24');
+      Inc(Result);
+    end;
 
     { (b) the sprite is placed by its top-left, the entity is its centre. }
     Pool.Clear;
@@ -3386,6 +3716,8 @@ begin
   end;
 
   Inc(Result, TestTileCollide(Log, GameDir));
+  Inc(Result, TestSpriteTables(Log, GameDir));
+  Inc(Result, TestItemHandlers(Log));
 
   Log.Add('');
   if Result = 0 then

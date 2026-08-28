@@ -112,6 +112,7 @@ nothing else. See `../notes/audio_map.md` for the recovered call map.
 | `PlayerState.pas` | `save.dat`, and the player controller's state machine |
 | `Camera.pas` | the scrolling dead zone and the map-edge clamp |
 | `Player.pas` | **the player controller, as running code** - the first behaviour |
+| `EntityHandlers.pas` | `Entity_UpdateAll` and the per-type handlers translated so far |
 
 `Entities.pas` and `PlayerState.pas` carry long header comments recording what
 each field means and what the evidence for it was. That is deliberate: the
@@ -121,8 +122,14 @@ a timer with three separate uses. Read the headers before naming anything new.
 
 ## Not yet written
 
-The entity behaviours themselves — roughly 100 per-type update handlers, plus
-scrolling and the three special-move routines `Player_Update` delegates to. The
+The entity behaviours themselves — 74 of the 78 per-type update handlers.
+`EntityHandlers.HANDLER_ADDR` lists every one of them by address, read out of
+the jump table in the binary rather than transcribed by hand, so it doubles as
+the to-do list. `tools/coverage.py` deliberately does **not** count those
+addresses: a table of addresses is a to-do list, not a translation, and
+counting it would take the figure from 34% to 85% without a line being read.
+
+The older text below is kept because the rest of it still applies. The
 *structure* around them is decoded: the dispatcher, the record, collision,
 death, damage, and the player's own state machine. See `../CLAUDE.md` section
 8a.
