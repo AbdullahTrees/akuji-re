@@ -796,6 +796,16 @@ is worse than none. Four ways it has happened here, all found by mutation:
 * A check on an early `Exit` passed against a build with the `Exit` deleted,
   because the loop stopped doing the observable thing either way. **Observe
   something that happens *before* the guard you are testing.**
+* A test double **redeclared a field that already existed on its base class**.
+  The double's `Spawn` used its own `Pool` and the code under test used the
+  base's, which was nil — so every cross-entity effect silently did nothing
+  while the test could still see a perfectly good pool. It looked like a defect
+  in the code for three rounds of debugging. **A double must not shadow the
+  state the code under test reads**, and a double that overrides the method
+  under test only tests the double.
+* Naming a method `Destroy` shadows `TObject.Destroy`; FPC warns
+  "an inherited method is hidden by ...". Renamed to `DestroyEntity`. That was
+  not the bug above, but it made the bug much harder to see.
 
 **Force a full rebuild (`lazbuild -B`) when mutation testing.** An incremental
 build can leave you running the old binary, which makes a live mutation look

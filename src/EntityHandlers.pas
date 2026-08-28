@@ -376,7 +376,7 @@ begin
   begin
     if E.Raw[EF_CLASS] = DEATH_CLASS_BIG then
       World.PlaySound(SND_BOM03);
-    World.Destroy(E, True);
+    World.DestroyEntity(E, True);
   end;
 
   Result := True;
@@ -736,7 +736,7 @@ begin
 
     if IsAlive(E^) and (E^.Raw[EF_CULL_OFFSCREEN] = 1)
        and IsOffScreen(E^, CULL_MARGIN) then
-      World.Destroy(E^, False);
+      World.DestroyEntity(E^, False);
   end;
 end;
 

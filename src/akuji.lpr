@@ -2001,14 +2001,14 @@ type
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
     { Not used by the trace, but left abstract it would be a runtime
       abstract-method error the first time a handler destroyed something. }
-    procedure Destroy(var E: TEntity; DropLoot: Boolean); override;
+    procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
     procedure PlaySound(Id: Integer); override;
     function RandomBelow(N: Integer): Integer; override;
   end;
 
-procedure TFlatWorld.Destroy(var E: TEntity; DropLoot: Boolean);
+procedure TFlatWorld.DestroyEntity(var E: TEntity; DropLoot: Boolean);
 begin
   E.Raw[EF_ALIVE] := 0;
 end;
@@ -2458,11 +2458,12 @@ type
     Killed: Integer;
     Sounds: Integer;
     LastSound: Integer;
-    { A real pool, so Spawn actually allocates and SpawnDebris can be watched
-      doing its work. It deliberately does NOT override SpawnDebris or
-      RandomBelow any more - those are implemented on TEntityWorld now, and
-      overriding them would test the double instead of the code. }
-    Pool: TEntityPool;
+    { NOTE: Pool is NOT redeclared here. It lives on TEntityWorld, and
+      declaring it again shadowed the base field - the double's Spawn used
+      one and Entity_Destroy used the other, which was nil, so every
+      cross-entity effect silently did nothing while the test still saw a
+      pool. It does NOT override SpawnDebris or RandomBelow either: a double
+      that overrides the thing under test only tests the double. }
     function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
@@ -2470,7 +2471,7 @@ type
     function SolidCollideX(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function SolidCollideY(const E: TEntity; Delta: Integer; SkipSoft: Boolean): Boolean; override;
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
-    procedure Destroy(var E: TEntity; DropLoot: Boolean); override;
+    procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure PlaySound(Id: Integer); override;
   end;
@@ -2521,8 +2522,11 @@ begin
     Exit(SLOT_NONE);
   Result := Pool.Spawn(Kind, TypeId, X, Y);
 end;
-procedure TCountingWorld.Destroy(var E: TEntity; DropLoot: Boolean);
-begin Inc(Killed); E.Raw[EF_ALIVE] := 0; end;
+procedure TCountingWorld.DestroyEntity(var E: TEntity; DropLoot: Boolean);
+begin
+  Inc(Killed);
+  inherited DestroyEntity(E, DropLoot);
+end;
 procedure TCountingWorld.SetSpawnField(Slot, IntIndex, Value: Integer);
 begin
   if Pool <> nil then
@@ -3293,6 +3297,130 @@ begin
   end;
 end;
 
+{ --- Entity_Destroy @ 0x00461400 -----------------------------------------
+
+  Four debts settled in four directions, and two of them are what makes this
+  worth testing rather than assuming: a dying projectile hands a shot back to
+  its owner, and a class-5 parent takes its children with it.
+
+  The shot-count check is the interesting one. It reads the owner's slot from
+  the projectile's int 1 and decrements the owner's int $15 - which is exactly
+  the pair the Player.pas audit arrived at from the other side, when it moved
+  PF_OWNER from $04 to $01. Two functions written weeks apart agreeing on an
+  undocumented field pair is the strongest evidence available short of running
+  the original. }
+function TestDestroy(Log: TStringList): Integer;
+var
+  W: TCountingWorld;
+  Pool: TEntityPool;
+  Owner, Shot, Parent, Kid, N, I: Integer;
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- Entity_Destroy ---');
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  try
+    W.Pool := Pool;
+
+    { A projectile gives its owner a shot back. }
+    Owner := Pool.Spawn(EKIND_ACTOR, 1, 0, 0);
+    Pool.SetField(Owner, EF_SHOTS, 2);
+    Shot := Pool.Spawn(EKIND_MINOR, 2, 0, 0);
+    Pool.SetField(Shot, EF_CLASS, DESTROY_CLASS_PROJECTILE);
+    Pool.SetField(Shot, EF_OWNER, Owner);
+    Pool.SetField(Shot, EF_SPRITE, SPRITE_NONE);
+    Pool.SetField(Shot, EF_EVENT_ID, -1);
+    W.DestroyEntity(Pool.Entity(Shot)^, False);
+    Log.Add(Format('projectile destroyed: owner shots 2 -> %d, slot alive %d',
+      [Pool.Field(Owner, EF_SHOTS), Pool.Field(Shot, EF_ALIVE)]));
+    if Pool.Field(Owner, EF_SHOTS) <> 1 then
+    begin
+      Log.Add('FAILED: a dying projectile should return a shot to its owner');
+      Inc(Result);
+    end;
+    if Pool.Field(Shot, EF_ALIVE) <> 0 then
+    begin
+      Log.Add('FAILED: the slot should be free');
+      Inc(Result);
+    end;
+
+    { A parent takes its two children with it, and they take no loot. }
+    Pool.Clear;
+    Parent := Pool.Spawn(EKIND_MINOR, 3, 0, 0);
+    Pool.SetField(Parent, EF_CLASS, DESTROY_CLASS_PARENT);
+    Pool.SetField(Parent, EF_SPRITE, SPRITE_NONE);
+    Pool.SetField(Parent, EF_EVENT_ID, -1);
+    for I := 0 to 1 do
+    begin
+      Kid := Pool.Spawn(EKIND_MINOR, 4, 0, 0);
+      Pool.SetField(Kid, EF_SPRITE, SPRITE_NONE);
+      Pool.SetField(Kid, EF_EVENT_ID, -1);
+      Pool.SetField(Parent, EF_CHILD_A + I, Kid);
+    end;
+    W.Killed := 0;
+    W.DestroyEntity(Pool.Entity(Parent)^, False);
+    N := 0;
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] then Inc(N);
+    Log.Add(Format('parent destroyed: %d destroy call(s), %d slot(s) left alive',
+      [W.Killed, N]));
+    if N <> 0 then
+    begin
+      Log.Add('FAILED: the children should have gone with the parent');
+      Inc(Result);
+    end;
+
+    { The no-drop flag. Column 8 non-zero means never drop, and the roll is
+      not even taken - which is observable because the RNG does not advance. }
+    Pool.Clear;
+    Parent := Pool.Spawn(EKIND_MINOR, 5, 0, 0);
+    Pool.SetField(Parent, EF_SPRITE, SPRITE_NONE);
+    Pool.SetField(Parent, EF_EVENT_ID, -1);
+    Pool.SetField(Parent, EF_NO_DROP, 1);
+    RandomSeed := 4242;
+    W.DestroyEntity(Pool.Entity(Parent)^, True);
+    if RandomSeed <> 4242 then
+    begin
+      Log.Add('FAILED: a no-drop entity should not even roll');
+      Inc(Result);
+    end;
+    N := 0;
+    for I := 0 to ENTITY_COUNT - 1 do
+      if Pool.Alive[I] and (Pool.Field(I, EF_TYPE) = DROP_TYPE) then Inc(N);
+    if N <> 0 then
+    begin
+      Log.Add('FAILED: a no-drop entity dropped something');
+      Inc(Result);
+    end;
+
+    { And with the flag clear it does roll - over enough tries the drop rate
+      should land near the 76-in-256 the threshold implies. }
+    N := 0;
+    RandomSeed := 1;
+    for I := 1 to 2000 do
+    begin
+      Pool.Clear;
+      Parent := Pool.Spawn(EKIND_MINOR, 5, 0, 0);
+      Pool.SetField(Parent, EF_SPRITE, SPRITE_NONE);
+      Pool.SetField(Parent, EF_EVENT_ID, -1);
+      W.DestroyEntity(Pool.Entity(Parent)^, True);
+      if Pool.LiveCount > 0 then
+        Inc(N);
+    end;
+    Log.Add(Format('drop rate over 2000 kills: %d (%.1f%%), threshold implies '
+      + '%.1f%%', [N, N / 20.0, (DROP_ROLL - 1 - DROP_THRESHOLD) / 2.56]));
+    if (N < 500) or (N > 700) then
+    begin
+      Log.Add('FAILED: the drop rate is nowhere near 76 in 256');
+      Inc(Result);
+    end;
+  finally
+    W.Free;
+    Pool.Free;
+  end;
+end;
+
 { --- Entity_SpawnDebris @ 0x00461874 -------------------------------------
 
   This one cannot be checked against the original by emulation: it calls
@@ -3918,6 +4046,7 @@ begin
   end;
 
   Inc(Result, TestSpawnDebris(Log));
+  Inc(Result, TestDestroy(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));

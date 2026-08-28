@@ -138,6 +138,55 @@ const
   DEBRIS_LIFT     = 8;    { particle i leaves at (i + 4) * -8 }
   DEBRIS_DEPTH    = 6;
   DEBRIS_SPEED_MAX = 3;   { RandomBelow(3) + 1, so 1..3 }
+
+  { --- Entity_MaybeDropItem @ 0x004617FC --------------------------------
+    One roll of Random(256) decides everything. The item drops when the roll
+    EXCEEDS 179, which is 76 of 256 - a shade under 30% - and the same roll,
+    compared against 245, picks between two variants: 10 of 256 outright, so
+    about 13% of the drops that happen.
+
+    Rolling ONCE for both is worth noticing. The variant is not independent of
+    the drop: it is the top of the same distribution, so the rare item can only
+    ever appear on a roll that was already going to drop something. }
+  DROP_ROLL      = $100;  { Random(256) }
+  DROP_THRESHOLD = $B3;   { 179; drops when the roll is GREATER }
+  DROP_RARE      = $F5;   { 245; the same roll, higher up }
+  DROP_TYPE      = $24;   { 36 - EntityUpdate_Type36_FallingItem }
+  DROP_TIMER     = 30;
+  DROP_LIFT      = -96;   { EF_VEL_Y, so it pops upward before falling }
+
+  { --- Entity_Destroy @ 0x00461400 --------------------------------------
+    Far more than "mark the slot free". It settles debts in four directions,
+    and two of them corroborate fixes made elsewhere from the other side:
+
+      class 4  decrements Entities[ THIS ENTITY'S int 1 ].int $15. Int 1 is
+               the owner slot and $15 is that owner's live shot count - which
+               is exactly what the Player.pas audit concluded when it moved
+               PF_OWNER from $04 to $01 and put the projectile lifetime in
+               $14. A projectile dying gives its owner a shot back.
+
+      class 5  destroys its two children, EF_CHILD_A and EF_CHILD_B, which is
+               what those fields were named for before this function was read.
+
+      class 7  scatters a kind-2 debris burst, but only on a loot-bearing
+               destroy.
+
+    The loot itself is gated on type table column 8 being zero, so that column
+    is a NO DROP flag.
+
+    Then the event bookkeeping, which matches what EventScripts.pas worked out
+    from the data: opcode 7 fires the event, opcode 5 sets the progress flag
+    named by ParamB's first four characters, and either way the event's "an
+    entity for this exists" byte is cleared so it can spawn again. }
+  DESTROY_CLASS_PROJECTILE = 4;
+  DESTROY_CLASS_PARENT     = 5;
+  DESTROY_CLASS_SHATTER    = 7;
+  EF_NO_DROP  = $37;   { type table column 8; non-zero means never drop }
+  EF_OWNER    = $01;   { the slot that fired this }
+  EF_SHOTS    = $15;   { on an OWNER: how many of its shots are alive }
+  EVENT_OPCODE_DESTROY = 7;
+  EVENT_OPCODE_FLAG    = 5;
+  EVENT_BEGIN_FROM_DESTROY = 4;
   TERRAIN_WATER_A = 3;
   TERRAIN_WATER_B = 4;
   SND_WATER01 = 31;  SND_WATER02 = 40;
@@ -165,8 +214,11 @@ const
                             and EF_DEATH_TIMER to 8 as invulnerability. }
   EF_POS_X       = $1E;   { biased; use PosX }
   EF_POS_Y       = $1F;
-  EF_VEL_X       = $20;   { zeroed on spawn, written as -96 by FUN_004617FC }
-  EF_VEL_Y       = $21;
+  EF_VEL_X       = $20;   { zeroed on spawn }
+  EF_VEL_Y       = $21;   { AUDIT: the -96 that Entity_MaybeDropItem writes
+                            was recorded against EF_VEL_X above. It is this
+                            one - the original writes +0x84, not +0x80 - so a
+                            dropped item is launched UPWARD, not sideways. }
   EF_FACING      = $22;   { direction 0..63, see Directions.pas }
   { Type table column 2. Entity_UpdateAll copies it to the sprite's draw-order
     key, so this is the DRAW LAYER - except that -1 means "sort by screen Y",
@@ -638,6 +690,10 @@ type
     comes back through PushX/PushY, and OnTopOfSolid says the hit was a
     landing. That is the original's shape - three globals rather than out
     parameters - and it is kept because the callers read them in that order. }
+  { Declared ahead of TEntityWorld because Entity_Destroy reaches other
+    entities by slot, and the pool is defined further down. }
+  TEntityPool = class;
+
   { The tilemap, as the collision code sees it.
 
     TileMap_Get @ 0x0044DB5C is one line - `Data[X + Y * Width]`, a Word, with
@@ -697,6 +753,16 @@ type
     Layer: TLayerInfo;
     TerrainId: Integer;
 
+    { The pool itself, when the world has one. Entity_Destroy reaches other
+      entities by slot - its owner, its children - and cannot do that through
+      Spawn alone. Nil is a legitimate configuration: a world with no pool
+      simply has no cross-entity bookkeeping to settle. }
+    Pool: TEntityPool;
+
+    { The sprite pool, so a destroyed entity can hide and release its sprite.
+      Nil when the world does not draw. }
+    Sprites: TSpriteSink;
+
     { Scrolling is an INPUT to the tile query, not just a consequence of it:
       Entity_TileCollideX/Y take it as their fifth argument, because when the
       layer moves instead of the entity the tile under the entity differs. }
@@ -713,17 +779,35 @@ type
                            SkipSoft: Boolean): Boolean; virtual; abstract;
 
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; virtual; abstract;
-    procedure Destroy(var E: TEntity; DropLoot: Boolean); virtual; abstract;
+    { 0x00461400. Real, not abstract. }
+    procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); virtual;
+
+    { What Entity_Destroy needs from the event system, which it reaches
+      through globals in the original. The defaults are "no event table
+      wired" - EventOpcode returning -1 means every event test is skipped -
+      which is a real configuration, not a stub: the player trace runs that
+      way on purpose. }
+    function EventOpcode(EventId: Integer): Integer; virtual;
+    function EventProgressIndex(EventId: Integer): Integer; virtual;
+    procedure BeginEvent(EventId, Arg: Integer); virtual;
+    procedure ClearEventEntity(EventId: Integer); virtual;
+    procedure SetProgress(Index: Integer); virtual;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
     { 0x00461874. Real, not abstract: this is the whole function. }
     procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual;
+
+    { 0x004617FC. A ~30% chance of dropping a type 36. }
+    procedure MaybeDropItem(const E: TEntity); virtual;
     procedure PlaySound(Id: Integer); virtual; abstract;
     { Delphi's Random(N), which the original's behaviour genuinely depends
       on. Overridable only so a test can make a trace repeatable. }
     function RandomBelow(N: Integer): Integer; virtual;
   end;
 
-type
+  { NOTE: no `type` keyword here on purpose. TEntityPool is forward-declared
+    above so TEntityWorld can hold one, and Pascal requires a forward class and
+    its definition to sit in the SAME type block. }
+
   { A collision box in screen pixels, in the order the original stores it: four
     consecutive ints passed by pointer to Rect_Overlap. }
   TBox = record L, T, R, B: Integer; end;
@@ -1203,6 +1287,117 @@ end;
 function TEntityWorld.RandomBelow(N: Integer): Integer;
 begin
   Result := DelphiRandom(N);
+end;
+
+function TEntityWorld.EventOpcode(EventId: Integer): Integer;
+begin
+  Result := -1;                    { no event table attached }
+end;
+
+function TEntityWorld.EventProgressIndex(EventId: Integer): Integer;
+begin
+  Result := -1;
+end;
+
+procedure TEntityWorld.BeginEvent(EventId, Arg: Integer);
+begin
+end;
+
+procedure TEntityWorld.ClearEventEntity(EventId: Integer);
+begin
+end;
+
+procedure TEntityWorld.SetProgress(Index: Integer);
+begin
+end;
+
+{ Entity_Destroy @ 0x00461400. }
+procedure TEntityWorld.DestroyEntity(var E: TEntity; DropLoot: Boolean);
+var
+  Owner, Child, EventId, Op, Flag: Integer;
+begin
+  { A dying projectile hands a shot back to whoever fired it. }
+  if (E.Raw[EF_CLASS] = DESTROY_CLASS_PROJECTILE) and (Pool <> nil) then
+  begin
+    Owner := E.Raw[EF_OWNER];
+    Pool.SetField(Owner, EF_SHOTS, Pool.Field(Owner, EF_SHOTS) - 1);
+  end;
+
+  { A parent takes its children with it. Recursive, and deliberately WITHOUT
+    loot - the children were never separately earned. }
+  if (E.Raw[EF_CLASS] = DESTROY_CLASS_PARENT) and (Pool <> nil) then
+  begin
+    Child := E.Raw[EF_CHILD_A];
+    if Child <> 0 then
+      DestroyEntity(Pool.Entity(Child)^, False);
+    Child := E.Raw[EF_CHILD_B];
+    if Child <> 0 then
+      DestroyEntity(Pool.Entity(Child)^, False);
+  end;
+
+  if DropLoot then
+  begin
+    if E.Raw[EF_NO_DROP] = 0 then
+      MaybeDropItem(E);
+    if E.Raw[EF_CLASS] = DESTROY_CLASS_SHATTER then
+      SpawnDebris(E, DEBRIS_SHATTER);
+  end;
+
+  EventId := E.Raw[EF_EVENT_ID];
+  if EventId <> -1 then
+  begin
+    Op := EventOpcode(EventId);
+    if (Op = EVENT_OPCODE_DESTROY) and DropLoot then
+      BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
+    if (Op = EVENT_OPCODE_FLAG) and DropLoot then
+    begin
+      Flag := EventProgressIndex(EventId);
+      if Flag >= 0 then
+        SetProgress(Flag);
+    end;
+    { Cleared whatever the opcode was, and whether or not loot was dropped,
+      so the event can place another entity next time the camera comes near. }
+    ClearEventEntity(EventId);
+  end;
+
+  E.Raw[EF_ALIVE] := 0;
+  E.Raw[EF_DEPTH] := 0;
+  E.Raw[EF_HP] := 0;
+
+  if E.Raw[EF_SPRITE] <> SPRITE_NONE then
+  begin
+    if Sprites <> nil then
+    begin
+      Sprites.SetVisible(E.Raw[EF_SPRITE], False);
+      Sprites.SetDepth(E.Raw[EF_SPRITE], 0);
+    end;
+    E.Raw[EF_SPRITE] := SPRITE_NONE;
+  end
+  else
+    E.Raw[EF_SPRITE] := SPRITE_NONE;
+end;
+
+{ Entity_MaybeDropItem @ 0x004617FC. }
+procedure TEntityWorld.MaybeDropItem(const E: TEntity);
+var
+  Roll, Slot: Integer;
+begin
+  Roll := RandomBelow(DROP_ROLL);
+  if Roll <= DROP_THRESHOLD then
+    Exit;
+
+  { No layer delta here, unlike Entity_SpawnDebris - the drop is placed at the
+    parent's position exactly. Whether that is deliberate or an oversight in
+    the original cannot be told from the code; it is reproduced either way. }
+  Slot := Spawn(EKIND_MINOR, DROP_TYPE,
+                E.Raw[EF_POS_X] - POSITION_BIAS,
+                E.Raw[EF_POS_Y] - POSITION_BIAS);
+  if Slot = SLOT_NONE then
+    Exit;                        { the original does not check; see SpawnDebris }
+
+  SetSpawnField(Slot, EF_TIMER, DROP_TIMER);
+  SetSpawnField(Slot, EF_VEL_Y, DROP_LIFT);
+  SetSpawnField(Slot, EF_FLAG1C, Ord(Roll > DROP_RARE));
 end;
 
 { Entity_SpawnDebris @ 0x00461874. }
