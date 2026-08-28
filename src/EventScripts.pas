@@ -182,7 +182,14 @@ const
 type
   TEventRecord = record
     Opcode:  Integer;   { csv 0 -> +0x00 }
-    Active:  Boolean;   { +0x05, runtime only; Entity_Destroy clears it }
+    InWindow: Boolean;  { +0x04, runtime only; set while inside the camera
+                          window, cleared again once it leaves WITHOUT an
+                          entity out. Those two bytes are separate on purpose:
+                          the mark stops a second spawn, the entity byte stops
+                          the mark being cleared underneath one. }
+    Active:  Boolean;   { +0x05, runtime only; "an entity for this exists".
+                          Entity_Destroy clears it }
+    EntitySlot: Integer;{ +0x08, which slot that entity is in }
     ParamA:  string;    { csv 5 -> +0x0C }
     TileX:   Integer;   { csv 3 -> +0x10 }
     TileY:   Integer;   { csv 4 -> +0x14 }
@@ -209,6 +216,8 @@ type
     function Load(const ADataDir: string; StageIndex: Integer): Integer;
 
     procedure SetActive(Index: Integer; Value: Boolean);
+    procedure SetInWindow(Index: Integer; Value: Boolean);
+    procedure SetEntity(Index, Slot: Integer);
 
     { Kill an event for GOOD. Both Events_SpawnNearCamera and the
       interpreter's sub-op 7 do exactly this: opcode to -1 and the tile moved
@@ -267,6 +276,21 @@ begin
     Exit;
   end;
   Result := FEvents[Index];
+end;
+
+procedure TEventScript.SetInWindow(Index: Integer; Value: Boolean);
+begin
+  if (Index >= 0) and (Index < Length(FEvents)) then
+    FEvents[Index].InWindow := Value;
+end;
+
+procedure TEventScript.SetEntity(Index, Slot: Integer);
+begin
+  if (Index >= 0) and (Index < Length(FEvents)) then
+  begin
+    FEvents[Index].EntitySlot := Slot;
+    FEvents[Index].Active := True;
+  end;
 end;
 
 procedure TEventScript.Disable(Index: Integer);

@@ -234,6 +234,11 @@ const
   EF_TYPE        = $03;   { index into ENTITY_TYPES }
   EF_SPRITE      = $04;   { sprite-pool handle, -1 when the type has no sprite }
   SPRITE_NONE    = -1;    { EF_SPRITE's empty value }
+  { The drawn sprite id, which Entity_UpdateAll copies onto the sprite object
+    every frame, and the placement variant the ParamA 'A' letter writes. Both
+    sit outside the two 10-int blocks. }
+  EF_ANIM_ID     = $05;
+  EF_VARIANT     = $06;
   EF_FLAG1C      = $07;   { set to 0 or 1 by FUN_004617FC }
   EF_BLOCK_A     = $08;   { 10 ints, zeroed on spawn }
   { Block B is a bank of 10 COUNTDOWN TIMERS. Steer (0x00461738) decrements one
@@ -1125,6 +1130,11 @@ function EntitiesOverlap(const A, B: TEntity;
   separation-versus-width rather than the usual four edge comparisons; this is
   the same predicate, kept in the original's form. }
 function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
+
+{ An entity position to pixels, with POSITION_BIAS removed and the rounding
+  toward zero the original uses. Exported because the event spawn walk needs
+  the same conversion for the layer origin. }
+function PixelOf(Raw: Integer): Integer;
 
 { 0x0045114C. The three-way compare the game uses wherever it wants a sign:
   -1 when B < A, 1 when A < B, 0 when equal. Called as Compare(0, X), which is

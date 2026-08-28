@@ -41,7 +41,8 @@ unit EventRunner;
 interface
 
 uses
-  SysUtils, Classes, PlayerState, GameState, EventScripts, EventCommands;
+  SysUtils, Classes, PlayerState, GameState, EventScripts, EventCommands,
+  Entities;
 
 type
   { What the interpreter needs from the rest of the game.
@@ -118,7 +119,38 @@ type
 
     { The sub-opcode of the current step, or -1 when there is none. }
     function CurrentSubOp: Integer;
+
+    { 0x00454790. Walked every frame: spawns what has come near the camera,
+      retires what a flag has closed off, and starts opcode-4 events outright.
+      The camera tile is passed in rather than read from the tilemap object,
+      because that is the one thing here the original reaches for through a
+      component this reconstruction does not have. }
+    procedure SpawnNearCamera(Events: TEventScript; Pool: TEntityPool;
+                              const L: TLayerInfo;
+                              CamTileX, CamTileY: Integer;
+                              var P: TPlayerState; var AGameState: Integer);
   end;
+
+const
+  { The spawn window, in tiles around the camera's top-left. The screen is
+    10 x 7.5 tiles and the margin is 2 on every side, so the tests are
+        CamTile - 2  <  tile  <  CamTile + 12      (10 + 2)
+        CamTile - 2  <  tile  <  CamTile + 9.5     (7.5 + 2)
+    which is where Camera.pas's VIEW_TILES_* came from in the first place -
+    the two functions agree without either having been written from the
+    other. The vertical bound is fractional in the original and is kept so. }
+  SPAWN_WINDOW_X = 12;
+  SPAWN_WINDOW_Y = 9.5;
+
+  { An entity is dropped in the MIDDLE of its tile: half a tile, in 1/32 px. }
+  SPAWN_TILE_CENTRE = $200;
+  EVENT_BEGIN_FROM_SPAWN = 4;
+
+  { Type 20 gets its extent forced to a whole tile on spawn. It is one of the
+    three types with no sprite, so it has no art to take a size from - and
+    with no extent it would have no hitbox either. }
+  SPAWN_FORCED_EXTENT_TYPE = 20;
+  SPAWN_FORCED_EXTENT = 32;
 
 { The guard on an alternative: its first four characters are a progress flag
   index. Exposed because both AdvanceStep and the tests want it, and because
@@ -485,6 +517,175 @@ begin
     N := 0;
     if N <> 0 then
       AdvanceStep(P, AGameState);
+  end;
+end;
+
+{ ParamA's letter decides which fields the placement carries, and where each
+  one sits. The positions come from EventCommands.SpawnArgPosition, which was
+  read out of this same function - so this applies them rather than restating
+  them. }
+procedure ApplySpawnArgs(Pool: TEntityPool; Slot: Integer;
+                         const ParamA: string; var P: TPlayerState);
+var
+  Kind: Char;
+  Start, Len, A0, A1, A2: Integer;
+
+  function Arg(Index: Integer): Integer;
+  begin
+    Result := 0;
+    if not SpawnArgPosition(Kind, Index, Start, Len) then
+      Exit;
+    if not TryStrToInt(Trim(Copy(ParamA, Start, Len)), Result) then
+      Result := 0;
+  end;
+
+begin
+  if Length(ParamA) < 6 then
+    Exit;
+  Kind := ParamA[6];
+
+  case Kind of
+    '*': ;    { carries nothing at all - 379 of the shipped placements }
+
+    '/':
+      begin
+        { Gated: the state is only applied when a progress flag is already
+          set, which is how one placement covers a before and an after. }
+        A0 := Arg(0);
+        A1 := Arg(1);
+        if (A0 >= 0) and (A0 < PROGRESS_LENGTH) and (P.Progress[A0] = 1) then
+          Pool.SetField(Slot, EF_STATE, A1);
+      end;
+
+    'A':
+      Pool.SetField(Slot, EF_VARIANT, Arg(0));
+
+    'M':
+      begin
+        A0 := Arg(0);
+        A1 := Arg(1);
+        A2 := Arg(2);
+        Pool.SetField(Slot, EF_STATE, A0);
+        Pool.SetField(Slot, EF_BLOCK_A + 1, A1);
+        { The heading is given in eighths of the 64-step turn. }
+        Pool.SetField(Slot, EF_FACING, A2 shl 3);
+      end;
+
+    'R':
+      begin
+        A0 := Arg(0);
+        A1 := Arg(1);
+        Pool.SetField(Slot, EF_FACING, A0);
+        Pool.SetField(Slot, EF_BLOCK_A + 1, A1);
+      end;
+
+    'J':
+      begin
+        { A nudge, in whole pixels off the tile centre. }
+        A0 := Arg(0);
+        A1 := Arg(1);
+        Pool.SetField(Slot, EF_POS_X, Pool.Field(Slot, EF_POS_X) + A0 * 32);
+        Pool.SetField(Slot, EF_POS_Y, Pool.Field(Slot, EF_POS_Y) + A1 * 32);
+      end;
+
+  else
+    { The original has a seventh form here, reading seven fields at 6, 11, 16, 21,
+      26, 31 and 36 - variant, both extents and all four box percentages. No
+      shipped placement reaches it: every one of the 692 records carries one of
+      the six letters above. Left unimplemented deliberately, and this comment
+      is the record of why rather than an oversight. }
+    ;
+  end;
+end;
+
+procedure TEventRunner.SpawnNearCamera(Events: TEventScript; Pool: TEntityPool;
+                                       const L: TLayerInfo;
+                                       CamTileX, CamTileY: Integer;
+                                       var P: TPlayerState;
+                                       var AGameState: Integer);
+var
+  I, Slot, TypeId, CamPxX, CamPxY: Integer;
+  Rec: TEventRecord;
+  InWindow: Boolean;
+begin
+  if (Pool = nil) or (Events = nil) or (L.TileW = 0) or (L.TileH = 0) then
+    Exit;
+
+  CamPxX := PixelOf(L.OriginX);
+  CamPxY := PixelOf(L.OriginY);
+
+  for I := 0 to Events.Count - 1 do
+  begin
+    Rec := Events[I];
+
+    { Opcode 4 ignores the window entirely - the puzzle checkers are always
+      live, which is why they can sit at tile (1, 1) and still work. }
+    InWindow := ((CamTileX - SPAWN_MARGIN_TILES < Rec.TileX)
+                 and (Rec.TileX < CamTileX + SPAWN_WINDOW_X)
+                 and (CamTileY - SPAWN_MARGIN_TILES < Rec.TileY)
+                 and (Rec.TileY < CamTileY + SPAWN_WINDOW_Y))
+                or (Rec.Opcode = EVOP_ALWAYS);
+
+    if not InWindow then
+    begin
+      { Out of range and holding no entity: clear the in-window mark so it can
+        spawn again next time round. If it still has an entity the mark stays,
+        which is what stops it spawning a second one. }
+      if not Rec.Active then
+        Events.SetInWindow(I, False);
+      Continue;
+    end;
+
+    { The required flag. }
+    if (Rec.NeedsFlag <> 0)
+       and ((Rec.NeedsFlag >= PROGRESS_LENGTH) or (P.Progress[Rec.NeedsFlag] = 0)) then
+      Continue;
+
+    { The forbidding flag - and this is the "gone for good" path, not a skip. }
+    if (Rec.BlockedBy <> 0) and (Rec.BlockedBy < PROGRESS_LENGTH)
+       and (P.Progress[Rec.BlockedBy] = 1) then
+    begin
+      Events.Disable(I);
+      if Rec.Active then
+        Pool.Kill(Rec.EntitySlot);
+      Continue;
+    end;
+
+    { Already marked, or already holding an entity: nothing to do. }
+    if Rec.InWindow or Rec.Active then
+      Continue;
+
+    TypeId := 0;
+    if Length(Rec.ParamA) >= 4 then
+      if not TryStrToInt(Copy(Rec.ParamA, 1, 4), TypeId) then
+        TypeId := 0;
+
+    Slot := Pool.Spawn(EKIND_MINOR, TypeId,
+                       (Rec.TileX * L.TileW - CamPxX) * 32 + SPAWN_TILE_CENTRE,
+                       (Rec.TileY * L.TileH - CamPxY) * 32 + SPAWN_TILE_CENTRE);
+    if Slot = SLOT_NONE then
+      Continue;
+
+    Events.SetInWindow(I, True);
+    Events.SetEntity(I, Slot);
+
+    { A type with no sprite has no art to size itself from, so it is given a
+      whole tile. }
+    if Pool.Field(Slot, EF_TYPE) = SPAWN_FORCED_EXTENT_TYPE then
+    begin
+      Pool.SetField(Slot, EF_EXTENT_X, SPAWN_FORCED_EXTENT);
+      Pool.SetField(Slot, EF_EXTENT_Y, SPAWN_FORCED_EXTENT);
+    end;
+
+    { The entity remembers which record placed it - this is what lets
+      Entity_Destroy and the touch handlers find their event again. }
+    Pool.SetField(Slot, EF_EVENT_ID, I);
+
+    ApplySpawnArgs(Pool, Slot, Rec.ParamA, P);
+
+    { A puzzle checker runs the moment it is placed. }
+    if Rec.Opcode = EVOP_ALWAYS then
+      StartEvent(Events, I, EVENT_BEGIN_FROM_SPAWN, P, AGameState);
   end;
 end;
 

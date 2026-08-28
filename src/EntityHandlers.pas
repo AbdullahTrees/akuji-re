@@ -150,8 +150,8 @@ const
   { Slots this handler uses. int 5 is the drawn sprite id, the same slot
     Player_Update writes - it is entity-wide, not the player's. int 6 is the
     variant. Both sit outside the two 10-int blocks. }
-  EF_ANIM_ID = $05;
-  EF_VARIANT = $06;
+  { EF_ANIM_ID and EF_VARIANT moved to Entities.pas - they are core entity
+    fields, not handler-local ones, and the event spawn walk needs them too. }
 
   { --- The two touch handlers @ 0x00458274 and 0x00458490 ---------------
     Both are what EF_TOUCH_KIND 2 and 5 reach, and both follow the same shape:
