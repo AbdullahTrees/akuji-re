@@ -1412,7 +1412,7 @@ const
   SHEET_COLS = 10;
   TILE_PX    = 32;
 var
-  Terr, Track, Frame, N, Tracks, Frames, Obvious, Bad: Integer;
+  Terr, Track, Frame, N, Tracks, Frames, Obvious, Thr, Kill, Bad: Integer;
   A: TTerrainAnim;
   Id, GotX, GotY: Integer;
 begin
@@ -1511,6 +1511,58 @@ begin
   end;
   Log.Add(Format('the transposed reading places all %d; the obvious one places'
     + ' %d, and only on the diagonal', [N, Obvious]));
+
+  { --- the switch itself --------------------------------------------- }
+  for Terr := 1 to TERRAIN_MAX do
+  begin
+    Thr := -1;
+    Kill := -1;
+    TerrainConfigure(Terr, Thr, Kill, A);
+    if (Thr <> TERRAIN_SOLID_THRESHOLD[Terr])
+       or (Kill <> TERRAIN_KILL_TILE[Terr]) then
+    begin
+      Log.Add(Format('FAILED: terrain %d configured (%d, %d), want (%d, %d)',
+        [Terr, Thr, Kill, TERRAIN_SOLID_THRESHOLD[Terr],
+         TERRAIN_KILL_TILE[Terr]]));
+      Inc(Bad);
+    end;
+    { The kill tile has to be a tile you can walk INTO or nothing could ever
+      touch it - so it must be below the threshold - except for terrain 9,
+      whose kill tile is deliberately outside the id space altogether. }
+    if (Kill < TILESET_IDS) and (Kill >= Thr) then
+    begin
+      Log.Add(Format('FAILED: terrain %d''s kill tile %d is at or above its'
+        + ' solid threshold %d, so it could never be entered',
+        [Terr, Kill, Thr]));
+      Inc(Bad);
+    end;
+    if (Terr >= 5) and (A.TrackCount <> 0) then
+    begin
+      Log.Add(Format('FAILED: terrain %d built %d animated tiles; only 1..4 do',
+        [Terr, A.TrackCount]));
+      Inc(Bad);
+    end;
+  end;
+
+  { The default arm writes nothing at all. That is the behaviour, not an
+    oversight: a terrain id outside 1..9 falls through the jump table and the
+    two globals keep whatever the last stage put there. }
+  Thr := 12345;
+  Kill := 6789;
+  TerrainConfigure(0, Thr, Kill, A);
+  if (Thr <> 12345) or (Kill <> 6789) or (A.TrackCount <> 0) then
+  begin
+    Log.Add(Format('FAILED: terrain 0 changed the configuration to (%d, %d)'
+      + ' with %d tracks; the default arm writes nothing',
+      [Thr, Kill, A.TrackCount]));
+    Inc(Bad);
+  end;
+  TerrainConfigure(TERRAIN_MAX + 1, Thr, Kill, A);
+  if (Thr <> 12345) or (Kill <> 6789) then
+  begin
+    Log.Add('FAILED: a terrain id past the end wrote to the globals');
+    Inc(Bad);
+  end;
   if Obvious <> 1 then
   begin
     Log.Add(Format('FAILED: expected exactly one diagonal frame (tile 77),'

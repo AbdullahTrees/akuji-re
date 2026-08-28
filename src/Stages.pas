@@ -286,7 +286,48 @@ const
                                    (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0))))
   );
 
+{ 0x004645B0. What Load_Stage_Assets calls once a stage's assets are in, with
+  the terrain id from rec[18].
+
+  It is a nine-arm switch and every arm does the same two things - write the
+  solid threshold and the kill tile into two adjacent BSS globals - after which
+  four of them also build the animated tiles. An id outside 1..9 falls through
+  the jump table's default and writes NOTHING, leaving whatever the last stage
+  set; that is reproduced rather than guarded, because a default is what the
+  original has and the stage table never produces one.
+
+  The globals become parameters here, and they are `var` rather than `out` on
+  purpose: the default arm's whole behaviour is that they KEEP their previous
+  values, and an `out` parameter is free to be cleared on entry. The original
+  reaches them through pointer indirections because Delphi puts unit variables
+  behind them; there is nothing to model in that. What the animator does with its tracks
+  belongs to TMYBGANIME, which is component-layer and not reconstructed - so
+  the tracks are handed back rather than built into an object that would only
+  be a stub. }
+procedure TerrainConfigure(TerrainId: Integer;
+                           var SolidThreshold, KillTile: Integer;
+                           out Anim: TTerrainAnim);
+
+
 implementation
+
+procedure TerrainConfigure(TerrainId: Integer;
+                           var SolidThreshold, KillTile: Integer;
+                           out Anim: TTerrainAnim);
+begin
+  { The switch's default arm. Both globals keep their previous values and no
+    animator is built - which is also why every caller must pass the ones it
+    already has rather than expecting them initialised. }
+  if (TerrainId < 1) or (TerrainId > TERRAIN_MAX) then
+  begin
+    Anim := TERRAIN_ANIM[0];
+    Exit;
+  end;
+
+  SolidThreshold := TERRAIN_SOLID_THRESHOLD[TerrainId];
+  KillTile       := TERRAIN_KILL_TILE[TerrainId];
+  Anim           := TERRAIN_ANIM[TerrainId];
+end;
 
 function TStageTable.GetCount: Integer;
 begin
