@@ -69,6 +69,8 @@
       0x0045C250  type 49  a hovering diver
       0x0045C430  type 50  a patroller that opens up to fire, and changes its
                            own vulnerability while open
+      0x0045C608  type 51  a pure chaser
+      0x0045CA28  type 53  a charger, by facing
 
   And the dispatcher they hang off:
 
@@ -1036,6 +1038,38 @@ const
   T50_VULN_OPEN    = 1;
   T50_VULN_CLOSING = 2;
 
+  { --- Types 51 and 53 --------------------------------------------------
+    TYPE 51 is the simplest chaser in the game: a four-frame loop, one
+    Entity_SteerToPlayer a frame with a fixed reload of 6, and move by the
+    velocity that produces. No states, no difficulty tables, no end - it
+    homes until something kills it. It also keeps EF_DEATH_TIMER topped up at
+    2 the way types 11 and 28 do, so it blinks continuously.
+
+    TYPE 53 winds up and then charges in whatever direction it was already
+    facing. Its sprite table is TWO rows of five - frames 0..2 for the
+    wind-up and 3..4 for the run - and the row is the sign of its horizontal
+    velocity, the same shape types 3, 30 and 2 use, at a stride of 0x14 rather
+    than the usual 0x10 because the rows are five wide.
+
+    Nothing stops it. Once it is running it runs until it leaves the screen. }
+  T51_FRAMES = 4;  T51_TICKS = 8;
+  T51_TABLE_ADDR = $0046C170;
+  T51_SPRITES: array[0..T51_FRAMES - 1] of Integer = (153, 154, 155, 154);
+  T51_TURN_TIMER = 1;
+  T51_TURN_RELOAD = 6;
+  T51_DEATH_TIMER = 2;
+
+  T53_ROW = 5;
+  T53_WIND_LAST = 2;
+  T53_RUN_FIRST = 3;
+  T53_RUN_LAST = 4;
+  T53_TICKS = 4;
+  T53_TABLE_ADDR = $0046C1D0;
+  T53_SPRITES: array[0..1, 0..T53_ROW - 1] of Integer =
+    ((512, 513, 514, 508, 509),      { going left  }
+     (512, 513, 514, 510, 511));     { going right }
+  T53_CHARGE_SOUND = 7;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1290,6 +1324,14 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045C608. The simplest chaser: steer, move, repeat, for ever. }
+procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045CA28. Winds up, then charges in whatever direction it faces. }
+procedure EntityUpdate_Type53(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045C430. Patrols, opens to fire, closes - and changes its own
   vulnerability while open. See the T50_ block. }
@@ -2068,6 +2110,84 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T51_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T51_SPRITES[Frame];
+
+  { Topped back up whenever it reaches zero, so it blinks continuously - the
+    same thing types 11 and 28 do with this field. }
+  if E.Raw[EF_DEATH_TIMER] = 0 then
+    E.Raw[EF_DEATH_TIMER] := T51_DEATH_TIMER;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T51_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T51_FRAMES;
+  end;
+
+  if World.Pool <> nil then
+    World.Pool.Steer(E.Raw[EF_SLOT], T51_TURN_TIMER, T51_TURN_RELOAD);
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+  Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type53(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T53_ROW) then
+    Frame := 0;
+  { By the SIGN, two ifs and no else - a stationary one keeps its sprite. }
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T53_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T53_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T53_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T53_WIND_LAST then
+      begin
+        World.PlaySound(T53_CHARGE_SOUND);
+        E.Raw[EF_STATE] := 1;
+        E.Raw[EF_FLAG1C] := T53_RUN_FIRST;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T53_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T53_RUN_LAST then
+        E.Raw[EF_FLAG1C] := T53_RUN_FIRST;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type50(var E: TEntity; AGameState: Integer;
@@ -4384,11 +4504,13 @@ begin
       48: EntityUpdate_Type48(E^, AGameState, World);
       49: EntityUpdate_Type49(E^, AGameState, World);
       50: EntityUpdate_Type50(E^, AGameState, World);
+      51: EntityUpdate_Type51(E^, AGameState, World);
+      53: EntityUpdate_Type53(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 30 arms are in HANDLER_ADDR, untranslated }
+      { the other 28 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
