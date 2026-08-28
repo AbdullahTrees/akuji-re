@@ -568,10 +568,17 @@ const
 
       A[1] $09  frames between spawns      B[0] $12  countdown to next spawn
       A[2] $0A  how many to spawn in all   B[1] $13  how many spawned so far
-      A[3] $0B  scatter radius, in tiles   B[2] $14  countdown to next sound
+      A[3] $0B  scatter radius              B[2] $14  countdown to next sound
       A[4] $0C  frames between sounds
 
-    When B[1] passes A[2] it destroys itself. That is the pattern to expect
+    AUDIT: the radius was recorded as being "in tiles" and it is not. The
+    offset is Random(r * 16) - r * 8 PIXELS, so it spans plus or minus r * 8 -
+    quarter-tile units at the game's 32-pixel tiles. Reading it as tiles
+    overstates every burst by a factor of four.
+
+    When B[1] passes A[2] it destroys itself - and note the test is a strict
+    `A[2] < B[1]` after the increment, so an emitter configured for N actually
+    spawns N + 1 times. That is the pattern to expect
     from the other handlers: block A is the stage author's configuration and
     block B is the handler's scratch. }
   EF_BLOCK_LEN = 10;
