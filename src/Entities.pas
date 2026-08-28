@@ -1111,6 +1111,11 @@ function EntitiesOverlap(const A, B: TEntity;
   the same predicate, kept in the original's form. }
 function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
 
+{ 0x0045114C. The three-way compare the game uses wherever it wants a sign:
+  -1 when B < A, 1 when A < B, 0 when equal. Called as Compare(0, X), which is
+  Sign(X). Differential-tested against the original over 25 cases. }
+function Compare(A, B: Integer): Integer;
+
 { E.Raw[Extent] div 2, rounded toward zero the way the original's shift-and-
   correct does it. Exported because Entity_UpdateAll halves an extent four times
   over and must halve it identically. }
@@ -1151,6 +1156,15 @@ end;
 function HalfExtent(V: Integer): Integer;
 begin
   Result := V div 2;
+end;
+
+function Compare(A, B: Integer): Integer;
+begin
+  Result := 0;
+  if B < A then
+    Result := -1;
+  if A < B then
+    Result := 1;
 end;
 
 function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;

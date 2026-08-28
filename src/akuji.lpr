@@ -4633,11 +4633,8 @@ begin
           Got := AngleBetween(Key('eax', 0), Key('edx', 0),
                               Key('ecx', 0), Stk[0]);
         $0045114C:
-          begin
-            if Key('edx', 0) < Key('eax', 0) then Got := -1
-            else if Key('eax', 0) < Key('edx', 0) then Got := 1
-            else Got := 0;
-          end;
+          { The real function now, not a restatement of it here. }
+          Got := Compare(Key('eax', 0), Key('edx', 0));
         $00457150:
           begin
             BuildEntityAndLayer;

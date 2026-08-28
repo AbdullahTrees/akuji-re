@@ -21,6 +21,7 @@
       0x00458404  Entity_TouchLife
       0x00458138  Player_TakeDamage
       0x00457880  Entity_PlayerTouch - the dispatcher over all seven kinds
+      0x00457AB4  Entity_TakeProjectileHits
 
   And the dispatcher they hang off:
 
@@ -206,6 +207,71 @@ const
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
 
+  { --- Entity_TakeProjectileHits @ 0x00457AB4 ---------------------------
+    A wide switch on the TARGET's EF_VULN_KIND, and the projectile's own
+    EF_STATE is its POWER. Three of the arms do something other than damage:
+
+      7  REFLECTS the shot. It spawns a fresh type 2 travelling the other way,
+         with the same power, a 600-frame life, and a touch kind that makes it
+         hostile - 7 for power 2, otherwise 1. It also sizes the new shot's
+         collision box: all four percentage columns to 30 for power 2 and 60
+         otherwise, which is the only place in the game seen writing those at
+         runtime.
+      6  SPINS the target a fifth of a turn (24 of 64) and sets int $15.
+      5  SHOVES it sideways at the shot's direction times 64 and steps its
+         frame, wrapping 0..3.
+
+    The rest are immunity, and several are CONDITIONAL ON THE SHOT'S POWER,
+    which is what makes them armour rather than invulnerability:
+
+      2, $5C   immune outright
+      $5A      immune to power below 1
+      $5B      immune to power below 2
+      $5D      immune UNLESS the power is exactly 3
+      4        immune unless the power is exactly 4
+
+    A shot of power 3 is skipped entirely unless the target's kind is $5D, so
+    that power exists to open exactly one kind of door.
+
+    On a real hit the target loses the shot's EF_HP - the same slot being
+    damage on a projectile and hit points on a target - and gets 8 frames in
+    both timers. Powers 2 and 3 PIERCE: they are not destroyed and can hit
+    again. Power 4 is destroyed WITH loot.
+
+    Only the special arms return early; an ordinary hit carries on scanning,
+    so several shots can land in one pass until the target's HP reaches 0. }
+  VULN_IMMUNE        = 2;
+  VULN_ONLY_POWER4   = 4;
+  VULN_SHOVE         = 5;
+  VULN_SPIN          = 6;
+  VULN_REFLECT       = 7;
+  VULN_ARMOUR_1      = $5A;   { immune below power 1 }
+  VULN_ARMOUR_2      = $5B;   { immune below power 2 }
+  VULN_IMMUNE_ALT    = $5C;
+  VULN_ONLY_POWER3   = $5D;
+
+  HIT_SPARK_TYPE = 10;
+  REFLECT_TYPE   = 2;
+  REFLECT_LIFE   = 600;
+  REFLECT_BOX_STRONG = $1E;   { the four percentage columns, power 2 }
+  REFLECT_BOX_WEAK   = $3C;
+  SPIN_MARK      = $EC;       { 236, into int $15 }
+  SPIN_TURN      = $18;       { 24 of 64 }
+  SHOVE_SPEED_SHIFT = 6;      { direction shl 6 }
+  SHOVE_FRAMES   = 4;         { the frame wraps 0..3 }
+  HIT_INVULN     = 8;
+  PIERCING_POWER_A = 2;       { these are not consumed by the hit }
+  PIERCING_POWER_B = 3;
+  LOOT_POWER       = 4;       { this one is destroyed WITH loot }
+
+  { The per-target hit sound, at 0x00468E34 through the pointer 0x0046CC48.
+    Four entries, four readers, all of them in this one function. }
+  HIT_SOUND_COUNT = 4;
+  HIT_SOUND_ADDR  = $00468E34;
+  HIT_SOUND_PTR   = $0046CC48;
+  HIT_SOUNDS: array[0..HIT_SOUND_COUNT - 1] of Integer =
+    (SND_KIN01, SND_SHOT01, SND_PI02, SND_MOVE01);
+
   { --- Entity_UpdateDying ------------------------------------------------- }
   DEATH_CLASS_SMALL  = 1;
   DEATH_CLASS_BIG    = 2;
@@ -271,6 +337,9 @@ procedure PlayerTakeDamage(var Player: TEntity; var P: TPlayerState;
 { 0x00457880. The touch dispatcher. }
 procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
                       var Inp: TInputState; World: TEntityWorld);
+
+{ 0x00457AB4. Everything the actor slots have thrown at this entity. }
+procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
 
 { 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
   which only variant 8 has. }
@@ -350,10 +419,8 @@ type
   TTouchProc = procedure(var E, Player: TEntity; var P: TPlayerState;
                          var Inp: TInputState; World: TEntityWorld);
 
-  { Entity_TakeProjectileHits @ 0x00457AB4 is still not translated. Its call
-    site stays where the original has it and dispatches through this, which is
-    nil until the function exists - leaving the call in place rather than
-    omitting it is what keeps the omission visible. }
+  { The projectile pass, a variable for the same reason as the touch pass:
+    so a test can count calls without needing the real thing. }
   TEntityCallback = procedure(var E: TEntity; World: TEntityWorld);
 
 var
@@ -632,6 +699,146 @@ begin
       if Player.Raw[EF_VEL_Y] > 0 then
         E.Raw[EF_STATE] := 2;
     TOUCH_KIND_HURT_HARD: PlayerTakeDamage(Player, P, 2, World);
+  end;
+end;
+
+function HitSound(const E: TEntity): Integer;
+var
+  I: Integer;
+begin
+  I := E.Raw[EF_HIT_SOUND];
+  if (I < 0) or (I >= HIT_SOUND_COUNT) then
+    I := 0;                     { the original indexes this unchecked }
+  Result := HIT_SOUNDS[I];
+end;
+
+procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
+var
+  Slot, Vuln, Power, Dir, NewSlot, EventId, Box: Integer;
+  Target, Shot: TBox;
+  S: PEntity;
+begin
+  Vuln := E.Raw[EF_VULN_KIND];
+  if (Vuln = 0) or (E.Raw[EF_TIMER] <> 0) or (World.Pool = nil) then
+    Exit;
+
+  Target := EntityBox(E, 1, 1);
+
+  for Slot := SLOT_ACTOR_FIRST to SLOT_ACTOR_LAST do
+  begin
+    S := World.Pool.Entity(Slot);
+    Power := S^.Raw[EF_STATE];
+
+    { A power-3 shot is invisible to everything except kind $5D. }
+    if not ((Vuln = VULN_ONLY_POWER3) or (Power <> 3)) then
+      Continue;
+    if (S^.Raw[EF_ALIVE] and $FF) = 0 then
+      Continue;
+    if S^.Raw[EF_HP] = 0 then          { no damage means not a projectile }
+      Continue;
+    if (E.Raw[EF_ALIVE] and $FF) = 0 then
+      Continue;
+    if E.Raw[EF_HP] = 0 then
+      Continue;
+
+    Shot := EntityBox(S^, 1, 1);
+    if not RectOverlap(Shot, Target, 0, 0) then
+      Continue;
+
+    World.Spawn(EKIND_MINOR, HIT_SPARK_TYPE,
+                S^.Raw[EF_POS_X] - POSITION_BIAS,
+                S^.Raw[EF_POS_Y] - POSITION_BIAS);
+
+    EventId := E.Raw[EF_EVENT_ID];
+    if (EventId <> -1) and (World.EventOpcode(EventId) = 6) then
+      World.BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
+
+    if Vuln = VULN_REFLECT then
+    begin
+      NewSlot := World.Spawn(EKIND_MINOR, REFLECT_TYPE,
+                             S^.Raw[EF_POS_X] - POSITION_BIAS,
+                             S^.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(NewSlot, EF_VEL_X, -S^.Raw[EF_VEL_X]);
+      World.SetSpawnField(NewSlot, EF_STATE, Power);
+      World.SetSpawnField(NewSlot, EF_CHILD_B, REFLECT_LIFE);
+      World.SetSpawnField(NewSlot, EF_CLASS, 0);
+      if Power = PIERCING_POWER_A then
+      begin
+        World.SetSpawnField(NewSlot, EF_TOUCH_KIND, TOUCH_KIND_HURT_HARD);
+        Box := REFLECT_BOX_STRONG;
+      end
+      else
+      begin
+        World.SetSpawnField(NewSlot, EF_TOUCH_KIND, TOUCH_KIND_HURT);
+        Box := REFLECT_BOX_WEAK;
+      end;
+      World.SetSpawnField(NewSlot, EF_BOX_PCT_X, Box);
+      World.SetSpawnField(NewSlot, EF_BOX_PCT_Y, Box);
+      World.SetSpawnField(NewSlot, EF_INSET_PCT_X, Box);
+      World.SetSpawnField(NewSlot, EF_INSET_PCT_Y, Box);
+      World.PlaySound(HitSound(E));
+      World.DestroyEntity(S^, False);
+      Exit;
+    end;
+
+    if Vuln = VULN_SPIN then
+    begin
+      E.Raw[EF_SHOTS] := SPIN_MARK;
+      Inc(E.Raw[EF_FACING], SPIN_TURN);
+      if E.Raw[EF_FACING] > DIR_COUNT - 1 then
+        Dec(E.Raw[EF_FACING], DIR_COUNT);
+      World.PlaySound(HitSound(E));
+      World.DestroyEntity(S^, False);
+      Exit;
+    end;
+
+    if Vuln = VULN_SHOVE then
+    begin
+      { Compare(0, X) is how the original spells Sign(X). }
+      Dir := Compare(0, S^.Raw[EF_VEL_X]);
+      E.Raw[EF_VEL_X] := Dir shl SHOVE_SPEED_SHIFT;
+      Inc(E.Raw[EF_FLAG1C], Compare(0, E.Raw[EF_VEL_X]));
+      if E.Raw[EF_FLAG1C] > SHOVE_FRAMES - 1 then
+        E.Raw[EF_FLAG1C] := 0;
+      if E.Raw[EF_FLAG1C] < 0 then
+        E.Raw[EF_FLAG1C] := SHOVE_FRAMES - 1;
+      World.PlaySound(HitSound(E));
+      World.DestroyEntity(S^, False);
+      Exit;
+    end;
+
+    { Immunity, some of it conditional on the shot's power. }
+    if (Vuln = VULN_IMMUNE) or (Vuln = VULN_IMMUNE_ALT)
+    or ((Vuln = VULN_ARMOUR_1) and (Power < 1))
+    or ((Vuln = VULN_ARMOUR_2) and (Power < 2))
+    or ((Vuln = VULN_ONLY_POWER3) and (Power <> 3))
+    or ((Vuln = VULN_ONLY_POWER4) and (Power <> LOOT_POWER)) then
+    begin
+      World.PlaySound(HitSound(E));
+      World.DestroyEntity(S^, Power = LOOT_POWER);
+      Exit;
+    end;
+
+    { A real hit. The projectile's EF_HP is its DAMAGE - the same slot that
+      holds hit points on a target. }
+    Dec(E.Raw[EF_HP], S^.Raw[EF_HP]);
+
+    { Powers 2 and 3 pierce and are not consumed. }
+    if (Power <> PIERCING_POWER_A) and (Power <> PIERCING_POWER_B) then
+      World.DestroyEntity(S^, Power = LOOT_POWER);
+
+    E.Raw[EF_TIMER] := HIT_INVULN;
+    E.Raw[EF_DEATH_TIMER] := HIT_INVULN;
+
+    if E.Raw[EF_HP] < 1 then
+    begin
+      E.Raw[EF_HP] := 0;
+      E.Raw[EF_DYING] := 0;      { let Entity_UpdateDying run its setup }
+    end
+    else
+      World.PlaySound(SND_HIT01);
+    { NOTE: no Exit here. Only the special arms above stop the scan, so
+      several shots can land in one pass until the target's HP reaches 0. }
   end;
 end;
 
@@ -998,5 +1205,6 @@ initialization
   { The touch pass is real now. It stays a variable only so a test can put a
     counting stub in its place. }
   EntityPlayerTouch := @PlayerTouch;
+  EntityTakeProjectileHits := @TakeProjectileHits;
 
 end.
