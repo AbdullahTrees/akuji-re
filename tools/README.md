@@ -32,6 +32,18 @@ readers is the strongest evidence available here.
 ## Mutation testing
 
     tools/mutate.sh tools/mutations/entities.txt [game dir]
+    SELFTEST=--selftest-runner tools/mutate.sh tools/mutations/runner.txt
+    CHECK_CMD="python tools/emudiff.py" tools/mutate.sh tools/mutations/emudiff.txt
+
+`SELFTEST` picks which self-test judges the mutation; `CHECK_CMD` replaces it
+entirely, which is what the differential specs need — a wrong RNG reproduces
+itself, so anything comparing the reconstruction against itself passes.
+
+| spec | covers | result |
+|---|---|---|
+| `entities.txt` | `Entities.pas`, `EntityHandlers.pas` | 47 defects |
+| `runner.txt` | `EventRunner.pas`, the interpreter | 33 defects, 4 survived first time |
+| `emudiff.txt` | what only the original can settle | 2 defects |
 
 Applies a deliberate defect, rebuilds, and requires the gate to notice. **A test
 that cannot fail is worse than none**, and on this project that has happened six
@@ -39,7 +51,11 @@ separate ways:
 
 * a self-test that passed having loaded **zero** events
 * an `Assert` the compiler removed entirely — FPC drops assertions without `-Sa`
-* a check whose reference was built from the constant under test
+* a check whose reference was built from the constant under test — this one
+  has now happened **twice**, most recently as
+  `Want(PosX = Tx * 32 * 32 + SPAWN_TILE_CENTRE)`, which passes cheerfully with
+  `SPAWN_TILE_CENTRE` mutated to 0. Write the number out. An expectation phrased
+  in terms of the thing it is testing is not an expectation, it is a restatement
 * one the compiler folded to a constant and warned "unreachable code" about
 * one that verified a table's values using **that table's own length**
 * one that watched for an effect the code stopped producing either way, so

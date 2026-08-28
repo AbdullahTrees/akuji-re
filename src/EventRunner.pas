@@ -22,17 +22,27 @@
   Event_Begin refuses to start a second one while it is there. Running off the
   end of the steps puts the game back into GS_PLAY.
 
-  ## Progress[1..4] are SCRATCH
+  ## Progress[1..4] are SCRATCH, and Progress[3] is the dialogue answer
 
   Event_Begin clears exactly those four bytes every time a script starts. They
-  are not world flags: nothing in the 692 shipped records reads or writes them,
-  as a sweep of the data confirms. What writes them is the interpreter - sub-op
-  6 puts a comparison result into Progress[1] and Progress[2] - and what reads
-  them is the alternative guard above. So they are an event's local variables,
-  and clearing them on entry is what stops one event seeing the last one's.
+  are an event's local variables: no shipped record SETS one, and clearing them
+  on entry is what stops one event seeing the last one's.
 
-  Both sub-ops that use them are, as PlayerState.pas records, unused by any
-  shipped event. A cut feature whose plumbing is all still here. }
+  What they are FOR is legible in the data, and this once read "nothing in the
+  692 records reads or writes them", which was wrong. 86 alternatives guard on
+  a scratch flag, and all 86 guard on flag 3 specifically. Every one of them
+  has a dialogue step earlier in its own program whose line ends in \w - the
+  yes/no prompt. So Progress[3] is where the player's ANSWER goes, and a
+  guarded step is the yes branch. The Devil Statue is the whole idea in one
+  record, identical in all 43 stages that have one:
+
+      0000-03-0000/0003-13/0003-03-0001
+
+  ask, save if yes, say so if yes. --selftest-runner drives it both ways.
+
+  Flags 1 and 2 really are untouched by the shipped data. What writes them is
+  sub-op 6, which no event uses - a cut comparison feature whose plumbing is
+  all still here. Flag 4 is written by nothing at all. }
 
 unit EventRunner;
 
