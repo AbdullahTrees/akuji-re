@@ -2330,9 +2330,16 @@ begin
   { --- 2. the dead zone ---------------------------------------------------
     A map big enough that the bounds check never fires, so this isolates the
     zone itself. }
+  { A layer origin ALWAYS carries POSITION_BIAS - Stage_Begin writes
+    ScrollX * 0x20 + 0x10000 - and Camera_ShouldScroll* subtracts it back off
+    with the -0x10000 / -0xFFE1 pair. These fixtures used bare pixel values,
+    which only worked while the Pascal used the non-subtracting conversion.
+    Biasing them is not a test change to suit the code: it is the fixture
+    being made to look like a layer the game could actually produce. }
   FillChar(L, SizeOf(L), 0);
   L.TileW := 32; L.TileH := 32; L.MapTilesX := 1000; L.MapTilesY := 1000;
-  L.OriginX := 200 * 32; L.OriginY := 200 * 32;
+  L.OriginX := (200 shl POSITION_SHIFT) + POSITION_BIAS;
+  L.OriginY := (200 shl POSITION_SHIFT) + POSITION_BIAS;
   Bad := 0;
   for I := 0 to SCREEN_W - 1 do
     for J := 0 to 1 do
@@ -2362,8 +2369,8 @@ begin
   Log.Add(Format('a still entity never scrolls:           %d violations', [Bad]));
   Inc(Result, Bad);
 
-  L.OriginX := Camera.MaxScrollX(L) shl POSITION_SHIFT;
-  L.OriginY := Camera.MaxScrollY(L) shl POSITION_SHIFT;
+  L.OriginX := (Camera.MaxScrollX(L) shl POSITION_SHIFT) + POSITION_BIAS;
+  L.OriginY := (Camera.MaxScrollY(L) shl POSITION_SHIFT) + POSITION_BIAS;
   if Camera.ShouldScrollX(L, SCREEN_W - 1, 32) or
      Camera.ShouldScrollY(L, SCREEN_H - 1, 32) then
   begin
@@ -2780,6 +2787,12 @@ begin
     FillChar(L, SizeOf(L), 0);
     L.TileW := 32; L.TileH := 32;
     L.MapTilesX := 10; L.MapTilesY := 7;
+    { Biased, like every layer the game builds - see the note in the camera
+      section above. With a bare 0 the vertical clamp reads the origin as
+      2048 pixels ABOVE the map and lets the view move instead of the entity,
+      so a jump never comes down. }
+    L.OriginX := POSITION_BIAS;
+    L.OriginY := POSITION_BIAS;
 
     { --- 1. standing still ------------------------------------------------ }
     Reset;
@@ -2898,19 +2911,19 @@ begin
       camera doing its job, and it is worth pinning because it looks like a bug
       the first time you see it. }
     L.MapTilesX := 1000;
-    L.OriginX := 0;
+    L.OriginX := POSITION_BIAS;
     Reset;
     for I := 1 to 400 do Step(1, 0, False, False);
     Log.Add(Format('walk right on a big map: x %d, layer origin %d px'
       + '  (dead zone at %d)',
-      [EntityPixelX(E), L.OriginX div 32, Camera.DEADZONE_RIGHT]));
+      [EntityPixelX(E), PixelOf(L.OriginX), Camera.DEADZONE_RIGHT]));
     if EntityPixelX(E) <> Camera.DEADZONE_RIGHT then
     begin
       Log.Add(Format('FAILED: expected the player to stop at the dead zone'
         + ' edge %d, got %d', [Camera.DEADZONE_RIGHT, EntityPixelX(E)]));
       Inc(Result);
     end;
-    if L.OriginX <= 0 then
+    if PixelOf(L.OriginX) <= 0 then
     begin
       Log.Add('FAILED: the player stopped but the layer never scrolled');
       Inc(Result);
@@ -2918,7 +2931,7 @@ begin
 
     { --- 5b. and on a map too small to scroll, it reaches the wall --------- }
     L.MapTilesX := 10;
-    L.OriginX := 0;
+    L.OriginX := POSITION_BIAS;
     Reset;
     for I := 1 to 400 do Step(1, 0, False, False);
     Log.Add(Format('walk into the wall:      x %d (wall at %d)',
