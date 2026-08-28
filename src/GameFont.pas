@@ -2,10 +2,19 @@
   and Font_Define @ 0x004511A0.
 
   Font_Define fills a table at 0x0046E8A4 (0x20-byte stride, so several fonts
-  can be defined). Title_Init registers font 0 as:
+  can be defined). Four callers register font 0, always with the same nine
+  arguments and never any other id - Title_Init @ 0x00462184, Stage_Begin @
+  0x0046228E, GameOver_Update @ 0x00461AD3 and 0x00455F92. Re-registering the
+  same font on every screen change is redundant, and it is what makes the
+  arguments checkable: four independent copies of the same nine numbers.
 
       Font_Define(0, p_Surfaces[0], $20, $140, 8, 8, 9, 9, $5F)
-                     surface   first  screenW  adv cellH cellW last
+                     surface   first  screenW  adv  ?  cellH cellW last
+
+  The FIFTH argument - the second 8 - is stored at +0x18 and never read by
+  anything. Game_DrawText uses +0x14 (the advance) for both the horizontal
+  step and nothing else; there is no vertical advance because it draws one
+  line. A field the writer fills and no reader touches.
 
   Game_DrawText then indexes the sheet:
 
@@ -14,6 +23,13 @@
       row = idx div 32            srcY = row * CellH + CellH * Variant * 2
       dest x = X + charIndex * Advance
       centred: X = (ScreenW - Length(S) * Advance) div 2
+
+  Note the axis order. This is the OBVIOUS one - column from mod, row from div
+  - and it is the opposite of how a TILESET is indexed, where TileMaps.pas
+  takes x from div and y from mod. The two sheets really do disagree in the
+  original; they are cut by different code and neither is a mistake in the
+  other's terms. Worth stating plainly, because the tileset order looks like a
+  bug until you find the second function that confirms it.
 
   Verified against font9x9-01.bmp in bmp.qda: 288x54 is exactly 32 columns by
   6 rows of 9x9 cells - three colour variants of 64 glyphs each, which is the

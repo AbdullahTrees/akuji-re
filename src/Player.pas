@@ -124,6 +124,52 @@ type
     and there is nothing player-specific in it. }
   TPlayerWorld = Entities.TEntityWorld;
 
+type
+  { What Stage_Begin needs from the parts of the game this does not
+    reconstruct. Every one of these reaches DirectDraw or the form. }
+  TStageHost = class
+  public
+    { The original writes 4 into a field of the tilemap DISPLAY component and
+      calls a method on it before anything else. That object is not the map
+      data this reconstruction has. }
+    procedure PrepareDisplay; virtual;
+    procedure ResetInput; virtual;
+    procedure LoadStageAssets(StageIndex: Integer); virtual;
+    { Font 0, from surface 0: chars $20..$5F, 9x9 cells, 8-pixel advance. The
+      numbers are GameFont.pas's and are checked there against Game_DrawText. }
+    procedure DefineFont; virtual;
+    procedure SetBackgroundSurface; virtual;
+  end;
+
+const
+  { Entity_Spawn's kind and type for the player. Slot 0, always. }
+  PLAYER_SPAWN_KIND = EKIND_SINGLE;
+  PLAYER_SPAWN_TYPE = 1;
+
+{ 0x00462210. What GS_STAGE_BEGIN runs, once, and it ends by setting GS_PLAY -
+  so the state exists for exactly one frame. Everything a stage needs is set up
+  here and nothing is torn down afterwards.
+
+  The order matters and is kept: the assets are loaded BEFORE the layer origin
+  is written and the player is spawned, because loading replaces the tilemaps
+  and the surfaces the other two depend on.
+
+  What is reconstructible is the last three steps, and they are the ones that
+  say what the player state's fields mean:
+
+      LayerInfo[0].Origin := (ScrollX, ScrollY) shl 5 + POSITION_BIAS
+      player := Spawn(EKIND_SINGLE, 1, SpawnX shl 5, SpawnY shl 5)
+      player.EF_FACING := P.SpawnFacing
+
+  All four of those are PIXELS shifted into 1/32 units, which is what settled
+  that SpawnX and SpawnY are not tile numbers - see PlayerState.pas.
+
+  It also clears the event interpreter's wait state and the title's sub-mode,
+  which is why a script cannot be left half-run across a stage change. }
+procedure StageBegin(Pool: TEntityPool; var L: TLayerInfo;
+                     var P: TPlayerState; Host: TStageHost;
+                     StageIndex: Integer; var AGameState: Integer);
+
 { One frame. E is the player entity, P the save state (abilities, weapon, jump
   strength, lives), L the layer the camera lives in.
   Inp is VAR, not const: the double-tap window lives in the input record, and
@@ -145,6 +191,40 @@ uses
 
 { Shared by all three: run the X half and the Y half of a move through the
   solid check, the tile check and the camera, in the original's order. }
+procedure TStageHost.PrepareDisplay; begin end;
+procedure TStageHost.ResetInput; begin end;
+procedure TStageHost.LoadStageAssets(StageIndex: Integer); begin end;
+procedure TStageHost.DefineFont; begin end;
+procedure TStageHost.SetBackgroundSurface; begin end;
+
+procedure StageBegin(Pool: TEntityPool; var L: TLayerInfo;
+                     var P: TPlayerState; Host: TStageHost;
+                     StageIndex: Integer; var AGameState: Integer);
+var
+  Slot: Integer;
+begin
+  Host.PrepareDisplay;
+  Host.ResetInput;
+
+  AGameState := GS_PLAY;
+
+  { The assets first: everything below reads what they replace. }
+  Host.LoadStageAssets(StageIndex);
+  Host.DefineFont;
+  Host.SetBackgroundSurface;
+
+  L.OriginX := (P.ScrollX shl POSITION_SHIFT) + POSITION_BIAS;
+  L.OriginY := (P.ScrollY shl POSITION_SHIFT) + POSITION_BIAS;
+
+  if Pool = nil then
+    Exit;
+  Slot := Pool.Spawn(PLAYER_SPAWN_KIND, PLAYER_SPAWN_TYPE,
+                     P.SpawnX shl POSITION_SHIFT,
+                     P.SpawnY shl POSITION_SHIFT);
+  if Slot <> SLOT_NONE then
+    Pool.SetField(Slot, EF_FACING, P.SpawnFacing);
+end;
+
 procedure MoveAndCollide(var E: TEntity; var L: TLayerInfo;
                          World: TPlayerWorld; out HitX, HitY: Boolean);
 var

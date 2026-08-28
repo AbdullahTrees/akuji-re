@@ -1873,6 +1873,153 @@ begin
   Tracks := Tracks + Format('%d ', [Track]);
 end;
 
+{ Stage_Begin @ 0x00462210.
+
+  Most of it is host calls, so what is worth checking is the part that is not:
+  the three conversions that say what SpawnX, SpawnY and ScrollX/Y mean, and
+  the ORDER, since loading the assets replaces what the other two read. }
+type
+  TStageHostStub = class(TStageHost)
+  public
+    Calls: TStringList;
+    constructor Create;
+    destructor Destroy; override;
+    procedure PrepareDisplay; override;
+    procedure ResetInput; override;
+    procedure LoadStageAssets(StageIndex: Integer); override;
+    procedure DefineFont; override;
+    procedure SetBackgroundSurface; override;
+  end;
+
+constructor TStageHostStub.Create;
+begin
+  inherited Create;
+  Calls := TStringList.Create;
+end;
+
+destructor TStageHostStub.Destroy;
+begin
+  Calls.Free;
+  inherited Destroy;
+end;
+
+procedure TStageHostStub.PrepareDisplay;
+begin Calls.Add('display'); end;
+procedure TStageHostStub.ResetInput;
+begin Calls.Add('input'); end;
+procedure TStageHostStub.LoadStageAssets(StageIndex: Integer);
+begin Calls.Add(Format('assets %d', [StageIndex])); end;
+procedure TStageHostStub.DefineFont;
+begin Calls.Add('font'); end;
+procedure TStageHostStub.SetBackgroundSurface;
+begin Calls.Add('background'); end;
+
+function TestStageBegin(Log: TStrings): Integer;
+var
+  P: TPlayerState;
+  L: TLayerInfo;
+  Pool: TEntityPool;
+  H: TStageHostStub;
+  GS, Slot, Bad: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- Stage_Begin ---');
+
+  Pool := TEntityPool.Create;
+  H := TStageHostStub.Create;
+  try
+    InitNewGame(P, 0);
+    P.SpawnX := 96;
+    P.SpawnY := 115;
+    P.ScrollX := 64;
+    P.ScrollY := 448;
+    P.SpawnFacing := $10;
+    FillChar(L, SizeOf(L), 0);
+    GS := GS_STAGE_BEGIN;
+
+    StageBegin(Pool, L, P, H, 7, GS);
+
+    { The state exists for exactly one frame and this is what ends it. }
+    Want(GS = GS_PLAY,
+         Format('Stage_Begin left the state at %d, want %d', [GS, GS_PLAY]));
+
+    { The assets must be loaded BEFORE the origin and the spawn, because
+      loading replaces the tilemaps and surfaces they read. Checking the whole
+      sequence rather than "assets were loaded" is what pins that. }
+    Want(H.Calls.CommaText = 'display,input,"assets 7",font,background',
+         'the setup ran in the order ' + H.Calls.CommaText);
+
+    { ScrollX/Y are PIXELS; the layer origin is 1/32 pixel, biased. }
+    Want(L.OriginX = (64 shl 5) + POSITION_BIAS,
+         Format('origin x is %d, want %d',
+                [L.OriginX, (64 shl 5) + POSITION_BIAS]));
+    Want(L.OriginY = (448 shl 5) + POSITION_BIAS,
+         Format('origin y is %d, want %d',
+                [L.OriginY, (448 shl 5) + POSITION_BIAS]));
+
+    { The player is slot 0 - EKIND_SINGLE has exactly one slot, which is what
+      lets every homing entity read p_Entities[0] with no indirection. }
+    Slot := SLOT_NONE;
+    if Pool.Alive[0] then
+      Slot := 0;
+    Want(Slot = 0, 'Stage_Begin did not put the player in slot 0');
+    if Slot = 0 then
+    begin
+      Want(Pool.Field(0, EF_TYPE) = 1,
+           Format('the player spawned as type %d, want 1',
+                  [Pool.Field(0, EF_TYPE)]));
+      { SpawnX/Y are pixels too, and PosX gives them back unbiased. 96 pixels
+        is 3072 in 1/32 units - the numbers are written out rather than
+        recomputed from the field, so a changed shift is visible. }
+      Want(Pool.PosX(0) = 3072,
+           Format('the player spawned at x=%d, want 96 pixels = 3072',
+                  [Pool.PosX(0)]));
+      Want(Pool.PosY(0) = 3680,
+           Format('the player spawned at y=%d, want 115 pixels = 3680',
+                  [Pool.PosY(0)]));
+      Want(Pool.Field(0, EF_FACING) = $10,
+           Format('the player faces %d, want the saved $10',
+                  [Pool.Field(0, EF_FACING)]));
+      Want(Pool.LiveCount = 1,
+           Format('Stage_Begin spawned %d entities, want 1',
+                  [Pool.LiveCount]));
+    end;
+
+    { A default new game lands where Game_StartOrLoad's constants say: tile 3
+      across, and 19 pixels into tile 3 down. The asymmetry is the point. }
+    Pool.Clear;
+    InitNewGame(P, 0);
+    FillChar(L, SizeOf(L), 0);
+    GS := GS_STAGE_BEGIN;
+    StageBegin(Pool, L, P, H, 1, GS);
+    Want(Pool.PosX(0) = 96 * 32, 'the default spawn is not 96 pixels across');
+    Want(Pool.PosY(0) = 115 * 32, 'the default spawn is not 115 pixels down');
+    { And the two axes really are offset differently. 96 is tile 3 flush; 115
+      is tile 3 plus 19, which is SPAWN_CENTRE_Y and not SPAWN_CENTRE_X. }
+    Want(DEFAULT_SPAWN_X = 3 * 32,
+         Format('the default X %d is not flush with tile 3',
+                [DEFAULT_SPAWN_X]));
+    Want(DEFAULT_SPAWN_Y = 3 * 32 + 19,
+         Format('the default Y %d is not tile 3 plus 19', [DEFAULT_SPAWN_Y]));
+    Want(SPAWN_CENTRE_Y <> SPAWN_CENTRE_X,
+         'the two spawn offsets have become equal; the original has 16 and 19');
+  finally
+    H.Free;
+    Pool.Free;
+  end;
+
+  Result := Bad;
+  if Result = 0 then
+    Log.Add('OK - assets first, then the origin and the player, then GS_PLAY');
+end;
+
 function TestGameStart(Log: TStrings; const GameDir: string): Integer;
 var
   P: TPlayerState;
@@ -1944,7 +2091,10 @@ begin
          Format('a new game set music track %d, want 1', [P.MusicTrack]));
     Want(Trim(H.Tracks) = '1', 'the new game played ' + H.Tracks);
     Want(P.Lives = DEFAULT_LIVES, 'a new game does not start on three lives');
-    Want(P.SpawnTileX = DEFAULT_SPAWN_X, 'the spawn point is wrong');
+    Want(P.SpawnX = 96, Format('the spawn point is x=%d, want 96 pixels',
+                               [P.SpawnX]));
+    Want(P.SpawnY = 115, Format('the spawn point is y=%d, want 115 pixels',
+                                [P.SpawnY]));
     Want(P.Progress[0] = 1, 'flag 0 is not set, so no 0000 guard would hold');
     Want(P.Head[ABILITY_DASH] = 0, 'a new game starts with the dash unlocked');
     { GameLevel 1 publishes itself as flag 5. }
@@ -2431,6 +2581,7 @@ begin
   end;
 
   Inc(Result, TestGameStart(Log, GameDir));
+  Inc(Result, TestStageBegin(Log));
 
   Log.Add('');
   if Result = 0 then

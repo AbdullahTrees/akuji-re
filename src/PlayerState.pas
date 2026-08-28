@@ -273,9 +273,26 @@ const
   PROGRESS_LENGTH   = $1195;
 
   DEFAULT_LIVES     = 3;
-  DEFAULT_SPAWN_X   = $60;     { 96 }
-  DEFAULT_SPAWN_Y   = $73;     { 115 }
-  DEFAULT_SCROLL_Y  = $1C0;    { 448 }
+  DEFAULT_SPAWN_X   = $60;     { 96 pixels = tile 3, flush }
+  DEFAULT_SPAWN_Y   = $73;     { 115 pixels = tile 3 + 19 }
+  DEFAULT_SCROLL_Y  = $1C0;    { 448 pixels = tile 14 }
+
+  { Where a tile-numbered destination lands in pixels. Both the stage-load and
+    the warp sub-opcodes carry TILE coordinates and convert them the same way,
+    and the two axes are NOT symmetric:
+
+        SpawnX := tileX * TileW + 16          centred across
+        SpawnY := tileY * TileH + 19          NOT centred down
+        ScrollX := camTileX * TileW           the camera is flush, no offset
+        ScrollY := camTileY * TileH
+
+    The 19 is not a rounding of 16. Game_StartOrLoad's own default carries it
+    too - 115 is 3 * 32 + 19 - so it is deliberate, and it puts the player's
+    origin where its feet sit rather than at the middle of the tile. Recorded
+    as measured; what makes 19 the right number is the player's box, which
+    Player.pas has. }
+  SPAWN_CENTRE_X = 16;
+  SPAWN_CENTRE_Y = 19;
   DEFAULT_FIELD11C8 = 300;
   DEFAULT_FIELD11D0 = $68;     { 104 }
 
@@ -318,8 +335,16 @@ type
       signature of a one-byte shift. Caught by --selftest-player. }
     Pad119F:     Byte;      // +0x119F
     SavedStage:  Integer;   // +0x11A0  copied into Settings.CurrentStage on load
-    SpawnTileX:  Integer;   // +0x11A4
-    SpawnTileY:  Integer;   // +0x11A8
+    { PIXELS, not tiles - these were called SpawnTileX/Y and that was wrong.
+      Stage_Begin spawns the player at (SpawnX shl 5, SpawnY shl 5), and the
+      shift is the 1/32-pixel conversion, so the field itself is whole pixels.
+      Three other writers agree: the event warp converts a tile argument with
+      tile * TileW + SPAWN_CENTRE_X, the respawn path converts a live position
+      back with OriginPixel, and Game_StartOrLoad's defaults are 96 and 115 -
+      115 being 3 * 32 + 19, which is a pixel offset inside tile 3 and not a
+      tile number at all. }
+    SpawnX:      Integer;   // +0x11A4  pixels
+    SpawnY:      Integer;   // +0x11A8  pixels
     ScrollX:     Integer;   // +0x11AC
     ScrollY:     Integer;   // +0x11B0
     Lives:       Integer;   // +0x11B4  HUD life icons, clamped to 0..MaxLives
@@ -454,8 +479,8 @@ begin
   FillChar(P, SizeOf(P), 0);
   P.Lives      := DEFAULT_LIVES;
   P.MaxLives   := DEFAULT_LIVES;
-  P.SpawnTileX := DEFAULT_SPAWN_X;
-  P.SpawnTileY := DEFAULT_SPAWN_Y;
+  P.SpawnX := DEFAULT_SPAWN_X;
+  P.SpawnY := DEFAULT_SPAWN_Y;
   P.ScrollX    := 0;
   P.ScrollY    := DEFAULT_SCROLL_Y;
   P.EventCounter := DEFAULT_FIELD11C8;
