@@ -66,6 +66,9 @@
       0x0045BD9C  type 46  a homing enemy that wakes when you come close
       0x0045BF58  type 47  a lobber, on a wait-wind-rest cycle
       0x0045C0F4  type 48  its shot - a ball that bounces four times
+      0x0045C250  type 49  a hovering diver
+      0x0045C430  type 50  a patroller that opens up to fire, and changes its
+                           own vulnerability while open
 
   And the dispatcher they hang off:
 
@@ -962,6 +965,77 @@ const
   T48_BLINK_TIMER = $E10;   { armed on the second-to-last bounce }
   T48_HANDOFF = $2C;        { the one-shot velocity slot }
 
+  { --- Type 49, the diver -----------------------------------------------
+    Hovers, drops on you, climbs back, rests, repeats.
+
+      1  hover: a two-frame flap at sixteen ticks, and a bob that steps the
+         heading every frame and adds a QUARTER of its Y component - the same
+         heading-as-oscillator idiom type 42 uses, at a quarter amplitude
+      2  dive: gravity 4 from -0xC0 upward. Sprite 2 while still rising and 3
+         once falling, which is a sign test on the velocity rather than a
+         state
+      3  climb, then rest and go back to hovering
+
+    It calls Entity_SpawnDebris TWICE - once when the dive starts and once
+    when it ends - which is the only use of that function outside a death, so
+    the debris is doubling as a dust puff here.
+
+    Its trigger is horizontal pixel distance against 64, 128 or 256 by
+    difficulty, and this one runs the ordinary way round: HARDER sees further.
+    Above easy it also AIMS, setting its horizontal speed to
+    Compare(self.x, player.x) shifted left five; on easy it dives straight
+    down, because that write is inside `if difficulty > 0`.
+
+    It clears EF_BLOCK_A[1] and EF_CHILD_B when the dive starts and neither is
+    read anywhere in this handler. }
+  T49_FRAMES = 2;  T49_TICKS = $10;
+  T49_TABLE_ADDR = $0046C118;
+  T49_SPRITES: array[0..3] of Integer = (144, 145, 146, 147);
+  T49_RANGE_ADDR = $0046C128;
+  T49_REST_ADDR  = $0046C134;
+  T49_RANGE: array[0..2] of Integer = (64, 128, 256);   { harder sees further }
+  T49_REST:  array[0..2] of Integer = (120, 120, 60);
+  T49_BOB_SHIFT = 2;        { a quarter of the heading's Y component }
+  T49_DIVE_VY = -$C0;
+  T49_GRAVITY = 4;
+  T49_DIVE_END = $BF;
+  T49_RISING_FRAME = 2;
+  T49_FALLING_FRAME = 3;
+  T49_AIM_SHIFT = 5;
+
+  { --- Type 50, the opener ----------------------------------------------
+    Patrols, opens, fires, and closes - and while it is open it REWRITES ITS
+    OWN EF_VULN_KIND, which nothing else does. Vulnerability 1 while firing
+    and 2 while closing, so the window in which it can be hurt is part of the
+    animation rather than a property of the type.
+
+    Its states are 1, 2, 3, 5 and 6 - there is no 4, and nothing here sets 3
+    to 5 either. The type-39 shot it spawns in state 2 is what does that, the
+    same parent-child arrangement types 31/35 and 38/39 use, and this is the
+    third instance.
+
+    On EASY it starts by SUBTRACTING 2 from its own EF_HP - the only handler
+    that makes itself weaker rather than the difficulty making it stronger.
+
+    The patrol reverses on block A[1] frames like type 30's, and the whole
+    patrol lasts 60 frames on every difficulty - the table is (60, 60, 60), so
+    that one was left flat. }
+  T50_FRAMES = 4;  T50_TICKS = 8;
+  T50_TABLE_ADDR = $0046C140;
+  T50_SPRITES: array[0..5] of Integer = (148, 149, 150, 149, 151, 152);
+  T50_PATROL_ADDR = $0046C158;
+  T50_HOLD_ADDR   = $0046C164;
+  T50_PATROL: array[0..2] of Integer = (60, 60, 60);   { deliberately flat }
+  T50_HOLD:   array[0..2] of Integer = (120, 60, 60);
+  T50_EASY_HP_PENALTY = -2;
+  T50_OPEN_FIRST = 4;
+  T50_OPEN_LAST  = 5;
+  T50_OFFSCREEN_MARGIN = 2;
+  T50_SHOT_TYPE = $27;      { 39 }
+  T50_SHOT_SPEED = 2;
+  T50_VULN_OPEN    = 1;
+  T50_VULN_CLOSING = 2;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1216,6 +1290,15 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045C430. Patrols, opens to fire, closes - and changes its own
+  vulnerability while open. See the T50_ block. }
+procedure EntityUpdate_Type50(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045C250. A diver: hover, drop, climb, rest. See the T49_ block. }
+procedure EntityUpdate_Type49(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045C0F4. Type 47's shot: four bounces, each shorter than the last. }
 procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
@@ -1985,6 +2068,209 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type50(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T50_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T50_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    { The only handler that weakens ITSELF on easy. }
+    if D = 0 then
+      Inc(E.Raw[EF_HP], T50_EASY_HP_PENALTY);
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T50_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T50_FRAMES;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > E.Raw[EF_BLOCK_A + 1] then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FACING] := -E.Raw[EF_FACING];
+    end;
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
+
+    Inc(E.Raw[EF_CHILD_B]);
+    if E.Raw[EF_CHILD_B] > T50_PATROL[D] then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_FLAG1C] := T50_OPEN_FIRST;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_SHOTS] := 0;
+    end;
+  end;
+
+  if (E.Raw[EF_STATE] = 2) and (not IsOffScreen(E, T50_OFFSCREEN_MARGIN)) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T50_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T50_OPEN_LAST then
+      begin
+        E.Raw[EF_FLAG1C] := T50_OPEN_LAST;
+        E.Raw[EF_STATE] := 3;
+        { Open, and hurtable differently while it is. }
+        E.Raw[EF_VULN_KIND] := T50_VULN_OPEN;
+        Slot := World.Spawn(EKIND_MINOR, T50_SHOT_TYPE,
+                            E.Raw[EF_POS_X] - POSITION_BIAS
+                              - World.Layer.DeltaX,
+                            E.Raw[EF_POS_Y] - POSITION_BIAS
+                              - World.Layer.DeltaY);
+        World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+        World.SetSpawnField(Slot, EF_VEL_X,
+                            E.Raw[EF_FACING] * T50_SHOT_SPEED);
+      end;
+    end;
+  end;
+
+  { State 3 is a hold - the type-39 shot moves it to 5. }
+
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    Inc(E.Raw[EF_CHILD_B]);
+    if E.Raw[EF_CHILD_B] > T50_HOLD[D] then
+    begin
+      E.Raw[EF_STATE] := 6;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_VULN_KIND] := T50_VULN_CLOSING;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 6 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T50_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Dec(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] < T50_OPEN_FIRST then
+      begin
+        E.Raw[EF_FLAG1C] := 0;
+        E.Raw[EF_STATE] := 1;
+        E.Raw[EF_BLOCK_B] := 0;
+      end;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type49(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Step, Dist: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T49_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T49_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+    E.Raw[EF_STATE] := 1;
+
+  { Hovering and resting share the flap and the bob. }
+  if (E.Raw[EF_STATE] = 1) or (E.Raw[EF_STATE] = 3) then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T49_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T49_FRAMES;
+    end;
+
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+    { A quarter of the heading's Y component, with the original's
+      round-toward-zero shift. }
+    Step := DirVelY(E.Raw[EF_FACING]);
+    if Step < 0 then
+      Inc(Step, (1 shl T49_BOB_SHIFT) - 1);
+    Inc(E.Raw[EF_POS_Y], Step shr T49_BOB_SHIFT);
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dist := Abs(E.Raw[EF_POS_X]
+                - World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X));
+    if Dist < 0 then
+      Inc(Dist, 31);
+    if (Dist shr POSITION_SHIFT) < T49_RANGE[D] then
+    begin
+      World.SpawnDebris(E, 0);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_A + 1] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      { Only above easy does it aim - on easy it drops straight down. }
+      if D > 0 then
+        E.Raw[EF_VEL_X] :=
+          Compare(E.Raw[EF_POS_X],
+                  World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X))
+          shl T49_AIM_SHIFT;
+      E.Raw[EF_VEL_Y] := T49_DIVE_VY;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { A sign test, not a state: rising shows one frame and falling another. }
+    E.Raw[EF_FLAG1C] := T49_RISING_FRAME;
+    if E.Raw[EF_VEL_Y] > 0 then
+      E.Raw[EF_FLAG1C] := T49_FALLING_FRAME;
+
+    Inc(E.Raw[EF_VEL_Y], T49_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T49_DIVE_END then
+    begin
+      World.SpawnDebris(E, 0);
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_VEL_Y] := 0;
+    end;
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T49_REST[D] then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
@@ -4096,11 +4382,13 @@ begin
       46: EntityUpdate_Type46(E^, AGameState, World);
       47: EntityUpdate_Type47(E^, AGameState, World);
       48: EntityUpdate_Type48(E^, AGameState, World);
+      49: EntityUpdate_Type49(E^, AGameState, World);
+      50: EntityUpdate_Type50(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 32 arms are in HANDLER_ADDR, untranslated }
+      { the other 30 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
