@@ -71,6 +71,7 @@
                            own vulnerability while open
       0x0045C608  type 51  a pure chaser
       0x0045CA28  type 53  a charger, by facing
+      0x0045CE78  type 56  a trap that bursts when you get near
 
   And the dispatcher they hang off:
 
@@ -1070,6 +1071,44 @@ const
      (512, 513, 514, 510, 511));     { going right }
   T53_CHARGE_SOUND = 7;
 
+  { --- Type 56, the burst trap ------------------------------------------
+    Sits still until the player comes within five times its width and two
+    times its height, then arms a four-frame fuse and throws a RADIAL BURST of
+    type-57 shots at the player.
+
+    The aim is the most detailed in the game so far. It takes
+    Angle_Between(self, player), adds a difficulty SKEW of 0, -4 or -8 - so
+    harder settings lead the shot rather than aiming straight at you - and
+    wraps negatives by adding 64. Then it fires count + 1 shots of 1, 3 or 5,
+    stepping the heading by FOUR between each. The wrap is written as
+    `next := aim + 4; if next > 63 then next := aim - 0x3C` - a subtraction of
+    60 from the PREVIOUS value rather than a mask on the new one. It happens
+    to be exactly equivalent to (aim + 4) mod 64 for every aim in 0..63, which
+    is worth stating because it does not look equivalent: aim 62 gives 2 both
+    ways, 63 gives 3, 60 gives 0. Kept in the original's form anyway.
+
+    Each shot gets speed 2, 2 or 3 times the direction component on both axes,
+    and its 0xD4 field set to 1 - EF_VULN_KIND, so the shots are themselves
+    hurtable.
+
+    The fuse lives in EF_TIMER, which Entity_UpdateAll counts down, so this
+    handler only has to watch for it reaching zero to re-arm. }
+  T56_FRAMES = 3;
+  T56_TABLE_ADDR = $0046C268;
+  T56_SPRITES: array[0..T56_FRAMES - 1] of Integer = (156, 157, 158);
+  T56_SKEW_ADDR  = $0046C274;
+  T56_COUNT_ADDR = $0046C280;
+  T56_SPEED_ADDR = $0046C28C;
+  T56_SKEW:  array[0..2] of Integer = (0, -4, -8);   { harder LEADS the shot }
+  T56_COUNT: array[0..2] of Integer = (0, 2, 4);     { plus one }
+  T56_SPEED: array[0..2] of Integer = (2, 2, 3);
+  T56_TRIGGER_SCALE_X = 5;
+  T56_TRIGGER_SCALE_Y = 2;
+  T56_FUSE = 4;
+  T56_SHOT_TYPE = $39;      { 57 }
+  T56_FAN_STEP = 4;
+  T56_FAN_WRAP = $3C;       { subtracted from the previous heading, not a mask }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1324,6 +1363,10 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045CE78. A trap: sits, then bursts at the player. See the T56_ block. }
+procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045C608. The simplest chaser: steer, move, repeat, for ever. }
 procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
@@ -2110,6 +2153,75 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Aim, I, N, Slot: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T56_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T56_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+
+  { EF_TIMER is the fuse and Entity_UpdateAll counts it down. }
+  if E.Raw[EF_TIMER] = 0 then
+    E.Raw[EF_STATE] := 0;
+
+  if (E.Raw[EF_STATE] = 0) and (E.Raw[EF_TIMER] <> 0) then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_FLAG1C]);
+    if E.Raw[EF_FLAG1C] > T56_FRAMES - 1 then
+    begin
+      E.Raw[EF_FLAG1C] := T56_FRAMES - 1;
+      E.Raw[EF_HP] := 0;
+
+      { Aim, then SKEW it - harder settings lead the shot. }
+      Aim := AngleBetween(E.Raw[EF_POS_X], E.Raw[EF_POS_Y],
+                          Player^.Raw[EF_POS_X], Player^.Raw[EF_POS_Y]);
+      Inc(Aim, T56_SKEW[D]);
+      if Aim < 0 then
+        Inc(Aim, DIR_COUNT);
+
+      N := T56_COUNT[D];
+      if N >= 0 then
+        for I := 0 to N do
+        begin
+          Slot := World.Spawn(EKIND_MINOR, T56_SHOT_TYPE,
+                              E.Raw[EF_POS_X] - POSITION_BIAS,
+                              E.Raw[EF_POS_Y] - POSITION_BIAS);
+          World.SetSpawnField(Slot, EF_VARIANT, 0);
+          World.SetSpawnField(Slot, EF_VEL_X, T56_SPEED[D] * DirVelX(Aim));
+          World.SetSpawnField(Slot, EF_VEL_Y, T56_SPEED[D] * DirVelY(Aim));
+          { The shots are hurtable themselves. }
+          World.SetSpawnField(Slot, EF_VULN_KIND, 1);
+
+          { `next := aim + 4; if next > 63 then next := aim - 60`, which is
+            (aim + 4) mod 64 for every aim in range - see the T56_ block. }
+          if Aim + T56_FAN_STEP > DIR_COUNT - 1 then
+            Aim := Aim - T56_FAN_WRAP
+          else
+            Inc(Aim, T56_FAN_STEP);
+        end;
+    end;
+  end;
+
+  if EntitiesOverlap(E, Player^, T56_TRIGGER_SCALE_X, T56_TRIGGER_SCALE_Y)
+     and (E.Raw[EF_TIMER] = 0) then
+    E.Raw[EF_TIMER] := T56_FUSE;
 end;
 
 procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
@@ -4506,11 +4618,12 @@ begin
       50: EntityUpdate_Type50(E^, AGameState, World);
       51: EntityUpdate_Type51(E^, AGameState, World);
       53: EntityUpdate_Type53(E^, AGameState, World);
+      56: EntityUpdate_Type56(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 28 arms are in HANDLER_ADDR, untranslated }
+      { the other 27 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
