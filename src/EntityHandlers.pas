@@ -72,6 +72,7 @@
       0x0045C608  type 51  a pure chaser
       0x0045CA28  type 53  a charger, by facing
       0x0045CE78  type 56  a trap that bursts when you get near
+      0x0045D670  type 59  a sleeper that rises, aims once, and flies
 
   And the dispatcher they hang off:
 
@@ -1109,6 +1110,38 @@ const
   T56_FAN_STEP = 4;
   T56_FAN_WRAP = $3C;       { subtracted from the previous heading, not a mask }
 
+  { --- Type 59, the riser -----------------------------------------------
+    Lies dormant, wakes when the player is within 80 pixels, rises, hangs,
+    takes ONE reading of where the player is, and flies that way for ever.
+
+      1  asleep. The wake range is 0x50 pixels and it is NOT difficulty-keyed -
+         the only proximity test in the game that is a bare literal
+      2  rising: launched at -0x80 with gravity 2, so it arcs up and slows.
+         It leaves the moment its velocity turns positive, which is the apex,
+         rather than after a fixed time
+      3  hang, nine frames
+      4  fly: Angle_Between is taken ONCE on entry and never again, so it
+         commits to a heading at the top of its arc and cannot correct. Speed
+         is 1, 2 or 3 by difficulty
+
+    It calls Entity_SpawnDebris on waking, the same way type 49 does at the
+    ends of its dive - a dust puff rather than a death.
+
+    Nothing ends it. Once flying it flies until it is culled. }
+  T59_TABLE_ADDR = $0046C300;
+  T59_SPRITES: array[0..5] of Integer = (270, 162, 163, 164, 165, 166);
+  T59_SPEED_ADDR = $0046C318;
+  T59_SPEED: array[0..2] of Integer = (1, 2, 3);
+  T59_WAKE_RANGE = $50;     { a bare literal - not difficulty-keyed }
+  T59_RISE_VY = -$80;
+  T59_GRAVITY = 2;
+  T59_HANG_TICKS = 8;
+  T59_FLY_TICKS = 4;
+  T59_FLY_FIRST = 3;
+  T59_FLY_LAST = 5;
+  T59_RISE_FRAME = 1;
+  T59_HANG_FRAME = 2;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1363,6 +1396,10 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
   its launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
+procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045CE78. A trap: sits, then bursts at the player. See the T56_ block. }
 procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
@@ -2153,6 +2190,89 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Dist: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T59_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T59_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+    E.Raw[EF_STATE] := 1;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dist := Abs(E.Raw[EF_POS_X]
+                - World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X));
+    if Dist < 0 then
+      Inc(Dist, 31);
+    { A bare 0x50 - the only proximity test that is not difficulty-keyed. }
+    if (Dist shr POSITION_SHIFT) < T59_WAKE_RANGE then
+    begin
+      E.Raw[EF_STATE] := 2;
+      World.SpawnDebris(E, 0);
+      E.Raw[EF_VEL_Y] := T59_RISE_VY;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_FLAG1C] := T59_RISE_FRAME;
+    Inc(E.Raw[EF_VEL_Y], T59_GRAVITY);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    { Leaves at the APEX - when the velocity turns positive - not on a timer. }
+    if E.Raw[EF_VEL_Y] > 0 then
+    begin
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := T59_HANG_FRAME;
+      E.Raw[EF_VEL_Y] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T59_HANG_TICKS then
+    begin
+      E.Raw[EF_STATE] := 4;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := T59_HANG_FRAME;
+      { ONCE, here, and never again - it cannot correct after this. }
+      E.Raw[EF_FACING] :=
+        AngleBetween(E.Raw[EF_POS_X], E.Raw[EF_POS_Y],
+                     World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X),
+                     World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_Y));
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T59_FLY_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T59_FLY_LAST then
+        E.Raw[EF_FLAG1C] := T59_FLY_FIRST;
+    end;
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]) * T59_SPEED[D]);
+    Inc(E.Raw[EF_POS_Y], DirVelY(E.Raw[EF_FACING]) * T59_SPEED[D]);
+  end;
 end;
 
 procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
@@ -4619,11 +4739,12 @@ begin
       51: EntityUpdate_Type51(E^, AGameState, World);
       53: EntityUpdate_Type53(E^, AGameState, World);
       56: EntityUpdate_Type56(E^, AGameState, World);
+      59: EntityUpdate_Type59(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 27 arms are in HANDLER_ADDR, untranslated }
+      { the other 26 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
