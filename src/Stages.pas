@@ -249,6 +249,7 @@ begin
   Result := GetRecord(Index).Raw[18];
 end;
 
+{ Load_StageTable @ 0x004669F8. }
 function TStageTable.Load(const ADataDir: string): Integer;
 var
   Lines, Fields: TStringList;

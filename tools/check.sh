@@ -80,6 +80,10 @@ run --selftest-entities "$GAME"
 run --selftest-settings "$GAME" "$SCRATCH"
 
 note ""
+note ""
+note "=== how much is CODE, not commentary ==="
+python "$REPO/tools/implemented.py" 2>/dev/null | tail -4 | sed 's/^/  /'
+note ""
 note "=== reference implementations ==="
 ref() {
     local name="$1"; shift

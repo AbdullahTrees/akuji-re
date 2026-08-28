@@ -113,6 +113,7 @@ begin
   Result := FSlots[Index];
 end;
 
+{ Load_Surface_Textures @ 0x00465E9C. }
 function TSurfaceSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer;
 var
   Lines, Fields: TStringList;

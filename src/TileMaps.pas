@@ -88,6 +88,7 @@ begin
                          PathDelim + Format('%.3d.map', [MapIndex]));
 end;
 
+{ Load_Map @ 0x00466340. }
 function TTileMap.LoadFromFile(const FileName: string): Boolean;
 var
   S: TFileStream;

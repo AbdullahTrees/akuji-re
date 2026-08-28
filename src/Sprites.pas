@@ -76,6 +76,7 @@ begin
   Result := FFrames[Index];
 end;
 
+{ Load_Sprite_Sheets @ 0x004660B8. }
 function TSpriteSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer;
 var
   Lines, Fields: TStringList;

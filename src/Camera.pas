@@ -102,6 +102,7 @@ begin
   Result := Trunc((L.MapTilesY - VIEW_TILES_Y) * L.TileH);
 end;
 
+{ Camera_ShouldScrollX @ 0x00459C1C. }
 function ShouldScrollX(const L: TLayerInfo; PixelX, Vel: Integer): Boolean;
 var
   Dest: Integer;
@@ -118,6 +119,7 @@ begin
   Result := True;
 end;
 
+{ Camera_ShouldScrollY @ 0x00459CD8. }
 function ShouldScrollY(const L: TLayerInfo; PixelY, Vel: Integer): Boolean;
 var
   Dest: Integer;
@@ -134,6 +136,7 @@ begin
   Result := True;
 end;
 
+{ Camera_ApplyMoveX @ 0x00459D9C. }
 procedure ApplyMoveX(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 var
@@ -151,6 +154,7 @@ begin
     Vel := 0;
 end;
 
+{ Camera_ApplyMoveY @ 0x00459E08. }
 procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 var

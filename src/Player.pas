@@ -197,6 +197,7 @@ begin
   Result := F shr 5;
 end;
 
+{ Player_UpdateGlide @ 0x004593B0. }
 procedure UpdateGlide(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                       const Inp: TInputState; World: TPlayerWorld);
 var
@@ -252,6 +253,7 @@ begin
   end;
 end;
 
+{ Player_UpdateAirDash @ 0x00459624. }
 procedure UpdateAirDash(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                         World: TPlayerWorld);
 var
@@ -290,6 +292,7 @@ begin
   end;
 end;
 
+{ Player_UpdateKnockback @ 0x00459828. }
 procedure UpdateKnockback(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                           World: TPlayerWorld);
 var
@@ -351,6 +354,7 @@ end;
   Player_Update itself.
   --------------------------------------------------------------------------- }
 
+{ Player_Update @ 0x004585A8. }
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
                        World: TPlayerWorld; AGameState: Integer);

@@ -281,6 +281,8 @@ begin
   Result := FLines[Index];
 end;
 
+{ Load_Event_Scripts @ 0x00465B50. It loads BOTH files - the event table
+  and the dialogue - which is why one routine covers both. }
 function TEventScript.Load(const ADataDir: string; StageIndex: Integer): Integer;
 var
   Src, Fields: TStringList;
