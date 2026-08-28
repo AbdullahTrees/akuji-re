@@ -210,6 +210,12 @@ type
 
     procedure SetActive(Index: Integer; Value: Boolean);
 
+    { Kill an event for GOOD. Both Events_SpawnNearCamera and the
+      interpreter's sub-op 7 do exactly this: opcode to -1 and the tile moved
+      to (-32, -32), which is off every shipped map. Nothing ever undoes it -
+      the record is dead until the stage reloads. }
+    procedure Disable(Index: Integer);
+
     property Count: Integer read GetCount;
     property Events[Index: Integer]: TEventRecord read GetEvent; default;
 
@@ -261,6 +267,15 @@ begin
     Exit;
   end;
   Result := FEvents[Index];
+end;
+
+procedure TEventScript.Disable(Index: Integer);
+begin
+  if (Index < 0) or (Index >= Length(FEvents)) then
+    Exit;
+  FEvents[Index].Opcode := EVOP_DISABLED;
+  FEvents[Index].TileX := EVENT_DISABLED_TILE;
+  FEvents[Index].TileY := EVENT_DISABLED_TILE;
 end;
 
 procedure TEventScript.SetActive(Index: Integer; Value: Boolean);
