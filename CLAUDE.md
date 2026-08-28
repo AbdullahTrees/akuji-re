@@ -100,6 +100,28 @@ swallowed the entry byte of the function at `0x464D30`.
 To fix one: `G` → address, `C` (clear), `D` (disassemble), `F` (create function).
 Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
+## 3a. Working rule: write the code as you read the disassembly
+
+**Translate each function to Pascal in the same breath as decompiling it.** Do
+not decompile a batch and write them up afterwards.
+
+Decompiled detail decays fast. A batched write is reconstructed from memory or
+from one's own summary notes rather than from the disassembly, and that is where
+invented field names and quietly-dropped details come from. Measured on this
+project: functions translated immediately came out clean; ones read early and
+written hours later had lost their reasoning (an unexplained `-0x80`) and
+regressed to raw offsets instead of the names already established for them.
+Functions read in a *previous* session were worse - rebuilt entirely from notes.
+
+Writing is also the error detector. `EF_HP`, the minus-sign field split and the
+one-byte `TPlayerState` were all caught by writing the thing down and running
+it, not by reading harder.
+
+So: **decompile, translate, build, test, commit, next.** One function at a time.
+The exception is a decode that genuinely needs several functions in view at once
+- opcode 9 needed the touch handlers plus the shipped data together - and even
+there, write each one before moving on rather than deferring all of them.
+
 ## 4. How Pascal is recovered
 
 Ghidra cannot emit Pascal; there is no transpiler. Translation is manual, but:
