@@ -16,6 +16,8 @@
       0x0045A43C  type 24  bobbing pickup, sixteen variants
       0x0045A4F0  type 25  static scenery - the smallest handler in the game
       0x0045A540  type 27  the save point
+      0x00458274  Entity_TouchPickup - the Mana Stone
+      0x00458490  Entity_TouchHeal
 
   And the dispatcher they hang off:
 
@@ -144,6 +146,20 @@ const
   EF_ANIM_ID = $05;
   EF_VARIANT = $06;
 
+  { --- The two touch handlers @ 0x00458274 and 0x00458490 ---------------
+    Both are what EF_TOUCH_KIND 2 and 5 reach, and both follow the same shape:
+    change the player's state, set the progress flag named by the event's
+    ParamB, put a type 26 effect where the entity was, and destroy themselves.
+    The effect's VARIANT is how one entity type shows three different pickups.
+
+    The Mana Stone's variant is also its value: 0 adds one, 1 adds ten. }
+  PICKUP_EFFECT_TYPE = $1A;   { 26 }
+  MANA_SMALL = 1;
+  MANA_LARGE = 10;
+  PICKUP_FX_NORMAL  = 0;
+  PICKUP_FX_LEVELUP = 1;
+  PICKUP_FX_HEAL    = 3;
+
   { --- Entity_UpdateDying ------------------------------------------------- }
   DEATH_CLASS_SMALL  = 1;
   DEATH_CLASS_BIG    = 2;
@@ -185,6 +201,16 @@ function EntityUpdateDying(var E: TEntity; AGameState: Integer;
   when the player walks into it is decided by EF_TOUCH_KIND from the type table,
   in Entity_PlayerTouch. }
 procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
+
+{ 0x00458274. The Mana Stone. The counter climbs by the entity's variant, and
+  when it reaches MANA_TARGETS[TargetIndex] the player gains a life of maximum
+  AND is refilled - which is what tk001.dat describes in words. }
+procedure EntityTouchPickup(var E: TEntity; var P: TPlayerState;
+                            World: TEntityWorld);
+
+{ 0x00458490. A full heal, and nothing else. }
+procedure EntityTouchHeal(var E: TEntity; var P: TPlayerState;
+                          World: TEntityWorld);
 
 { 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
   which only variant 8 has. }
@@ -380,6 +406,66 @@ begin
   end;
 
   Result := True;
+end;
+
+{ Both handlers set the progress flag their event names, spawn the same
+  effect, and destroy themselves; only the middle differs. }
+function PickupCommon(var E: TEntity; World: TEntityWorld): Integer;
+var
+  Flag: Integer;
+begin
+  Flag := World.EventProgressIndex(E.Raw[EF_EVENT_ID]);
+  if Flag >= 0 then
+    World.SetProgress(Flag);
+  Result := World.Spawn(EKIND_MINOR, PICKUP_EFFECT_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS);
+end;
+
+procedure EntityTouchPickup(var E: TEntity; var P: TPlayerState;
+                            World: TEntityWorld);
+var
+  Slot: Integer;
+begin
+  case E.Raw[EF_VARIANT] of
+    0: Inc(P.Counter, MANA_SMALL);
+    1: Inc(P.Counter, MANA_LARGE);
+  end;
+
+  Slot := PickupCommon(E, World);
+
+  { The comparison happens AFTER the counter has already gone up, so a stone
+    that takes you exactly to the target counts as reaching it. }
+  if P.Counter < ManaTarget(P.TargetIndex) then
+  begin
+    if E.Raw[EF_VARIANT] = 0 then
+      World.PlaySound(SND_GET01)
+    else if E.Raw[EF_VARIANT] = 1 then
+      World.PlaySound(SND_GET02);
+    World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_NORMAL);
+  end
+  else
+  begin
+    Inc(P.TargetIndex);
+    Inc(P.MaxLives);
+    P.Lives := P.MaxLives;
+    World.PlaySound(SND_POWER02);
+    World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_LEVELUP);
+  end;
+
+  World.DestroyEntity(E, False);
+end;
+
+procedure EntityTouchHeal(var E: TEntity; var P: TPlayerState;
+                          World: TEntityWorld);
+var
+  Slot: Integer;
+begin
+  World.PlaySound(SND_KACHI02);
+  P.Lives := P.MaxLives;
+  Slot := PickupCommon(E, World);
+  World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_HEAL);
+  World.DestroyEntity(E, False);
 end;
 
 procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;

@@ -37,12 +37,13 @@ unit PlayerState;
 
 interface
 
-
 uses
   Classes, SysUtils;
 
 { ===========================================================================
-  The player controller - Player_Update @ 0x004585A8, the type 1 handler.
+  The player controller - Player_Update @ 0x004585A8, the 
+
+type 1 handler.
 
   Ghidra could not find this one: it is frameless, so Function Start Search
   never matched it, and it had to be created explicitly. It is the single
@@ -278,6 +279,28 @@ const
   DEFAULT_FIELD11C8 = 300;
   DEFAULT_FIELD11D0 = $68;     { 104 }
 
+const
+  { --- The Mana Stone goals, at 0x00468EC4 through the pointer 0x0046D2B4 ---
+
+    Twelve ints, and exactly TWO readers in the whole binary:
+    Entity_TouchPickup, which compares Counter against MANA_TARGETS[TargetIndex]
+    to decide whether this stone finishes a level, and HUD_Draw, which shows the
+    same value as the right-hand half of its "%3d/%-3d". That second reader is
+    what confirms TargetIndex indexes this table and not something else.
+
+    The progression is 20, 50, 70, 130, 160, 400 and then 999 - which no counter
+    reaches - so index 6 is in effect a cap at six life upgrades.
+
+    What the remaining five are for is NOT settled. 30, 90, 270, 999, 0 reads
+    like a second, shorter progression, but nothing found so far selects it, and
+    the table's extent is confirmed at twelve by the next pointer along. Kept as
+    data rather than explained away. }
+  MANA_TARGET_COUNT = 12;
+  MANA_TARGET_ADDR  = $00468EC4;
+  MANA_TARGET_PTR   = $0046D2B4;
+  MANA_TARGETS: array[0..MANA_TARGET_COUNT - 1] of Integer =
+    (20, 50, 70, 130, 160, 400, 999, 30, 90, 270, 999, 0);
+
 type
   { Laid out to match the original exactly; the file is a raw image of it.
     Named fields are those whose meaning is established from Game_StartOrLoad,
@@ -326,6 +349,12 @@ procedure InitNewGame(var P: TPlayerState; GameLevel: Integer);
 procedure ApplySessionFlags(var P: TPlayerState; GameLevel: Integer);
 function LoadSave(var P: TPlayerState; const FileName: string): Boolean;
 function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
+
+{ MANA_TARGETS[Index]. The original indexes it unchecked; this returns
+  something unreachable past the end instead of reading whatever follows the
+  table. Reachable only if TargetIndex ever passes 11, which needs the counter
+  to have passed 999 first. }
+function ManaTarget(Index: Integer): Integer;
 
 implementation
 
@@ -408,6 +437,13 @@ begin
   finally
     S.Free;
   end;
+end;
+
+function ManaTarget(Index: Integer): Integer;
+begin
+  if (Index < 0) or (Index >= MANA_TARGET_COUNT) then
+    Exit(MaxInt);
+  Result := MANA_TARGETS[Index];
 end;
 
 initialization
