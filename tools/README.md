@@ -43,6 +43,7 @@ itself, so anything comparing the reconstruction against itself passes.
 |---|---|---|
 | `entities.txt` | `Entities.pas`, `EntityHandlers.pas` | 47 defects |
 | `runner.txt` | `EventRunner.pas`, the interpreter | 33 defects, 4 survived first time |
+| `startup.txt` | kill tiles, terrain, `Game_StartOrLoad` | 29 defects, 8 survived first time |
 | `emudiff.txt` | what only the original can settle | 2 defects |
 
 Applies a deliberate defect, rebuilds, and requires the gate to notice. **A test
@@ -51,11 +52,28 @@ separate ways:
 
 * a self-test that passed having loaded **zero** events
 * an `Assert` the compiler removed entirely — FPC drops assertions without `-Sa`
-* a check whose reference was built from the constant under test — this one
-  has now happened **twice**, most recently as
-  `Want(PosX = Tx * 32 * 32 + SPAWN_TILE_CENTRE)`, which passes cheerfully with
-  `SPAWN_TILE_CENTRE` mutated to 0. Write the number out. An expectation phrased
-  in terms of the thing it is testing is not an expectation, it is a restatement
+* **a check whose reference was built from the constant under test.** The most
+  frequent failure on this project by a wide margin — **four** occurrences in
+  one session: `SPAWN_TILE_CENTRE`, `SPAWN_FORCED_EXTENT`, `KILL_TILE_STATE`,
+  `START_STAGE`. Each looked like
+  `Want(PosX = Tx * 32 * 32 + SPAWN_TILE_CENTRE)`, and each passes cheerfully
+  when the constant is mutated, because the expected value moves with it.
+  **Write the number out.** An expectation phrased in terms of the thing it is
+  testing is not an expectation, it is a restatement. The same applies to a
+  table: comparing `TerrainConfigure`'s answer against `TERRAIN_SOLID_THRESHOLD`
+  only proves the function reads the table, so the test carries the literals
+  from the disassembly instead
+* **a check whose fixture happens to agree with the default.** Harder to spot,
+  because the assertion is written correctly. The shipped `save.dat` holds music
+  track 1, which is also the track a new game starts on, so "does a continue
+  play the *saved* track?" was unanswerable against it and the mutation
+  swapping one for the other survived. Same for difficulty, where the save says
+  2 and the test asked for 2. The fix is a fixture built to disagree — a
+  synthetic save with track 7, stage 42, and session flags that contradict its
+  own difficulty
+* **a symmetric check.** Setting both settings-unlock bytes and asserting both
+  progress flags cannot see the two flag numbers being swapped. Exercise each
+  input alone and require it to reach its own output *and not the other*
 * one the compiler folded to a constant and warned "unreachable code" about
 * one that verified a table's values using **that table's own length**
 * one that watched for an effect the code stopped producing either way, so
@@ -69,6 +87,17 @@ explains each one.
 
 **Calibrate with a negative control.** A comment-only change must SURVIVE;
 without that, "everything was killed" can just mean everything failed to build.
+
+**A survivor is not always a test gap.** One of `startup.txt`'s was a bad
+mutation: it added an `ApplySessionFlags` call before the load while leaving
+the one after it in place, so the later call still fixed everything up and
+nothing observable changed. Read the survivor before rewriting the test — the
+question is whether the mutation actually changes behaviour, and sometimes the
+honest answer is that it does not.
+
+**`CHECK_CMD` can run several self-tests at once.** When a spec spans units
+judged by different tests, a two-line script that runs each and returns
+non-zero if any fails turns three passes into one.
 
 ## Analysis
 

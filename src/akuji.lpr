@@ -1411,6 +1411,16 @@ const
   );
   SHEET_COLS = 10;
   TILE_PX    = 32;
+
+  { The two values every arm of 0x004645B0 writes, transcribed from the
+    disassembly rather than from the table under test. Comparing
+    TerrainConfigure's answer against TERRAIN_SOLID_THRESHOLD only says the
+    function reads the table; it says nothing about whether the table is
+    right, and a mutation that swapped two entries walked through both. }
+  BIN_THRESHOLD: array[1..9] of Integer =
+    ($32, $32, $3C, $32, $46, $3C, $3C, $3C, $50);
+  BIN_KILL: array[1..9] of Integer =
+    ($1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, 1000);
 var
   Terr, Track, Frame, N, Tracks, Frames, Obvious, Thr, Kill, Bad: Integer;
   A: TTerrainAnim;
@@ -1518,12 +1528,11 @@ begin
     Thr := -1;
     Kill := -1;
     TerrainConfigure(Terr, Thr, Kill, A);
-    if (Thr <> TERRAIN_SOLID_THRESHOLD[Terr])
-       or (Kill <> TERRAIN_KILL_TILE[Terr]) then
+    if (Thr <> BIN_THRESHOLD[Terr]) or (Kill <> BIN_KILL[Terr]) then
     begin
-      Log.Add(Format('FAILED: terrain %d configured (%d, %d), want (%d, %d)',
-        [Terr, Thr, Kill, TERRAIN_SOLID_THRESHOLD[Terr],
-         TERRAIN_KILL_TILE[Terr]]));
+      Log.Add(Format('FAILED: terrain %d configured (%d, %d), but 0x004645B0'
+        + ' writes (%d, %d)',
+        [Terr, Thr, Kill, BIN_THRESHOLD[Terr], BIN_KILL[Terr]]));
       Inc(Bad);
     end;
     { The kill tile has to be a tile you can walk INTO or nothing could ever
@@ -1870,7 +1879,7 @@ var
   Cfg: TGameSettings;
   H: TStartStub;
   GS, Bad, SavedStage, SavedMusic, SavedDiff: Integer;
-  SaveName: string;
+  SaveName, TempSave: string;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -1927,12 +1936,12 @@ begin
     Want(GS = GS_STAGE_BEGIN,
          Format('a new game left the state at %d, want %d',
                 [GS, GS_STAGE_BEGIN]));
-    Want(Cfg.CurrentStage = START_STAGE,
-         Format('a new game starts at stage %d, want %d',
-                [Cfg.CurrentStage, START_STAGE]));
-    Want(P.MusicTrack = START_MUSIC_TRACK,
-         Format('a new game set music track %d, want %d',
-                [P.MusicTrack, START_MUSIC_TRACK]));
+    { Written out, not START_STAGE. An expectation phrased in terms of the
+      constant it is checking moves with it and cannot fail. }
+    Want(Cfg.CurrentStage = 1,
+         Format('a new game starts at stage %d, want 1', [Cfg.CurrentStage]));
+    Want(P.MusicTrack = 1,
+         Format('a new game set music track %d, want 1', [P.MusicTrack]));
     Want(Trim(H.Tracks) = '1', 'the new game played ' + H.Tracks);
     Want(P.Lives = DEFAULT_LIVES, 'a new game does not start on three lives');
     Want(P.SpawnTileX = DEFAULT_SPAWN_X, 'the spawn point is wrong');
@@ -1950,14 +1959,27 @@ begin
          and (P.Progress[PROGRESS_EXTRA_DOOR_2] = 0),
          'the extra doors are open without the settings saying so');
 
+    { ONE at a time. Setting both and checking both is symmetric, so swapping
+      the two flag numbers is invisible to it - which is exactly what a
+      mutation did. Each byte has to be shown to reach its own flag and not
+      the other one. }
     FreshSettings(0);
     Cfg.ExtraDoor1 := 1;
+    GS := GS_TITLE_MENU;
+    GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS);
+    Want(P.Progress[1185] = 1,
+         'settings +0x1C did not reach Progress[1185]');
+    Want(P.Progress[1194] = 0,
+         'settings +0x1C reached Progress[1194], which belongs to +0x1D');
+
+    FreshSettings(0);
     Cfg.ExtraDoor2 := 1;
     GS := GS_TITLE_MENU;
     GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS);
-    Want((P.Progress[PROGRESS_EXTRA_DOOR_1] = 1)
-         and (P.Progress[PROGRESS_EXTRA_DOOR_2] = 1),
-         'the settings unlocks did not reach the progress block');
+    Want(P.Progress[1194] = 1,
+         'settings +0x1D did not reach Progress[1194]');
+    Want(P.Progress[1185] = 0,
+         'settings +0x1D reached Progress[1185], which belongs to +0x1C');
 
     { --- a continue, against the shipped save ------------------------ }
     if not LoadSave(P, SaveName) then
@@ -2019,6 +2041,52 @@ begin
            'the second difficulty write did not republish the session flags');
     end;
 
+    { --- a continue against a save that DISAGREES with the defaults --- }
+    { The shipped save happens to hold music track 1, which is also the track
+      a new game starts on - so it cannot show whether a continue plays the
+      SAVED track or the default one. A mutation that replaced the saved track
+      with the default passed against it. Build a save that differs. }
+    if LoadSave(P, SaveName) then
+    begin
+      TempSave := GetTempDir(False) + 'akuji_selftest_save.dat';
+      P.SavedStage := 42;
+      P.MusicTrack := 7;
+      { Session flags that CONTRADICT the difficulty they are stored beside.
+        A save cannot really be inconsistent, but the point of applying the
+        flags after the load is that whatever the file says about 5, 6 and 10
+        is overwritten - so the only way to see that happening is to make the
+        file wrong. InitNewGame publishes them too, which is why the later
+        call is invisible on the new-game path and this is the one place it
+        can be caught at all. }
+      P.Difficulty := 2;
+      P.Progress[5]  := 1;
+      P.Progress[6]  := 0;
+      P.Progress[10] := 1;
+      if not SaveTo(P, TempSave) then
+        Log.Add('  (could not write ' + TempSave + ' - skipped)')
+      else
+      begin
+        H.Tracks := '';
+        FreshSettings(0);
+        GS := GS_TITLE_MENU;
+        GameStartOrLoad(P, Cfg, smContinue, H, True, TempSave, GS);
+        Want(Cfg.CurrentStage = 42,
+             Format('a continue went to stage %d, want the saved 42',
+                    [Cfg.CurrentStage]));
+        Want(P.MusicTrack = 7,
+             Format('a continue kept music track %d, want the saved 7',
+                    [P.MusicTrack]));
+        Want(Trim(H.Tracks) = '7',
+             'the continue played ' + H.Tracks + ', want the saved track 7');
+        Want((P.Progress[6] = 1) and (P.Progress[5] = 0)
+             and (P.Progress[10] = 0),
+             Format('the session flags were not republished after the load:'
+               + ' 5=%d 6=%d 10=%d, want 0/1/0 for the saved difficulty 2',
+               [P.Progress[5], P.Progress[6], P.Progress[10]]));
+        DeleteFile(TempSave);
+      end;
+    end;
+
     { --- a continue with no save at all ------------------------------ }
     H.Tracks := '';
     FreshSettings(0);
@@ -2026,9 +2094,9 @@ begin
     Want(GameStartOrLoad(P, Cfg, smContinue, H, True,
                          GameDir + PathDelim + 'no-such-save.dat', GS),
          'a continue with no save file returned False');
-    Want(Cfg.CurrentStage = START_STAGE,
-         Format('a failed load left stage %d, want a clean new game at %d',
-                [Cfg.CurrentStage, START_STAGE]));
+    Want(Cfg.CurrentStage = 1,
+         Format('a failed load left stage %d, want a clean new game at 1',
+                [Cfg.CurrentStage]));
     Want(P.Lives = DEFAULT_LIVES,
          'a failed load did not leave a playable new game');
     Want(P.Progress[0] = 1, 'a failed load left flag 0 clear');
@@ -3101,9 +3169,13 @@ begin
     E.Raw[EF_BLOCK_B] := 77;
     Grid.Probes := '';
     EntityCheckKillTiles(E, L, Grid, KILL);
-    Want(E.Raw[EF_STATE] = KILL_TILE_STATE,
-         Format('standing on the kill tile left the state at %d, want %d',
-                [E.Raw[EF_STATE], KILL_TILE_STATE]));
+    { 10 written out, not KILL_TILE_STATE. An expectation phrased in terms of
+      the constant it is checking moves with it and cannot fail - which this
+      one did not, until a mutation set KILL_TILE_STATE to 11 and walked
+      straight past. Fourth time on this project; tools/README.md keeps count. }
+    Want(E.Raw[EF_STATE] = 10,
+         Format('standing on the kill tile left the state at %d, want 10',
+                [E.Raw[EF_STATE]]));
     Want(E.Raw[EF_BLOCK_B] = 0,
          Format('the state counter was left at %d, want 0',
                 [E.Raw[EF_BLOCK_B]]));
@@ -3131,6 +3203,45 @@ begin
       [Trim(Grid.Probes)]));
     Want(Trim(Grid.Probes) = '5,4 5,5 5,6',
          'the swept rectangle is not columns 5..5 by rows 4..6');
+
+    { An entity exactly one tile tall fills its row and NO more. The -1 on the
+      trailing edge is the only thing keeping it out of the next one, and it
+      shows up only when the bottom edge lands exactly on a tile boundary -
+      every other fixture here divides the same way with or without it. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][6] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 32);
+    Grid.Probes := '';
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Log.Add(Format('exactly one tile tall: probed [%s]', [Trim(Grid.Probes)]));
+    Want(Trim(Grid.Probes) = '5,5',
+         'a box flush with the tile boundary spilled into the next row');
+    Want(E.Raw[EF_STATE] = 3,
+         'a box flush with the tile boundary was killed by the row below it');
+
+    { EF_BOX_OFS_* is an INSET: added on the leading edge and subtracted on
+      the trailing one, so it pulls both sides in. Adding it on both would
+      slide the box instead, and with the offset at 0 - as it is in every
+      fixture above - the two are the same thing. Give it a real value. }
+    FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
+    Grid.Cells[5][4] := KILL;
+    Grid.Cells[5][6] := KILL;
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 96);      { spans rows 4..6 }
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Want(E.Raw[EF_STATE] = 10, 'a 96-tall entity did not reach rows 4 and 6');
+
+    PlaceAt(5 * 32 + 16, 5 * 32 + 16, 2, 96);
+    E.Raw[EF_BOX_OFS_Y] := 32;                     { pulls both ends in a tile }
+    Grid.Probes := '';
+    E.Raw[EF_STATE] := 3;
+    EntityCheckKillTiles(E, L, Grid, KILL);
+    Log.Add(Format('96 tall with a 32 inset: probed [%s]', [Trim(Grid.Probes)]));
+    Want(Trim(Grid.Probes) = '5,5',
+         'the inset did not pull BOTH ends of the box in');
+    Want(E.Raw[EF_STATE] = 3,
+         'the inset box still reached the kill tiles above and below it');
 
     { A kill tile at the bottom of that box is found... }
     Grid.Cells[5][6] := KILL;

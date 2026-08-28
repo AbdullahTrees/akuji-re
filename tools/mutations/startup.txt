@@ -1,0 +1,262 @@
+# Mutations for the stage-and-session setup: Entity_CheckKillTiles,
+# Terrain_Configure and Game_StartOrLoad. Three different self-tests judge
+# them, so run it three times:
+#
+#     SELFTEST=--selftest-entities tools/mutate.sh tools/mutations/startup.txt
+#     SELFTEST=--selftest-stages   tools/mutate.sh tools/mutations/startup.txt
+#     SELFTEST=--selftest-player   tools/mutate.sh tools/mutations/startup.txt
+#
+# A mutation the running self-test cannot see will SURVIVE, which is correct
+# and expected - what matters is that each one is killed by at least one of
+# the three. tools/README.md records which.
+===
+the kill-tile sweep only looks at the entity's own tile
+src/Entities.pas
+---
+  for Row := Top to Bottom do
+    for Col := Left to Right do
+--->
+  for Row := Top to Top do
+    for Col := Left to Left do
+===
+the kill-tile sweep runs one row past the box
+src/Entities.pas
+---
+  for Row := Top to Bottom do
+--->
+  for Row := Top to Bottom + 1 do
+===
+the trailing edge does not step back inside the box
+src/Entities.pas
+---
+  Bottom := (OY + PY + HY - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1)
+            div L.TileH;
+--->
+  Bottom := (OY + PY + HY - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y])
+            div L.TileH;
+===
+the box inset is added on both edges instead of mirrored
+src/Entities.pas
+---
+  Bottom := (OY + PY + HY - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1)
+--->
+  Bottom := (OY + PY + HY + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1)
+===
+the kill-tile comparison is not masked to sixteen bits
+src/Entities.pas
+---
+      if (Tiles.TileAt(Col - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
+          and $FFFF) = KillTile then
+--->
+      if Tiles.TileAt(Col - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
+         = KillTile then
+===
+the tile bias is applied on one axis only
+src/Entities.pas
+---
+      if (Tiles.TileAt(Col - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
+--->
+      if (Tiles.TileAt(Col, Row - TILE_BIAS_TILES)
+===
+a kill tile does not clear the state counter
+src/Entities.pas
+---
+        E.Raw[EF_STATE] := KILL_TILE_STATE;
+        E.Raw[EF_BLOCK_B] := 0;
+--->
+        E.Raw[EF_STATE] := KILL_TILE_STATE;
+===
+the fall-death state is off by one
+src/Entities.pas
+---
+  KILL_TILE_STATE = 10;
+--->
+  KILL_TILE_STATE = 11;
+===
+a tileset row and column are the other way round
+src/TileMaps.pas
+---
+  Result := (TileId div SheetCols) * TileW;
+--->
+  Result := (TileId mod SheetCols) * TileW;
+===
+one terrain animates the wrong tile
+src/Stages.pas
+---
+    { 2 } (TrackCount: 1; Tracks: ((TileId: 75; FrameCount: 5; Frames: (75,76,77,78,79)),
+--->
+    { 2 } (TrackCount: 1; Tracks: ((TileId: 75; FrameCount: 5; Frames: (75,76,77,78,80)),
+===
+a track loses a frame
+src/Stages.pas
+---
+    { 4 } (TrackCount: 2; Tracks: ((TileId: 15; FrameCount: 5; Frames: (15,16,17,18,19)),
+--->
+    { 4 } (TrackCount: 2; Tracks: ((TileId: 15; FrameCount: 4; Frames: (15,16,17,18,19)),
+===
+a terrain that animates nothing gains a track
+src/Stages.pas
+---
+    { 5 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+--->
+    { 5 } (TrackCount: 1; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
+===
+a track starts on a tile other than its own
+src/Stages.pas
+---
+                                   (TileId: 63; FrameCount: 4; Frames: (63,64,65,64,0)))),
+--->
+                                   (TileId: 63; FrameCount: 4; Frames: (64,64,65,64,0)))),
+===
+two terrains swap their solid thresholds
+src/Stages.pas
+---
+    (0, $32, $32, $3C, $32, $46, $3C, $3C, $3C, $50);
+--->
+    (0, $32, $32, $3C, $32, $3C, $46, $3C, $3C, $50);
+===
+a terrain's kill tile becomes solid, so nothing could walk into it
+src/Stages.pas
+---
+    (0, 29, 29, 29, 29, 29, 29, 29, 29, 1000);
+--->
+    (0, 29, 29, 29, 29, 29, 29, 29, 99, 1000);
+===
+an unknown terrain zeroes the configuration instead of leaving it
+src/Stages.pas
+---
+  if (TerrainId < 1) or (TerrainId > TERRAIN_MAX) then
+  begin
+    Anim := TERRAIN_ANIM[0];
+    Exit;
+  end;
+--->
+  if (TerrainId < 1) or (TerrainId > TERRAIN_MAX) then
+  begin
+    Anim := TERRAIN_ANIM[0];
+    SolidThreshold := 0;
+    KillTile := 0;
+    Exit;
+  end;
+===
+the terrain switch is off by one
+src/Stages.pas
+---
+  SolidThreshold := TERRAIN_SOLID_THRESHOLD[TerrainId];
+  KillTile       := TERRAIN_KILL_TILE[TerrainId];
+  Anim           := TERRAIN_ANIM[TerrainId];
+--->
+  SolidThreshold := TERRAIN_SOLID_THRESHOLD[TerrainId];
+  KillTile       := TERRAIN_KILL_TILE[TerrainId];
+  Anim           := TERRAIN_ANIM[TerrainId - 1];
+===
+the opening cutscene does not hold the new game back
+src/PlayerState.pas
+---
+  if (Mode = smNewGame) and Host.Opening then
+    Exit(False);
+--->
+  if False then
+    Exit(False);
+===
+the cutscene gate catches CONTINUE too
+src/PlayerState.pas
+---
+  if (Mode = smNewGame) and Host.Opening then
+--->
+  if Host.Opening then
+===
+a new game does not reach GS_STAGE_BEGIN
+src/PlayerState.pas
+---
+  AGameState := GS_STAGE_BEGIN;
+--->
+  AGameState := GS_PLAY;
+===
+a new game starts on the wrong stage
+src/PlayerState.pas
+---
+  START_STAGE       = 1;      { Settings.CurrentStage for a new game }
+--->
+  START_STAGE       = 0;      { Settings.CurrentStage for a new game }
+===
+the saved stage is not carried into the settings
+src/PlayerState.pas
+---
+    if LoadSave(P, SaveFileName) then
+      ASettings.CurrentStage := P.SavedStage;
+--->
+    if LoadSave(P, SaveFileName) then
+      ;
+===
+a continue plays the new game's music rather than the save's
+src/PlayerState.pas
+---
+    Host.PlayMusic(P.MusicTrack, True);
+  end;
+--->
+    Host.PlayMusic(START_MUSIC_TRACK, True);
+  end;
+===
+a continue does not read the save at all
+src/PlayerState.pas
+---
+    if LoadSave(P, SaveFileName) then
+      ASettings.CurrentStage := P.SavedStage;
+--->
+    if False then
+      ASettings.CurrentStage := P.SavedStage;
+===
+the session flags are applied BEFORE the load, so difficulty is saved state
+src/PlayerState.pas
+---
+  { After the load, so difficulty is a session fact and not a saved one. }
+  ApplySessionFlags(P, P.Difficulty);
+--->
+  { After the load, so difficulty is a session fact and not a saved one. }
+===
+the settings unlocks never reach the progress block
+src/PlayerState.pas
+---
+  if ASettings.ExtraDoor1 = 1 then
+    P.Progress[PROGRESS_EXTRA_DOOR_1] := 1;
+  if ASettings.ExtraDoor2 = 1 then
+    P.Progress[PROGRESS_EXTRA_DOOR_2] := 1;
+--->
+  if ASettings.ExtraDoor1 = 2 then
+    P.Progress[PROGRESS_EXTRA_DOOR_1] := 1;
+  if ASettings.ExtraDoor2 = 2 then
+    P.Progress[PROGRESS_EXTRA_DOOR_2] := 1;
+===
+the two unlocks land on each other's flags
+src/PlayerState.pas
+---
+  PROGRESS_EXTRA_DOOR_1 = 1185;
+  PROGRESS_EXTRA_DOOR_2 = 1194;
+--->
+  PROGRESS_EXTRA_DOOR_1 = 1194;
+  PROGRESS_EXTRA_DOOR_2 = 1185;
+===
+the archive no longer gates the second difficulty write
+src/PlayerState.pas
+---
+  if not UseArchive then
+  begin
+    P.Difficulty := ASettings.GameLevel;
+--->
+  if True then
+  begin
+    P.Difficulty := ASettings.GameLevel;
+===
+the second difficulty write is dropped altogether
+src/PlayerState.pas
+---
+  if not UseArchive then
+  begin
+    P.Difficulty := ASettings.GameLevel;
+    ApplySessionFlags(P, P.Difficulty);
+  end;
+--->
+  if not UseArchive then
+  begin
+  end;
