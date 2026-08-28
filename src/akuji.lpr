@@ -34,7 +34,7 @@ uses
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
-  SpritePool, Sprites,
+  SpritePool, Sprites, Dialogue,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -6460,6 +6460,120 @@ end;
   harness, and a frame is far past what the emulator can reach.
   --------------------------------------------------------------------------- }
 
+{ The message box's page splitting, against the shipped text.
+
+  Reading a sign locked the game: sub-op 3 waits and only the box advances the
+  script, so with no box the script never moved. This checks the part of the
+  box that is decidable without a screen - how a tk line becomes pages - and
+  it checks it against every line the game ships rather than against invented
+  strings. }
+function TestDialogue(Log: TStrings; const GameDir: string): Integer;
+var
+  S: TEventScript;
+  Page, Rest, Src: string;
+  Prompt: Boolean;
+  I, J, Bad, Lines, Prompts, Pages, MaxPages, N: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Lines := 0; Prompts := 0; Pages := 0; MaxPages := 0;
+  Log.Add('');
+  Log.Add('--- the message box ---');
+
+  { The four codes, on text taken straight out of tk002. }
+  Page := SplitPage('Will you save the game? \w', Rest, Prompt);
+  Want(Prompt, 'a \w line did not raise the prompt');
+  Want(Trim(Page) = 'Will you save the game?',
+       'the prompt page came out as "' + Page + '"');
+
+  Page := SplitPage('Saving completed! \e', Rest, Prompt);
+  Want(not Prompt, 'a \e line raised a prompt');
+  Want(Rest = '', 'a \e line left something after it: "' + Rest + '"');
+
+  Page := SplitPage('Touching a Devil Statue can \nsave your game. \kYou may '
+                    + 'want to save now. \e', Rest, Prompt);
+  Want(Pos('\k', Page) = 0, 'the page kept its own \k');
+  Want(Pos('You may', Rest) > 0,
+       'a \k line did not leave the next page behind: "' + Rest + '"');
+
+  { And every line in every shipped tk file must split without looping. A
+    page that produced no progress would hang the box the same way the
+    missing box hung the script. }
+  S := TEventScript.Create;
+  try
+    for I := 0 to 65 do
+    begin
+      S.Load(GameDir, I);
+      for J := 0 to S.LineCount - 1 do
+      begin
+        Inc(Lines);
+        Src := S.Lines[J];
+        N := 0;
+        repeat
+          { Src and Rest must be DIFFERENT variables - SplitPage clears its
+            out parameter on entry, and aliasing them blanks the input before
+            it is read. That is not hypothetical: it is the bug this sweep
+            found in TDialogueBox.TakePage. }
+          Page := SplitPage(Src, Rest, Prompt);
+          Src := Rest;
+          Inc(N);
+          Inc(Pages);
+          if Prompt then
+            Inc(Prompts);
+        until (Src = '') or (N > 32);
+        if N > 32 then
+        begin
+          Log.Add(Format('  stage %d line %d never finished splitting: %s',
+            [I, J, S.Lines[J]]));
+          Inc(Bad);
+        end;
+        if N > MaxPages then
+          MaxPages := N;
+      end;
+    end;
+  finally
+    S.Free;
+  end;
+
+  Log.Add(Format('tk lines split: %d into %d pages, longest %d, %d prompts',
+    [Lines, Pages, MaxPages, Prompts]));
+
+  { Pinned so a splitter that returned nothing could not pass vacuously. The
+    44 prompts are the same 44 EventRunner.pas counts from the other side -
+    the \w lines that its scratch-flag guards depend on. }
+  { The shipped totals, counted independently: 66 tk files, 203 lines, 63 of
+    them carrying \w and 52 carrying \k. Pinned so a splitter that returned
+    nothing could not pass by comparing nothing - which is exactly what it did
+    on the first run, when the sweep aliased its own input and every line came
+    back empty. }
+  if Lines <> 203 then
+  begin
+    Log.Add(Format('  FAILED: %d tk lines, want 203 - wrong game directory?',
+      [Lines]));
+    Inc(Bad);
+  end;
+  if Prompts <> 63 then
+  begin
+    Log.Add(Format('  FAILED: %d prompt pages, want the 63 lines carrying \w',
+      [Prompts]));
+    Inc(Bad);
+  end;
+  if MaxPages < 2 then
+  begin
+    Log.Add('  FAILED: no line split into more than one page, but 52 carry \k');
+    Inc(Bad);
+  end;
+
+  Result := Bad;
+  if Result = 0 then
+    Log.Add('OK - every shipped line splits into pages and terminates');
+end;
+
 function SelfTestSession(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -6731,6 +6845,8 @@ begin
     Map.Free;
     Stages.Free;
   end;
+
+  Inc(Bad, TestDialogue(Log, GameDir));
 
   Result := Bad;
   Log.Add('');

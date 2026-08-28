@@ -23,7 +23,7 @@ uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
   QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
-  Entities, GameSession, SpritePool;
+  Entities, GameSession, SpritePool, Dialogue;
 
 type
   TFrm_main = class(TForm)
@@ -49,6 +49,11 @@ type
     FMap: TTileMap;
     FStageLoaded: Integer;
     FStartHost: TStartHost;
+    { The message box. It is the session's TEventHost, so sub-op 3 reaches it
+      directly - and closing it is what advances the script, exactly as
+      FUN_004568D0 does. Without one, reading a sign locked the game. }
+    FDialogue: TDialogueBox;
+    FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
       FPlayer below is gone and FSession.Player is the one copy. }
@@ -151,6 +156,8 @@ begin
       an opening that never runs is a cutscene that finishes instantly, and
       that is a truthful stub rather than a skipped step. }
     FStartHost := TStartHost.Create;
+    FDialogue := TDialogueBox.Create;
+    FSession.EventHost := FDialogue;
 
     Sheet := FSurfaces[0];
     if Sheet <> nil then
@@ -245,6 +252,10 @@ begin
   FSession.Input.Moving := (FSession.Input.AxisX <> 0)
                            or (FSession.Input.AxisY <> 0);
 
+  { The confirm edge the message box needs, taken before Button[0] is
+    overwritten below. }
+  FConfirmLatch := FSession.Input.Button[0];
+
   FSession.Input.Button[0] := Joy.IsDown(abAction1);
   FSession.Input.Button[1] := Joy.IsDown(abAction2);
   FSession.Input.Button[2] := Joy.IsDown(abAction3);
@@ -280,6 +291,8 @@ begin
               SCREEN_W, SCREEN_H);
   FSession.Sprites.DrawAll(DDDD1.Canvas, FSurfaces);
   DrawHud;
+  FDialogue.Draw(DDDD1.Canvas, FFont,
+                 PixelOf(FSession.Pool.Field(0, EF_POS_Y)));
 end;
 
 { Load_Stage_Assets @ 0x00465A1C. The record's rec[0] selects the surface set,
@@ -457,6 +470,7 @@ begin
         LoadStage(Settings.CurrentStage);
         FSession.SetFrames(FSprites);
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
+        FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player);
       end;
     GS_PLAYER_INIT:
       begin
@@ -477,7 +491,15 @@ begin
     GS_PLAY_ALT,
     GS_STATE_140:
       begin
-        FSession.Frame(GameStateValue);
+        { While the box is up it - not the interpreter - drives the script,
+          and no game logic steps. That is the original's shape: sub-op 3
+          waits, and FUN_004568D0 is what calls EventScript_AdvanceStep. }
+        if FDialogue.Active then
+          FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
+                           FSession.Input.AxisY < 0, FSession.Input.AxisY > 0,
+                           GameStateValue)
+        else
+          FSession.Frame(GameStateValue);
         DrawScene;
       end;
     GS_PAUSE:
@@ -584,7 +606,9 @@ begin
     SaveSettings(FDataDir);
   FFont.Free;
   FTitleScreen.Free;
+  { FDialogue is the session's EventHost, and the session does not own it. }
   FSession.Free;
+  FDialogue.Free;
   FStartHost.Free;
   FMap.Free;
   FStages.Free;

@@ -370,6 +370,11 @@ type
     Difficulty:  Integer;   // +0x11E0  copy of Settings.GameLevel
   end;
 
+  { The one player state, by reference. The original has a single global at
+    0x0046CFF0 reached through a pointer; anything that needs to write it -
+    the message box answering a prompt, for one - takes this. }
+  PPlayerState = ^TPlayerState;
+
 procedure InitNewGame(var P: TPlayerState; GameLevel: Integer);
 procedure ApplySessionFlags(var P: TPlayerState; GameLevel: Integer);
 function LoadSave(var P: TPlayerState; const FileName: string): Boolean;
