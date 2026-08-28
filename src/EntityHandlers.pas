@@ -46,6 +46,10 @@
       0x0045AA78  type 23  a torch, and the two flames it holds
       0x0045A580  type 28  four frames, gated on its variant
       0x0045AB64  type 29  an idle that speeds up when the player is close
+      0x0045ABD8  type 30  a patroller, and the first thing that reads
+                           DIFFICULTY
+      0x0045AC94  type 31  a floating attacker with a six-state machine
+      0x0045A848  type 37  something that drops, lands and lies there
 
   And the dispatcher they hang off:
 
@@ -441,6 +445,77 @@ const
   T29_NEAR_SCALE_X = 3;
   T29_NEAR_SCALE_Y = 1;
 
+  { --- Types 30, 31 and 37 ----------------------------------------------
+    The first handlers that read the player's DIFFICULTY, and they read it
+    through tables indexed by it rather than by branching on it.
+
+    TYPE 30 patrols. On its first frame, and only on difficulty 2, it DOUBLES
+    its speed and HALVES its turn period - so on hard it covers four times the
+    ground between turns. Its sprite row comes from the sign of that speed,
+    the same two-ifs-no-else shape type 3 has.
+
+    TYPE 31 floats, circles and attacks on a six-state machine, and three
+    separate difficulty tables drive it: how much HP it gains over the base,
+    how long it waits before attacking, and how fast it fires while attacking.
+    All three are (easy, normal, hard) triples.
+
+      state 0  spawn: add the HP bonus, rise 4 px and left 1 px, go to 1
+      state 1  drift in a circle, one heading step a frame, moving by HALF the
+               X component only; count up and go to state 2 after
+               wait[diff] * HP + 20 frames
+      state 2  spawn a type-35 child in mode 0 pointing at itself, go to 3
+      state 3  held - nothing here moves it; the child does
+      state 4  the attack: for 180 frames, every eighth frame past
+               rate[diff], play sound 0x17 and spawn a type-34 shot along
+               block A[1]'s heading
+      state 5  spawn a type-35 child in mode 1 and go to 6, which is inert
+
+    Reaching state 4 is not this handler's doing - nothing here sets it. The
+    type-35 child does, which is why state 3 looks like a dead end and is not.
+    Losing all HP forces the sprite to frame 4 wherever it is.
+
+    TYPE 37 drops. It puffs on arrival, falls at gravity 4 to a terminal 0x200,
+    lands on the first solid tile with sound 0x1B, and animates a five-frame
+    loop throughout. Its frame counter wraps with a div AND a mod, and the
+    quotient is left in EAX and returned - dead, like type 16's. }
+  T30_FRAMES = 2;  T30_TICKS = 8;
+  T30_TABLE_ADDR = $0046BE9C;
+  T30_SPRITES: array[0..1, 0..T30_FRAMES - 1] of Integer =
+    ((89, 90),      { moving left  }
+     (91, 92));     { moving right }
+  T30_SETTLE = $40;
+  T30_HARD = 2;
+
+  T31_FRAMES = 4;
+  T31_HURT_FRAME = 4;
+  T31_TICKS = 8;
+  T31_TABLE_ADDR = $0046BEDC;
+  T31_SPRITES: array[0..T31_HURT_FRAME] of Integer = (500, 501, 502, 501, 503);
+  T31_HP_BONUS_ADDR = $0046BED0;
+  T31_WAIT_ADDR     = $0046BEC4;
+  T31_RATE_ADDR     = $0046BEB8;
+  T31_HP_BONUS: array[0..2] of Integer = (0, 10, 20);
+  T31_WAIT:     array[0..2] of Integer = (8, 6, 4);
+  T31_RATE:     array[0..2] of Integer = (60, 30, 10);
+  T31_WAIT_BASE   = $14;    { added to wait[diff] * HP }
+  T31_ATTACK_LEN  = $B4;    { 180 frames of firing }
+  T31_FIRE_EVERY  = 8;
+  T31_FIRE_SOUND  = $17;
+  T31_MARKER_TYPE = $23;    { 35 - the child that drives the state machine }
+  T31_SHOT_TYPE   = $22;    { 34 }
+  T31_RISE  = $100;         { 8 px up on spawn }
+  T31_DRIFT = $80;          { 4 px left }
+
+  T37_FRAMES = 5;  T37_TICKS = 6;
+  T37_TABLE_ADDR = $0046BE5C;
+  T37_SPRITES: array[0..T37_FRAMES - 1] of Integer = (222, 223, 224, 225, 226);
+  T37_PUFF_TYPE = 8;
+  T37_DROP      = $100;     { 8 px, once, on arrival }
+  T37_TIMERS    = $3C;      { both timers armed to 60 }
+  T37_GRAVITY   = 4;
+  T37_TERMINAL  = $200;
+  T37_LAND_SOUND = $1B;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -690,6 +765,19 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045ABD8. A patroller that gets meaner on hard - see the T30_ block. }
+procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045AC94. A floating attacker. Six states, three difficulty tables, and
+  a child entity that drives the transition this handler cannot make itself. }
+procedure EntityUpdate_Type31(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045A848. Drops, lands, and lies there animating. }
+procedure EntityUpdate_Type37(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045A95C. A switch. The only handler that writes to the event table. }
 procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
@@ -1391,6 +1479,217 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T30_FRAMES) then
+    Frame := 0;
+  { By the SIGN of the speed, two ifs and no else - a stationary one keeps
+    whatever sprite it had. }
+  if E.Raw[EF_FACING] < 0 then
+    E.Raw[EF_ANIM_ID] := T30_SPRITES[0][Frame];
+  if E.Raw[EF_FACING] > 0 then
+    E.Raw[EF_ANIM_ID] := T30_SPRITES[1][Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T30_SETTLE);
+    { HARD ONLY: twice the speed and half the turn period, so four times the
+      ground between turns. This is the whole of its difficulty scaling and it
+      happens once, on the first frame. }
+    if World.PlayerDifficulty = T30_HARD then
+    begin
+      E.Raw[EF_FACING] := E.Raw[EF_FACING] * 2;
+      E.Raw[EF_BLOCK_A + 1] := HalfExtent(E.Raw[EF_BLOCK_A + 1]);
+    end;
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T30_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T30_FRAMES;
+  end;
+
+  { A SECOND counter, in EF_CHILD_A, for the turn - the frame counter above is
+    already using EF_BLOCK_B. }
+  Inc(E.Raw[EF_CHILD_A]);
+  if E.Raw[EF_CHILD_A] > E.Raw[EF_BLOCK_A + 1] then
+  begin
+    E.Raw[EF_CHILD_A] := 0;
+    E.Raw[EF_FACING] := -E.Raw[EF_FACING];
+  end;
+
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
+end;
+
+procedure EntityUpdate_Type31(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > T31_HURT_FRAME) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T31_SPRITES[Frame];
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_HP], T31_HP_BONUS[D]);
+    E.Raw[EF_STATE] := 1;
+    Dec(E.Raw[EF_POS_X], T31_RISE);
+    Dec(E.Raw[EF_POS_Y], T31_DRIFT);
+  end;
+
+  { Out of HP: forced onto the hurt frame wherever it is, and this is OUTSIDE
+    the dying guard so it keeps happening. }
+  if E.Raw[EF_HP] = 0 then
+    E.Raw[EF_FLAG1C] := T31_HURT_FRAME;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    { HALF the X component and nothing on Y, so it drifts sideways in a slow
+      sine rather than circling. }
+    Inc(E.Raw[EF_POS_X], HalfExtent(DirVelX(E.Raw[EF_FACING])));
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T31_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T31_FRAMES;
+    end;
+
+    { The tougher it is, the LONGER it waits - the wait is proportional to its
+      own HP as well as to the difficulty. }
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T31_WAIT[D] * E.Raw[EF_HP] + T31_WAIT_BASE then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_CHILD_A] := 0;
+    E.Raw[EF_FLAG1C] := 0;
+    Slot := World.Spawn(EKIND_MINOR, T31_MARKER_TYPE,
+                        E.Raw[EF_POS_X] - World.Layer.DeltaX - POSITION_BIAS
+                          - $400,
+                        E.Raw[EF_POS_Y] - World.Layer.DeltaY - POSITION_BIAS
+                          + $40);
+    World.SetSpawnField(Slot, EF_STATE, 0);
+    { The child is told which entity it belongs to, by SLOT. }
+    World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+  end;
+
+  { State 3 does nothing here. The type-35 child is what advances it to 4. }
+
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    E.Raw[EF_FLAG1C] := T31_HURT_FRAME;
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T31_ATTACK_LEN then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_CHILD_B] := 0;
+      E.Raw[EF_STATE] := 5;
+    end;
+
+    Inc(E.Raw[EF_CHILD_B]);
+    if (E.Raw[EF_CHILD_B] mod T31_FIRE_EVERY = 0)
+       and (E.Raw[EF_CHILD_A] > T31_RATE[D]) then
+    begin
+      World.PlaySound(T31_FIRE_SOUND);
+      Slot := World.Spawn(EKIND_MINOR, T31_SHOT_TYPE,
+                          E.Raw[EF_POS_X] - World.Layer.DeltaX - POSITION_BIAS
+                            - $480,
+                          E.Raw[EF_POS_Y] - World.Layer.DeltaY - POSITION_BIAS
+                            + $80);
+      { The shot's heading is block A[1], not the parent's facing. }
+      World.SetSpawnField(Slot, EF_FACING, E.Raw[EF_BLOCK_A + 1]);
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    E.Raw[EF_STATE] := 6;
+    E.Raw[EF_FLAG1C] := 0;
+    Slot := World.Spawn(EKIND_MINOR, T31_MARKER_TYPE,
+                        E.Raw[EF_POS_X] - World.Layer.DeltaX - POSITION_BIAS
+                          - $400,
+                        E.Raw[EF_POS_Y] - World.Layer.DeltaY - POSITION_BIAS
+                          + $40);
+    World.SetSpawnField(Slot, EF_STATE, 1);
+    World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+  end;
+end;
+
+procedure EntityUpdate_Type37(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T37_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T37_SPRITES[Frame];
+
+  { Arrival, and it happens whatever the game state is. }
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    World.Spawn(EKIND_MINOR, T37_PUFF_TYPE,
+                E.Raw[EF_POS_X] - POSITION_BIAS,
+                E.Raw[EF_POS_Y] - POSITION_BIAS);
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T37_DROP);
+    E.Raw[EF_TIMER] := T37_TIMERS;
+    E.Raw[EF_DEATH_TIMER] := T37_TIMERS;
+  end;
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_VEL_Y], T37_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T37_TERMINAL then
+      E.Raw[EF_VEL_Y] := T37_TERMINAL;
+
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      World.PlaySound(T37_LAND_SOUND);
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+      E.Raw[EF_STATE] := 2;
+    end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T37_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    { The original divides AND takes the remainder, leaving the quotient in
+      EAX as a dead result - see type 16 for the same shape. }
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T37_FRAMES;
+  end;
 end;
 
 procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
@@ -2244,11 +2543,14 @@ begin
       23: EntityUpdate_Type23(E^, AGameState, World);
       28: EntityUpdate_Type28(E^, AGameState, World);
       29: EntityUpdate_Type29(E^, AGameState, World);
+      30: EntityUpdate_Type30(E^, AGameState, World);
+      31: EntityUpdate_Type31(E^, AGameState, World);
+      37: EntityUpdate_Type37(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 49 arms are in HANDLER_ADDR, untranslated }
+      { the other 46 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

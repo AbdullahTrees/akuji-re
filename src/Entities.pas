@@ -882,6 +882,11 @@ type
       event table is the entity system's, not the interpreter's, so it comes
       through the world like the rest. }
     procedure SetEventOpcode(EventId, Opcode: Integer); virtual;
+    { The player's difficulty, 0..2. Several enemy handlers index a
+      three-entry table with it - EntityUpdate_Type30 doubles its speed on 2,
+      and type 31 has three separate tables keyed by it. The player state is
+      not otherwise reachable from a handler, so it comes through here. }
+    function PlayerDifficulty: Integer; virtual;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
     { 0x00461874. Real, not abstract: this is the whole function. }
     procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual;
@@ -1673,6 +1678,11 @@ end;
 
 procedure TEntityWorld.SetEventOpcode(EventId, Opcode: Integer);
 begin
+end;
+
+function TEntityWorld.PlayerDifficulty: Integer;
+begin
+  Result := 0;
 end;
 
 { Entity_Destroy @ 0x00461400. }
