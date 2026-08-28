@@ -33,7 +33,7 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
-  Stages, Camera, TileMaps, Player, EntityHandlers,
+  Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
