@@ -3281,6 +3281,201 @@ begin
   end;
 end;
 
+{ --- Entity_SolidCollideX/Y @ 0x00456B4C / 0x00456E0C --------------------
+
+  Three asymmetries between the two sweeps are the whole point of testing
+  these, and each has a case below:
+
+    softness is PER AXIS - kind 1 is soft in X, kind 2 is soft in Y
+    the Y sweep has NO zero-delta guard, so resting on a platform still
+      reports a collision
+    landing on top writes PushX as well as PushY, which is what carries a
+      rider along with a moving platform
+
+  Positions are placed one pixel apart on purpose: the push is then exactly
+  one pixel in 1/32 units, which is a number that can be predicted by hand
+  rather than read off the implementation. }
+function TestSolidCollide(Log: TStringList): Integer;
+const
+  EXT = 20;
+var
+  W: TCountingWorld;
+  Pool: TEntityPool;
+  Subject, Solid: Integer;
+
+  procedure Place(Slot, PxX, PxY, SolidKind: Integer);
+  begin
+    Pool.SetField(Slot, EF_POS_X, POSITION_BIAS + PxX * 32);
+    Pool.SetField(Slot, EF_POS_Y, POSITION_BIAS + PxY * 32);
+    Pool.SetField(Slot, EF_EXTENT_X, EXT);
+    Pool.SetField(Slot, EF_EXTENT_Y, EXT);
+    Pool.SetField(Slot, EF_HITBOX_INSET_X, 0);
+    Pool.SetField(Slot, EF_HITBOX_INSET_Y, 0);
+    Pool.SetField(Slot, EF_SOLID, SolidKind);
+    Pool.SetField(Slot, EF_EVENT_ID, -1);
+  end;
+
+  procedure Reset(SolidKind: Integer);
+  begin
+    Pool.Clear;
+    Subject := Pool.Spawn(EKIND_SINGLE, 1, 0, 0);      { slot 0 }
+    Solid := Pool.Spawn(EKIND_MINOR, 2, 0, 0);
+    Place(Subject, 100, 100, 0);
+    Place(Solid, 120, 120, SolidKind);
+    W.PushX := 0;
+    W.PushY := 0;
+    W.OnTopOfSolid := False;
+  end;
+
+begin
+  Result := 0;
+  Log.Add('');
+  Log.Add('--- Entity_SolidCollideX/Y ---');
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  try
+    W.Pool := Pool;
+
+    { Moving one pixel into a solid one pixel away pushes back one pixel. }
+    Reset(3);
+    Place(Solid, 120, 100, 3);
+    if not W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: a solid one pixel away should block');
+      Inc(Result);
+    end;
+    Log.Add(Format('blocked moving right: PushX %d (1/32 px)', [W.PushX]));
+    if W.PushX <> -32 then
+    begin
+      Log.Add('FAILED: want a one-pixel push back, -32');
+      Inc(Result);
+    end;
+
+    { A zero delta does nothing on X ... }
+    Reset(3);
+    Place(Solid, 120, 100, 3);
+    if W.SolidCollideX(Pool.Entity(Subject)^, 0, False) then
+    begin
+      Log.Add('FAILED: the X sweep should ignore a zero delta');
+      Inc(Result);
+    end;
+
+    { ... but the Y sweep has no such guard, which is how resting on a
+      platform keeps reporting one.
+
+      The solid sits at 119, not 120, so the boxes genuinely OVERLAP with no
+      movement at all. At 120 they exactly touch, and RectOverlap compares
+      with a strict <, so touching is not overlapping - a first version of
+      this case put them at 120 and failed for that reason rather than for
+      the one it was testing. }
+    Reset(3);
+    Place(Solid, 100, 119, 3);
+    if not W.SolidCollideY(Pool.Entity(Subject)^, 0, False) then
+    begin
+      Log.Add('FAILED: the Y sweep must still act on a zero delta');
+      Inc(Result);
+    end;
+
+    { Landing on top: within tolerance it marks the ride and carries the
+      rider along with the platform AND with this frame's scroll. }
+    Reset(3);
+    Place(Solid, 100, 120, 3);
+    W.Layer.DeltaX := 64;                { two pixels of scroll }
+    W.SolidCollideY(Pool.Entity(Subject)^, 32, False);
+    Log.Add(Format('landed: onTop %d, ridden %d, PushY %d, PushX %d',
+      [Ord(W.OnTopOfSolid), Pool.Field(Solid, EF_RIDDEN), W.PushY, W.PushX]));
+    if not W.OnTopOfSolid then
+    begin
+      Log.Add('FAILED: within 8 pixels of the top should count as on top');
+      Inc(Result);
+    end;
+    if Pool.Field(Solid, EF_RIDDEN) <> 1 then
+    begin
+      Log.Add('FAILED: the platform should be marked ridden');
+      Inc(Result);
+    end;
+    if W.PushY <> -32 then
+    begin
+      Log.Add('FAILED: want a one-pixel vertical push, -32');
+      Inc(Result);
+    end;
+    if W.PushX <> 64 then
+    begin
+      Log.Add('FAILED: riding should carry the layer delta into PushX');
+      Inc(Result);
+    end;
+    W.Layer.DeltaX := 0;
+
+    { Softness is per axis. Kind 1 is soft in X and solid in Y; kind 2 the
+      other way round. Nothing here is soft when SkipSoft is off. }
+    Reset(SOLID_SOFT_IN_X);
+    Place(Solid, 120, 100, SOLID_SOFT_IN_X);
+    if W.SolidCollideX(Pool.Entity(Subject)^, 32, True) then
+    begin
+      Log.Add('FAILED: kind 1 should be soft in X');
+      Inc(Result);
+    end;
+    if not W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: kind 1 still blocks X when SkipSoft is off');
+      Inc(Result);
+    end;
+
+    Reset(SOLID_SOFT_IN_Y);
+    Place(Solid, 100, 120, SOLID_SOFT_IN_Y);
+    if W.SolidCollideY(Pool.Entity(Subject)^, 32, True) then
+    begin
+      Log.Add('FAILED: kind 2 should be soft in Y');
+      Inc(Result);
+    end;
+    if not W.SolidCollideY(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: kind 2 still blocks Y when SkipSoft is off');
+      Inc(Result);
+    end;
+
+    { And the pair is genuinely crossed over: kind 1 is NOT soft in Y. }
+    Reset(SOLID_SOFT_IN_X);
+    Place(Solid, 100, 120, SOLID_SOFT_IN_X);
+    if not W.SolidCollideY(Pool.Entity(Subject)^, 32, True) then
+    begin
+      Log.Add('FAILED: kind 1 is soft in X only, not in Y');
+      Inc(Result);
+    end;
+
+    { The air dash phases through EF_VULN_KIND $5C - the same fact
+      Player_UpdateAirDash was written from. }
+    Reset(3);
+    Place(Solid, 120, 100, 3);
+    Pool.SetField(Solid, EF_VULN_KIND, SOLID_PHASE_VULN);
+    Pool.SetField(Subject, EF_STATE, SOLID_STATE_AIRDASH);
+    if W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: the air dash should phase through vuln kind $5C');
+      Inc(Result);
+    end;
+    Pool.SetField(Subject, EF_STATE, 0);
+    if not W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: any other state is blocked by it');
+      Inc(Result);
+    end;
+
+    { An entity never blocks itself. }
+    Pool.Clear;
+    Subject := Pool.Spawn(EKIND_MINOR, 2, 0, 0);
+    Place(Subject, 100, 100, 3);
+    if W.SolidCollideX(Pool.Entity(Subject)^, 32, False) then
+    begin
+      Log.Add('FAILED: an entity blocked itself');
+      Inc(Result);
+    end;
+  finally
+    W.Free;
+    Pool.Free;
+  end;
+end;
+
 { --- Entity_Destroy @ 0x00461400 -----------------------------------------
 
   Four debts settled in four directions, and two of them are what makes this
@@ -4031,6 +4226,7 @@ begin
 
   Inc(Result, TestSpawnDebris(Log));
   Inc(Result, TestDestroy(Log));
+  Inc(Result, TestSolidCollide(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
