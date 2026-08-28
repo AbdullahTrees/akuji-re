@@ -50,6 +50,8 @@
                            DIFFICULTY
       0x0045AC94  type 31  a floating attacker with a six-state machine
       0x0045A848  type 37  something that drops, lands and lies there
+      0x0045AF2C  type 34  type 31's shot
+      0x0045AFA8  type 35  type 31's telegraph - and what moves it to state 4
 
   And the dispatcher they hang off:
 
@@ -516,6 +518,50 @@ const
   T37_TERMINAL  = $200;
   T37_LAND_SOUND = $1B;
 
+  { --- Types 34 and 35, type 31's two children --------------------------
+    Between them these close the thread type 31 left open. Nothing in type 31
+    sets its own state 4; type 35 does.
+
+    TYPE 35 is the telegraph - eight frames at five ticks, played FORWARDS in
+    mode 0 and BACKWARDS in mode 1, off the same eight-entry table read as
+    `table[7 - frame]`. It watches its owner and destroys itself the moment
+    the owner's HP reaches 0, so a parent killed mid-wind-up takes its
+    telegraph with it.
+
+    When the forward run finishes it does three things to its OWNER: plays
+    sound 0x18, sets the owner's state to 4 - the attack - and writes
+    Angle_Between(owner, PLAYER) into the owner's block A[1]. That is the aim,
+    taken once at the end of the telegraph rather than tracked, which is why
+    type 31's shots all leave along one heading however the player moves.
+
+    The backward run just puts the owner back to state 1.
+
+    TYPE 34 is the shot. It moves at DOUBLE the direction table's step on both
+    axes, and its five frames advance on a DIFFICULTY-KEYED divisor of 8, 10
+    or 12 - so the shot animates FASTER on easy, and since it dies at the end
+    of its animation it also has a shorter range there. That is backwards from
+    what the other difficulty tables do and it is what the binary says.
+
+    Its frame test is `count mod rate = 0`, not a countdown, so the counter
+    runs on and the frames land on multiples. The division's quotient is left
+    in EAX and returned - dead, like type 16's and type 37's. }
+  T34_FRAMES = 5;
+  T34_TABLE_ADDR = $0046BEF0;
+  T34_SPRITES: array[0..T34_FRAMES - 1] of Integer = (512, 513, 514, 515, 516);
+  T34_RATE_ADDR = $0046BEAC;
+  T34_RATE: array[0..2] of Integer = (8, 10, 12);
+  T34_SPEED = 2;
+
+  T35_FRAMES = 8;  T35_TICKS = 4;
+  T35_TABLE_ADDR = $0046BF04;
+  T35_SPRITES: array[0..T35_FRAMES - 1] of Integer =
+    (504, 505, 506, 507, 508, 509, 510, 511);
+  T35_MODE_WIND_UP   = 0;
+  T35_MODE_WIND_DOWN = 1;
+  T35_SOUND = $18;
+  T35_OWNER_ATTACK = 4;
+  T35_OWNER_IDLE   = 1;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -765,6 +811,15 @@ procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
+
+{ 0x0045AF2C. Type 31's shot. Double speed, difficulty-keyed animation. }
+procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045AFA8. Type 31's telegraph, and the thing that puts its owner into the
+  attack state. See the T35_ block. }
+procedure EntityUpdate_Type35(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
 
 { 0x0045ABD8. A patroller that gets meaner on hard - see the T30_ block. }
 procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
@@ -1479,6 +1534,94 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
+procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Rate: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T34_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T34_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]) * T34_SPEED);
+  Inc(E.Raw[EF_POS_Y], DirVelY(E.Raw[EF_FACING]) * T34_SPEED);
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Rate := T34_RATE[D];
+
+  { A modulo test rather than a countdown - the counter is never reset, so the
+    frames land on multiples of the rate. }
+  Inc(E.Raw[EF_BLOCK_B]);
+  if (Rate <> 0) and (E.Raw[EF_BLOCK_B] mod Rate = 0) then
+  begin
+    Inc(E.Raw[EF_FLAG1C]);
+    if E.Raw[EF_FLAG1C] > T34_FRAMES - 1 then
+      World.DestroyEntity(E, False);
+  end;
+end;
+
+procedure EntityUpdate_Type35(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Owner, Aim: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T35_FRAMES) then
+    Frame := 0;
+  { The same table both ways round: forwards while winding up, backwards while
+    winding down. }
+  if E.Raw[EF_STATE] = T35_MODE_WIND_UP then
+    E.Raw[EF_ANIM_ID] := T35_SPRITES[Frame];
+  if E.Raw[EF_STATE] = T35_MODE_WIND_DOWN then
+    E.Raw[EF_ANIM_ID] := T35_SPRITES[T35_FRAMES - 1 - Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  Owner := E.Raw[EF_OWNER];
+  if World.Pool = nil then
+    Exit;
+
+  { An owner with no HP left takes its telegraph with it. }
+  if World.Pool.Field(Owner, EF_HP) = 0 then
+  begin
+    World.DestroyEntity(E, False);
+    Exit;
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] <= T35_TICKS then
+    Exit;
+
+  E.Raw[EF_BLOCK_B] := 0;
+  Inc(E.Raw[EF_FLAG1C]);
+  if E.Raw[EF_FLAG1C] <= T35_FRAMES - 1 then
+    Exit;
+
+  if E.Raw[EF_STATE] = T35_MODE_WIND_UP then
+  begin
+    World.PlaySound(T35_SOUND);
+    World.Pool.SetField(Owner, EF_STATE, T35_OWNER_ATTACK);
+    { The aim, taken ONCE here rather than tracked - which is why the shots
+      that follow all leave along one heading however the player moves. }
+    Aim := AngleBetween(World.Pool.Field(Owner, EF_POS_X),
+                        World.Pool.Field(Owner, EF_POS_Y),
+                        World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X),
+                        World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_Y));
+    World.Pool.SetField(Owner, EF_BLOCK_A + 1, Aim);
+  end;
+  if E.Raw[EF_STATE] = T35_MODE_WIND_DOWN then
+    World.Pool.SetField(Owner, EF_STATE, T35_OWNER_IDLE);
+
+  World.DestroyEntity(E, False);
 end;
 
 procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
@@ -2545,12 +2688,14 @@ begin
       29: EntityUpdate_Type29(E^, AGameState, World);
       30: EntityUpdate_Type30(E^, AGameState, World);
       31: EntityUpdate_Type31(E^, AGameState, World);
+      34: EntityUpdate_Type34(E^, AGameState, World);
+      35: EntityUpdate_Type35(E^, AGameState, World);
       37: EntityUpdate_Type37(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 46 arms are in HANDLER_ADDR, untranslated }
+      { the other 44 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
