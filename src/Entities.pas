@@ -807,15 +807,23 @@ type
       Nil when the world does not draw. }
     Sprites: TSpriteSink;
 
+    { The tilemap. Nil is a world with no terrain, where every tile query
+      answers TILE_NONE - which is what the player trace's flat room wants. }
+    Tiles: TTileSource;
+
     { Scrolling is an INPUT to the tile query, not just a consequence of it:
       Entity_TileCollideX/Y take it as their fifth argument, because when the
       layer moves instead of the entity the tile under the entity differs. }
+    { These four were abstract while the functions behind them were only
+      described. They are real now - Entity_TileCollideX/Y and
+      Entity_TileEdgeDistX/Y - and stay virtual only so a test can supply a
+      room without a tilemap. }
     function TileAtX(const E: TEntity; Delta: Integer;
-                     Scrolling: Boolean): Integer; virtual; abstract;
+                     Scrolling: Boolean): Integer; virtual;
     function TileAtY(const E: TEntity; Delta: Integer;
-                     Scrolling: Boolean): Integer; virtual; abstract;
-    function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
-    function EdgeDistY(const E: TEntity; Delta: Integer): Integer; virtual; abstract;
+                     Scrolling: Boolean): Integer; virtual;
+    function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual;
+    function EdgeDistY(const E: TEntity; Delta: Integer): Integer; virtual;
 
     { 0x00456B4C / 0x00456E0C. Real, not abstract. AgainstPlayer swaps the
       scan from the minor slots to slot 0 alone, which is how a moving solid
@@ -1358,6 +1366,34 @@ end;
 function TEntityWorld.RandomBelow(N: Integer): Integer;
 begin
   Result := DelphiRandom(N);
+end;
+
+function TEntityWorld.TileAtX(const E: TEntity; Delta: Integer;
+                             Scrolling: Boolean): Integer;
+begin
+  if Tiles = nil then
+    Exit(TILE_NONE);
+  Result := EntityTileCollideX(E, Layer, Tiles, SolidThreshold, Delta, 0,
+                               Scrolling);
+end;
+
+function TEntityWorld.TileAtY(const E: TEntity; Delta: Integer;
+                             Scrolling: Boolean): Integer;
+begin
+  if Tiles = nil then
+    Exit(TILE_NONE);
+  Result := EntityTileCollideY(E, Layer, Tiles, SolidThreshold, Delta, 0,
+                               Scrolling);
+end;
+
+function TEntityWorld.EdgeDistX(const E: TEntity; Delta: Integer): Integer;
+begin
+  Result := TileEdgeDistX(E, Layer, Delta);
+end;
+
+function TEntityWorld.EdgeDistY(const E: TEntity; Delta: Integer): Integer;
+begin
+  Result := TileEdgeDistY(E, Layer, Delta);
 end;
 
 function TEntityWorld.AxisX: Integer;

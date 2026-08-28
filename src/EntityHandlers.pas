@@ -24,6 +24,7 @@
       0x00457AB4  Entity_TakeProjectileHits
       0x0045A5D4  type 32  the invisible emitter
       0x0045A698  type 33  the explosion it spawns
+      0x0045A7BC  type 36  the falling item a kill drops
 
   And the dispatcher they hang off:
 
@@ -208,6 +209,25 @@ const
   HUD_LIFE_X0       = 20;     { pixels }
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
+
+  { --- Type 36, the falling item @ 0x0045A7BC ---------------------------
+    What Entity_MaybeDropItem drops. Gravity while airborne, then a snap onto
+    the tile edge it lands on - the pattern Entities.pas already quoted from
+    this function, and every line of it checks out.
+
+    Its two sprites are chosen by EF_FLAG1C, which is the field
+    Entity_MaybeDropItem writes its rarity roll into: the same flag that makes
+    Entity_TouchLife give a full refill instead of one life also picks which
+    of the two sprites the thing wears on the way down. Two entries, one
+    reader, and exactly two values written - flush three ways.
+
+    After landing the velocity keeps being added, but Entity_TileCollideY's
+    zero-delta guard is what settles it: once the snap leaves the velocity at
+    0 the query stops reporting a collision and the item sits still. }
+  DROP_SPRITE_COUNT = 2;
+  DROP_TABLE_ADDR   = $0046BE54;
+  DROP_TABLE_PTR    = $0046CE18;
+  DROP_SPRITES: array[0..DROP_SPRITE_COUNT - 1] of Integer = (100, 101);
 
   { --- Type 33, the explosion @ 0x0045A698 ------------------------------
     Six frames of sprite on a seven-tick cycle, and on its FIRST update it
@@ -398,6 +418,10 @@ procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
   which only variant 8 has. }
 procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
+
+{ 0x0045A7BC. The falling item. See DROP_SPRITES above. }
+procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
+                                          World: TEntityWorld);
 
 { 0x0045A698. The explosion. See BOOM_SPRITES above. }
 procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
@@ -967,6 +991,38 @@ begin
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
 end;
 
+procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
+                                          World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= DROP_SPRITE_COUNT) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := DROP_SPRITES[Frame];
+
+  if AGameState <> GS_PLAY then
+    Exit;
+
+  { Gravity only while still in the air. }
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_VEL_Y], GRAVITY);
+    if E.Raw[EF_VEL_Y] > TERMINAL_VELOCITY then
+      E.Raw[EF_VEL_Y] := TERMINAL_VELOCITY;
+  end;
+
+  { The collision query and the move happen either way, landed or not. }
+  if (World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold)
+     and (E.Raw[EF_VEL_Y] > 0) then
+  begin
+    E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    E.Raw[EF_STATE] := 1;
+  end;
+
+  Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+end;
+
 procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
                                         World: TEntityWorld);
 var
@@ -1243,7 +1299,8 @@ begin
       27: EntityUpdate_Type27(E^, AGameState);
       32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
       33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
-      { the other 71 arms are in HANDLER_ADDR, untranslated }
+      36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
+      { the other 70 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
