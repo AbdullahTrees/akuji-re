@@ -33,7 +33,8 @@ uses
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
-  Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner,
+  Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
+  SpritePool, Sprites,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -6427,6 +6428,209 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  --selftest-session <gamedir> : the pieces, connected.
+
+  Every other self-test checks one function against a fixture built for it.
+  None of them can catch two correct functions being wired together wrongly,
+  and until now nothing was wired at all - GmMain.pas did not reference
+  Entities, Player, Camera or EventRunner, so the entire translated game had
+  no caller.
+
+  This runs FRAMES. A real stage table, a real map, the real event table, and
+  the actual dispatcher; the only things stubbed are sound and sprites, and
+  both are legitimately absent rather than faked.
+
+  What it can show is that the parts fit: that a stage begins, that the player
+  exists and is affected by gravity and terrain, that events place entities as
+  the camera moves, and that a frame does not throw. What it cannot show is
+  that any of it matches akuji.exe - that still needs the differential
+  harness, and a frame is far past what the emulator can reach.
+  --------------------------------------------------------------------------- }
+
+function SelfTestSession(Log: TStrings): Integer;
+var
+  GameDir: string;
+  Stages: TStageTable;
+  Map: TTileMap;
+  Frames: TSpriteSet;
+  S: TGameSession;
+  GS, I, Bad, StartY, Fell, Moved, StartX: Integer;
+  Placed, LiveAfter: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  GameDir := ParamStr(2);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add('');
+
+  Stages := TStageTable.Create;
+  Map := TTileMap.Create;
+  S := nil;
+  try
+    if Stages.Load(GameDir) <= 0 then
+    begin
+      Log.Add('FAILED: no stage table');
+      Result := 1;
+      Exit;
+    end;
+    if not Map.Load(GameDir, Stages.Layer[1, 0]) then
+    begin
+      Log.Add('FAILED: could not load stage 1''s map');
+      Result := 1;
+      Exit;
+    end;
+
+    { The sprite frames are not decoration: an entity's extents are read off
+      its sprite every frame, so without them nothing has a size and nothing
+      collides. That is exactly how this test failed the first time it ran. }
+    Frames := TSpriteSet.Create;
+    Frames.LoadSet(GameDir, Stages.SpriteSet[1]);
+
+    S := TGameSession.Create(GameDir, Stages, Map);
+    S.SetFrames(Frames);
+
+    { --- a stage begins --------------------------------------------- }
+    InitNewGame(S.Player, 0);
+    ApplySessionFlags(S.Player, 0);
+    GS := GS_STAGE_BEGIN;
+    S.BeginStage(1, GS);
+
+    Log.Add(Format('stage 1: terrain %d, solid threshold %d, %d events, '
+      + 'map %dx%d tiles of %dx%d',
+      [S.World.TerrainId, S.World.SolidThreshold, S.Events.Count,
+       Map.MapWidth, Map.MapHeight, Map.TileWidth, Map.TileHeight]));
+
+    Want(GS = GS_PLAY, Format('BeginStage left the state at %d, want %d',
+                              [GS, GS_PLAY]));
+    Want(S.World.SolidThreshold > 0,
+         'the solid threshold is 0 - every tile would be walkable');
+    Want(S.Events.Count > 0, 'stage 1 loaded no events');
+    Want(S.Pool.Alive[0], 'the player is not in slot 0 after BeginStage');
+    Want(S.Pool.LiveCount = 1,
+         Format('BeginStage left %d entities, want just the player',
+                [S.Pool.LiveCount]));
+    Want(S.Layer.TileW = 32, 'the layer did not take the map''s tile size');
+
+    { The world's copy of the layer must be the session's, or every collision
+      query reads a stale origin. This is exactly the class of mistake that
+      only appears once things are connected. }
+    Want(S.World.Layer.TileW = S.Layer.TileW,
+         'the world''s layer is not the session''s');
+    Want(S.World.Layer.OriginY = S.Layer.OriginY,
+         'the world''s layer origin is stale');
+
+    { --- frames run ------------------------------------------------- }
+    StartY := S.Pool.PosY(0);
+    StartX := S.Pool.PosX(0);
+    Log.Add('');
+    { The first frames of a stage, kept because they are the whole story: the
+      player is placed in mid air, falls, and lands. Getting here took a
+      sprite pool - see SpritePool.pas - and the trace is what showed why. }
+    Log.Add('  frame state posY  velY  worldRow  tile');
+    for I := 1 to 120 do
+    begin
+      if I <= 5 then
+        Log.Add(Format('  %5d %5d %5d %5d %9d %5d',
+          [I, S.Pool.Field(0, EF_STATE),
+           PixelOf(S.Pool.Field(0, EF_POS_Y)),
+           S.Pool.Field(0, EF_VEL_Y),
+           (PixelOf(S.Layer.OriginY) + PixelOf(S.Pool.Field(0, EF_POS_Y)))
+             div 32,
+           Map.TileAtRaw(
+             (PixelOf(S.Layer.OriginX) + PixelOf(S.Pool.Field(0, EF_POS_X)))
+               div 32,
+             (PixelOf(S.Layer.OriginY) + PixelOf(S.Pool.Field(0, EF_POS_Y)))
+               div 32)]));
+      S.Frame(GS);
+    end;
+    Log.Add(Format('  extents %d x %d, sprite handle %d, frames %d',
+      [S.Pool.Field(0, EF_EXTENT_X), S.Pool.Field(0, EF_EXTENT_Y),
+       S.Pool.Field(0, EF_SPRITE), Frames.Count]));
+    Want(S.Pool.Field(0, EF_SPRITE) <> SPRITE_NONE,
+         'the player got no sprite, so it has no extents and cannot collide');
+    Want(S.Pool.Field(0, EF_EXTENT_X) > 0,
+         'the player has zero width - Entity_UpdateAll is not reading the '
+         + 'sprite');
+    Log.Add('');
+
+    Fell := S.Pool.PosY(0) - StartY;
+    Log.Add(Format('120 idle frames: player moved %d sub-pixels down, %d across',
+      [Fell, S.Pool.PosX(0) - StartX]));
+    Log.Add(Format('  live entities now %d, game state %d',
+      [S.Pool.LiveCount, GS]));
+
+    Want(S.Pool.Alive[0], 'the player stopped existing during 120 idle frames');
+    Want(Fell > 0,
+         'the player did not fall at all - gravity or the tile query is not '
+         + 'reaching the entity');
+    { And it must STOP falling: an entity that never lands means the collision
+      query is answering TILE_NONE, which is what a missing tile source looks
+      like. }
+    StartY := S.Pool.PosY(0);
+    for I := 1 to 120 do
+      S.Frame(GS);
+    Want(S.Pool.PosY(0) = StartY,
+         Format('the player is still falling after 240 frames (%d more '
+           + 'sub-pixels) - nothing is solid', [S.Pool.PosY(0) - StartY]));
+
+    { --- input reaches the controller -------------------------------- }
+    StartX := S.Pool.PosX(0);
+    S.Input.AxisX := 1;
+    for I := 1 to 60 do
+      S.Frame(GS);
+    S.Input.AxisX := 0;
+    Moved := S.Pool.PosX(0) - StartX;
+    Log.Add(Format('60 frames holding right: moved %d sub-pixels (%d px)',
+      [Moved, Moved div 32]));
+    Want(Moved > 0, 'holding right moved the player nowhere - input is not '
+         + 'reaching the controller');
+    { And it must move at the speed the controller's own constant predicts:
+      AxisX shl PLAYER_WALK_SHIFT is 32 sub-pixels, which is exactly one pixel
+      a frame. 60 frames, 60 pixels. Pinning the NUMBER rather than "it moved"
+      is what makes this a check on the wiring and not just on liveness. }
+    Want(Moved = 60 * (1 shl PLAYER_WALK_SHIFT),
+         Format('walking 60 frames moved %d sub-pixels, want %d - one pixel '
+           + 'a frame', [Moved, 60 * (1 shl PLAYER_WALK_SHIFT)]));
+
+    { --- the event table places entities ----------------------------- }
+    { Walk the camera over the whole map and count what gets placed. If the
+      spawn walk were not wired, or the camera tile were computed wrongly,
+      this would be zero while everything above still passed. }
+    Placed := 0;
+    for I := 0 to Map.MapWidth - 1 do
+    begin
+      S.SetCamera(I * 32, PixelOf(S.Layer.OriginY));
+      S.Frame(GS);
+      if S.Pool.LiveCount > Placed then
+        Placed := S.Pool.LiveCount;
+    end;
+    LiveAfter := S.Pool.LiveCount;
+    Log.Add(Format('camera swept across the map: at most %d entities live at '
+      + 'once, %d at the end', [Placed, LiveAfter]));
+    Want(Placed > 1,
+         'sweeping the camera placed nothing - the event spawn walk is not '
+         + 'connected, or the camera tile is wrong');
+  finally
+    S.Free;
+    Frames.Free;
+    Map.Free;
+    Stages.Free;
+  end;
+
+  Result := Bad;
+  Log.Add('');
+  if Result = 0 then
+    Log.Add('OK - a stage begins, frames run, and the parts reach each other')
+  else
+    Log.Add('FAILED');
+end;
+
+{ ---------------------------------------------------------------------------
   --emudiff <emu-output> : diff the reconstruction against the ORIGINAL.
 
   This is the verification tier the project did not have. Everything else here
@@ -6736,6 +6940,8 @@ begin
         Result := SelfTestEntities(Log)
       else if ParamStr(1) = '--selftest-runner' then
         Result := SelfTestRunner(Log)
+      else if ParamStr(1) = '--selftest-session' then
+        Result := SelfTestSession(Log)
       else if ParamStr(1) = '--emudiff' then
         Result := EmuDiff(Log)
       else
@@ -6765,6 +6971,7 @@ begin
      (ParamStr(1) = '--selftest-trace') or
      (ParamStr(1) = '--selftest-entities') or
      (ParamStr(1) = '--selftest-runner') or
+     (ParamStr(1) = '--selftest-session') or
      (ParamStr(1) = '--emudiff') then
   begin
     ExitCode := RunSelfTest;

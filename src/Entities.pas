@@ -784,6 +784,14 @@ type
     thing and one fewer method to stub. }
   TSpriteSink = class
   public
+    { Entity_Spawn allocates one of these per entity whose type table column 0
+      is not -1, and Entity_Destroy releases it. The defaults refuse, so a
+      test double that models only the seven drawing calls behaves exactly as
+      it did before this existed: no sprite, and extents left where the test
+      put them. }
+    function AllocSprite(AnimId: Integer): Integer; virtual;
+    procedure ReleaseSprite(Handle: Integer); virtual;
+
     procedure SetVisible(Handle: Integer; Visible: Boolean); virtual; abstract;
     function  GetVisible(Handle: Integer): Boolean; virtual; abstract;
     procedure SetAnim(Handle, AnimId: Integer); virtual; abstract;
@@ -896,6 +904,11 @@ type
     FSlots: array[0..ENTITY_COUNT - 1] of TEntity;
     function GetAlive(Index: Integer): Boolean;
   public
+    { Where Spawn takes an entity's sprite from. Nil means no sprite pool, in
+      which case every entity spawns without one - which is what every
+      existing test does, and it is why extents have to be set by hand there. }
+    Sprites: TSpriteSink;
+
     procedure Clear;
 
     { Entity_Spawn @ 0x004610C4. X and Y are logical pixels; the bias is
@@ -1220,6 +1233,15 @@ implementation
   bias subtraction, where an entity position gets the biased form. The bias
   cancels in the subtraction that follows it, so this is not a discrepancy -
   but it is why this is written out rather than reusing PixelOf. }
+function TSpriteSink.AllocSprite(AnimId: Integer): Integer;
+begin
+  Result := SPRITE_NONE;
+end;
+
+procedure TSpriteSink.ReleaseSprite(Handle: Integer);
+begin
+end;
+
 function OriginPixel(Raw: Integer): Integer;
 begin
   if Raw < 0 then
@@ -1703,6 +1725,11 @@ begin
     begin
       Sprites.SetVisible(E.Raw[EF_SPRITE], False);
       Sprites.SetDepth(E.Raw[EF_SPRITE], 0);
+      { The original stops here. Those two writes ARE its release - there is no
+        free call - so allocation must be reusing slots in exactly that state.
+        Saying so explicitly beats inferring a scan rule from two writes; the
+        observable behaviour is the same. }
+      Sprites.ReleaseSprite(E.Raw[EF_SPRITE]);
     end;
     E.Raw[EF_SPRITE] := SPRITE_NONE;
   end
@@ -2038,11 +2065,28 @@ begin
   for I := 0 to 9 do
     E^.Raw[EF_TYPEF_20 + I] := T.Raw[8 + I];
 
-  { The original allocates a sprite-pool object here unless the type's first
-    column is -1, and FAILS THE WHOLE SPAWN if the 256-object pool is full,
-    clearing the alive flag again. That pool belongs to the DirectX component
-    layer and is not modelled yet, so the allocation is skipped and the slot is
-    kept - a divergence that matters only once sprites are drawn from it. }
+  { The sprite. Column 0 is the entity's initial anim id, and -1 means the
+    type has no sprite at all - three of the eighty-one.
+
+    This used to be skipped, recorded as "a divergence that matters only once
+    sprites are drawn from it". It matters immediately: an entity's EXTENTS
+    are read off its sprite every frame by Entity_UpdateAll and every
+    collision box is built from them, so an entity with no sprite has no size
+    and collides with nothing. See SpritePool.pas.
+
+    A full pool FAILS THE SPAWN, alive flag and all. That is the original's
+    behaviour and it is why the pool size is a real limit rather than a
+    guard. }
+  if (Sprites <> nil) and (T.Raw[0] <> SPRITE_NONE) then
+  begin
+    I := Sprites.AllocSprite(T.Raw[0]);
+    if I = SPRITE_NONE then
+    begin
+      E^.Raw[EF_ALIVE] := 0;
+      Exit(SLOT_NONE);
+    end;
+    E^.Raw[EF_SPRITE] := I;
+  end;
 
   Result := Slot;
 end;
