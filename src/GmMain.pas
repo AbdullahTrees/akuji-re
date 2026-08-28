@@ -53,6 +53,10 @@ type
       directly - and closing it is what advances the script, exactly as
       FUN_004568D0 does. Without one, reading a sign locked the game. }
     FDialogue: TDialogueBox;
+    { bmp\power.bmp, the panel's backdrop. Loaded once - PowerUp_Show builds
+      the surface every time and frees it when the panel closes, which is a
+      lifetime detail, not a behaviour. }
+    FPowerBmp: TBitmap;
     FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
@@ -157,6 +161,7 @@ begin
       that is a truthful stub rather than a skipped step. }
     FStartHost := TStartHost.Create;
     FDialogue := TDialogueBox.Create;
+    FPowerBmp := FArchive.LoadBitmapByName('power.bmp');
     FSession.EventHost := FDialogue;
 
     Sheet := FSurfaces[0];
@@ -289,6 +294,17 @@ begin
               FStages.Tileset[Settings.CurrentStage, 0],
               PixelOf(FSession.Layer.OriginX), PixelOf(FSession.Layer.OriginY),
               SCREEN_W, SCREEN_H);
+  { The panel covers everything, so it replaces the scene rather than sitting
+    on it - PowerUp_Show blits a full 320x240 picture before Overlay_Update
+    draws its line. }
+  if FDialogue.Active and (FDialogue.Mode = omPanel) then
+  begin
+    if FPowerBmp <> nil then
+      DDDD1.Canvas.Draw(0, 0, FPowerBmp);
+    FDialogue.Draw(DDDD1.Canvas, FFont, 0);
+    Exit;
+  end;
+
   FSession.Sprites.DrawAll(DDDD1.Canvas, FSurfaces);
   DrawHud;
   FDialogue.Draw(DDDD1.Canvas, FFont,
@@ -470,7 +486,8 @@ begin
         LoadStage(Settings.CurrentStage);
         FSession.SetFrames(FSprites);
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
-        FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player);
+        FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
+                       FSession.Pool);
       end;
     GS_PLAYER_INIT:
       begin
@@ -495,9 +512,19 @@ begin
           and no game logic steps. That is the original's shape: sub-op 3
           waits, and FUN_004568D0 is what calls EventScript_AdvanceStep. }
         if FDialogue.Active then
-          FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
-                           FSession.Input.AxisY < 0, FSession.Input.AxisY > 0,
-                           GameStateValue)
+        begin
+          { The three-line box is dismissed by the player; the full-screen
+            panel is dismissed by its own fanfare finishing, which is what
+            Overlay_Update asks the music player. One call, two sources of
+            "done", because the original has one function with two modes. }
+          if FDialogue.Mode = omPanel then
+            FDialogue.Update(not KbgmPlayer1.IsPlaying, False, False,
+                             GameStateValue)
+          else
+            FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
+                             FSession.Input.AxisY < 0, FSession.Input.AxisY > 0,
+                             GameStateValue);
+        end
         else
           FSession.Frame(GameStateValue);
         DrawScene;
@@ -609,6 +636,7 @@ begin
   { FDialogue is the session's EventHost, and the session does not own it. }
   FSession.Free;
   FDialogue.Free;
+  FPowerBmp.Free;
   FStartHost.Free;
   FMap.Free;
   FStages.Free;

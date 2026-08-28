@@ -241,10 +241,37 @@ const
   DEATH_SOUL_STEP   = $14;
 
   { --- Ability flags, in Head. Zeroed by Game_StartOrLoad on a new game. --- }
+  { Head[4..7]. PowerUp_Show @ 0x00456698 is what sets them, one per pickup
+    variant, and it also names them for the screen it shows - the table at
+    0x00468EF4, reached through the pointer at 0x0046D1EC:
+
+        variant 4  'Dash    '     -> Head[4]
+        variant 5  'Jump++      ' -> Head[5]
+        variant 6  'Cloud   '     -> Head[6]
+        variant 7  'Bat   '       -> Head[7]
+
+    CAUTION about the names below. WALLKICK, AIRDASH and GLIDE were taken from
+    what Player.pas does with each flag, not from the game's own words, and
+    the game's words do not obviously agree - 'Jump++' reads like a second
+    jump rather than a wall kick, and 'Bat' is a form rather than a glide. The
+    INDICES are not in doubt; the labels are, and renaming them would be a
+    claim about the controller that has not been made yet. Left as they are
+    with the discrepancy written down. }
   ABILITY_DASH      = 4;
   ABILITY_WALLKICK  = 5;
   ABILITY_AIRDASH   = 6;
   ABILITY_GLIDE     = 7;
+
+  POWERUP_JUMP_STRENGTH = $84;   { variant 3, up from DEFAULT_FIELD11D0 }
+  POWERUP_COUNT = 8;
+  POWERUP_NAMES: array[0..POWERUP_COUNT - 1] of string = (
+    'Fire    ', 'Fire+     ', 'Charge  ', 'Jump+     ',
+    'Dash    ', 'Jump++      ', 'Cloud   ', 'Bat   ');
+  { The two literals the name is concatenated between, at 0x004568B0 and
+    0x004568BC. The padding above is what puts the gap in the finished
+    sentence. }
+  POWERUP_PREFIX = '  ';
+  POWERUP_SUFFIX = ' was recovered! ';
 
   { --- Sprite tables, 0x0046BB9C..0x0046BC2C, right-facing then left -------
 
@@ -385,6 +412,31 @@ function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
   table. Reachable only if TargetIndex ever passes 11, which needs the counter
   to have passed 999 first. }
 function ManaTarget(Index: Integer): Integer;
+
+{ 0x00456698. The ability pickup - what sub-op 10 reaches, and what the
+  full-screen "... was recovered!" panel announces.
+
+  It grants by the EVENT ENTITY's variant, the field ParamA's 'A' letter sets.
+  Three of the eight are the weapon, one is the jump, four are Head flags:
+
+      0  Fire     Weapon := 1, but only if it is still 0
+      1  Fire+    Weapon := 2, unless it is already 3
+      2  Charge   Weapon := 3
+      3  Jump+    JumpStrength := 0x84, up from the starting 0x68
+      4..7        Head[variant] := 1
+
+  The two guards on the weapon are the whole reason it is not a plain
+  assignment: picking up Fire after Charge must not demote you. Reproduced as
+  written rather than tidied into a max(), because they are not the same
+  function - variant 1 refuses only the value 3, so Fire+ over Fire+ does
+  re-apply.
+
+  Presentation - the panel, the fanfare, destroying the entity - is the
+  caller's. This is only the state change. }
+procedure PowerUpGrant(var P: TPlayerState; Variant: Integer);
+
+{ The pickup's display name, from the table at 0x00468EF4. }
+function PowerUpName(Variant: Integer): string;
 
 type
   TStartMode = (smNewGame, smContinue);
@@ -541,6 +593,29 @@ begin
   if (Index < 0) or (Index >= MANA_TARGET_COUNT) then
     Exit(MaxInt);
   Result := MANA_TARGETS[Index];
+end;
+
+function PowerUpName(Variant: Integer): string;
+begin
+  if (Variant < 0) or (Variant >= POWERUP_COUNT) then
+    Exit('');
+  Result := POWERUP_NAMES[Variant];
+end;
+
+procedure PowerUpGrant(var P: TPlayerState; Variant: Integer);
+begin
+  { The original's chain of independent ifs, not a case - two of them carry
+    conditions a case would invite tidying away. }
+  if (Variant = 0) and (P.Weapon = 0) then
+    P.Weapon := 1;
+  if (Variant = 1) and (P.Weapon <> 3) then
+    P.Weapon := 2;
+  if Variant = 2 then
+    P.Weapon := 3;
+  if Variant = 3 then
+    P.JumpStrength := POWERUP_JUMP_STRENGTH;
+  if (Variant >= ABILITY_DASH) and (Variant <= ABILITY_GLIDE) then
+    P.Head[Variant] := 1;
 end;
 
 function TStartHost.Opening: Boolean;

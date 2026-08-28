@@ -44,7 +44,7 @@ interface
 
 uses
   Classes, SysUtils, Graphics, GameFont, PlayerState, EventRunner, EventScripts,
-  GameState;
+  GameState, Entities;
 
 const
   { FUN_004568D0's numbers. The box flips to the lower half of the screen when
@@ -60,12 +60,35 @@ const
   BOX_H          = 72;
   BOX_LINES      = 3;
 
+  { Overlay_Update @ 0x004568D0 has two modes and this is the other one: the
+    full-screen power-up panel. It blits a 320x240 picture over everything and
+    draws ONE line, centred, near the bottom. The 6 is the original's own
+    character step for this line - `(0x140 - len * 6) >> 1` - which is not the
+    8 the tile font advances by, so the panel's text is a different metric and
+    almost certainly a different sheet. Recorded, not yet reproduced. }
+  PANEL_TEXT_Y  = $D8;   { 216 }
+  PANEL_CHAR_W  = 6;
+  PANEL_W       = $140;
+
 type
-  { The message box as the interpreter's collaborator. It owns no drawing
+  { What the overlay needs to know about the world it interrupts. }
+  TOverlayMode = (omBox, omPanel);
+
+  { The message overlay as the interpreter's collaborator. It owns no drawing
     surface - the form hands it a canvas - and it advances the script itself,
-    which is what the original does. }
+    which is what the original does.
+
+    ONE object with two modes, because that is what Overlay_Update is: the
+    same per-frame function, the same active flag, the same three strings, and
+    a mode selector at 0x0046CDA0 deciding whether to draw a three-line box or
+    a full-screen panel. Splitting them into two classes would lose the fact
+    that only one can be up at a time - which is exactly what sub-op 10's arm
+    guards on. }
   TDialogueBox = class(TEventHost)
   private
+    FMode: TOverlayMode;
+    FPanelText: string;
+    FPool: TEntityPool;
     FActive: Boolean;
     FLines: array[0..BOX_LINES - 1] of string;
     FRest: string;            { pages still to come, after a \k }
@@ -78,10 +101,16 @@ type
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
-                   APlayer: PPlayerState);
+                   APlayer: PPlayerState; APool: TEntityPool);
 
     { TEventHost. Sub-op 3 lands here. }
     procedure ShowLine(Index: Integer); override;
+
+    { TEventHost. Sub-op 10 lands here - the ability pickup. PowerUp_Show
+      grants by the EVENT'S ENTITY's variant, so the overlay has to reach the
+      pool to find it, exactly as the original reaches p_Entities through the
+      event table. }
+    procedure SubMode; override;
 
     { One frame. Confirm is the edge, not the level. Returns True while the
       box is up, which is the caller's cue to step no game logic. }
@@ -90,6 +119,11 @@ type
     procedure Draw(Dest: TCanvas; Font: TGameFont; PlayerScreenY: Integer);
 
     property Active: Boolean read FActive;
+    property Mode: TOverlayMode read FMode;
+    { The panel stays up for as long as its fanfare plays - Overlay_Update
+      asks the music player and closes when it stops. The form owns the
+      player, so it answers. }
+    property PanelText: string read FPanelText;
   end;
 
 { Splits one page off the front of a message: everything up to \k or \e.
@@ -174,11 +208,41 @@ begin
 end;
 
 procedure TDialogueBox.Bind(AScript: TEventScript; ARunner: TEventRunner;
-                            APlayer: PPlayerState);
+                            APlayer: PPlayerState; APool: TEntityPool);
 begin
   FScript := AScript;
   FRunner := ARunner;
   FPlayer := APlayer;
+  FPool := APool;
+end;
+
+procedure TDialogueBox.SubMode;
+var
+  Slot, Variant: Integer;
+begin
+  { Sub-op 10's arm at 0x0045597C runs PowerUp_Show only when the overlay is
+    not already up. }
+  if FActive then
+    Exit;
+  if (FScript = nil) or (FPool = nil) or (FPlayer = nil) or (FRunner = nil) then
+    Exit;
+
+  Slot := SLOT_NONE;
+  if (FRunner.EventId >= 0) and (FRunner.EventId < FScript.Count) then
+    Slot := FScript[FRunner.EventId].EntitySlot;
+  if (Slot = SLOT_NONE) or (not FPool.Alive[Slot]) then
+    Exit;
+
+  Variant := FPool.Field(Slot, EF_VARIANT);
+  PowerUpGrant(FPlayer^, Variant);
+
+  FMode := omPanel;
+  FActive := True;
+  FPanelText := POWERUP_PREFIX + PowerUpName(Variant) + POWERUP_SUFFIX;
+
+  { PowerUp_Show destroys the entity it granted from. }
+  FPool.Kill(Slot);
+  FScript.SetActive(FRunner.EventId, False);
 end;
 
 procedure TDialogueBox.ShowLine(Index: Integer);
@@ -191,6 +255,7 @@ begin
     Exit;
   end;
   FActive := True;
+  FMode := omBox;
   TakePage(FScript.Lines[Index]);
 end;
 
@@ -200,6 +265,21 @@ begin
   Result := FActive;
   if not FActive then
     Exit;
+
+  { The panel is not dismissed by the player. Overlay_Update keeps it while
+    the fanfare plays and closes it when the music stops, so the caller passes
+    that in as Confirm - see the property comment. }
+  if FMode = omPanel then
+  begin
+    if not Confirm then
+      Exit;
+    FActive := False;
+    Result := False;
+    FPanelText := '';
+    if (FRunner <> nil) and (FPlayer <> nil) then
+      FRunner.AdvanceStep(FPlayer^, AGameState);
+    Exit;
+  end;
 
   if FPrompt then
   begin
@@ -239,7 +319,18 @@ begin
   if not FActive then
     Exit;
 
-  { Out of the player's way, as FUN_004568D0 does it. }
+  if FMode = omPanel then
+  begin
+    { The original blits bmp\power.bmp over the whole screen first. The form
+      has the surfaces; this draws only the line, centred by the original's
+      own 6-pixel step. }
+    if Font <> nil then
+      Font.TextOut(Dest, (PANEL_W - Length(FPanelText) * PANEL_CHAR_W) div 2,
+                   PANEL_TEXT_Y, FPanelText, 0);
+    Exit;
+  end;
+
+  { Out of the player's way, as Overlay_Update does it. }
   if PlayerScreenY < BOX_PLAYER_SPLIT then
     BoxY := BOX_LOW_Y
   else

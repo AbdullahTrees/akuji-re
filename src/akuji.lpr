@@ -6480,6 +6480,7 @@ var
   S: TEventScript;
   Page, Rest, Src: string;
   Prompt: Boolean;
+  P2: TPlayerState;
   I, J, Bad, Lines, Prompts, Pages, MaxPages, N: Integer;
 
   procedure Want(Cond: Boolean; const What: string);
@@ -6492,6 +6493,55 @@ begin
   Lines := 0; Prompts := 0; Pages := 0; MaxPages := 0;
   Log.Add('');
   Log.Add('--- the message box ---');
+
+  { --- PowerUp_Show's grant table, from 0x00456698 ------------------- }
+  { The weapon's two guards are the only conditional part, and they are the
+    part a tidy rewrite would lose: picking up Fire after Charge must not
+    demote you. Each is checked in both directions. }
+  begin
+    FillChar(P2, SizeOf(P2), 0);
+    PowerUpGrant(P2, 0);
+    Want(P2.Weapon = 1, 'variant 0 did not give weapon 1 from nothing');
+    PowerUpGrant(P2, 0);
+    Want(P2.Weapon = 1, 'variant 0 re-applied over an existing weapon');
+    PowerUpGrant(P2, 1);
+    Want(P2.Weapon = 2, 'variant 1 did not raise the weapon to 2');
+    PowerUpGrant(P2, 2);
+    Want(P2.Weapon = 3, 'variant 2 did not give weapon 3');
+    PowerUpGrant(P2, 0);
+    Want(P2.Weapon = 3, 'Fire after Charge demoted the weapon');
+    PowerUpGrant(P2, 1);
+    Want(P2.Weapon = 3, 'Fire+ after Charge demoted the weapon');
+
+    { ...but variant 1 refuses only the value 3, so Fire+ over Fire+ DOES
+      re-apply. Not the same function as max(), and pinned so it stays. }
+    FillChar(P2, SizeOf(P2), 0);
+    P2.Weapon := 2;
+    PowerUpGrant(P2, 1);
+    Want(P2.Weapon = 2, 'Fire+ over Fire+ did not stay at 2');
+
+    FillChar(P2, SizeOf(P2), 0);
+    P2.JumpStrength := DEFAULT_FIELD11D0;
+    PowerUpGrant(P2, 3);
+    Want(P2.JumpStrength = $84,
+         Format('variant 3 left the jump at %d, want $84',
+                [P2.JumpStrength]));
+
+    for I := ABILITY_DASH to ABILITY_GLIDE do
+    begin
+      FillChar(P2, SizeOf(P2), 0);
+      PowerUpGrant(P2, I);
+      Want(P2.Head[I] = 1,
+           Format('variant %d did not set Head[%d]', [I, I]));
+      Want(P2.Weapon = 0,
+           Format('variant %d touched the weapon', [I]));
+    end;
+
+    { Stage 1's pickup is 0024-A-0004, and 4 is the dash. }
+    Want(PowerUpName(4) = 'Dash    ',
+         'variant 4 is not the dash: ' + PowerUpName(4));
+    Want(PowerUpName(9) = '', 'a variant past the table returned a name');
+  end;
 
   { The four codes, on text taken straight out of tk002. }
   Page := SplitPage('Will you save the game? \w', Rest, Prompt);
