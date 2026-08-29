@@ -8393,6 +8393,10 @@ begin
         HW := TCountingWorld.Create;
         try
           HW.Pool := HPool;
+          { The same value the case placed at 0x00484EF4. Left at 0 our
+            side treats every tile as solid, because the test is
+            `tile >= threshold` and an absent tilemap reads 0. }
+          HW.SolidThreshold := Key('f.solid', 0);
           FillChar(HP, SizeOf(HP), 0);
           FillChar(HL, SizeOf(HL), 0);
           FillChar(HInp, SizeOf(HInp), 0);

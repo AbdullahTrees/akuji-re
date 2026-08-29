@@ -113,6 +113,20 @@ GLOBALS_HI = 0x004A0000
 GAMESTATE_PTR = 0x0046D06C      # the pointer cell
 GAMESTATE_AT = 0x60002000       # scratch: where we point it
 
+# THE SOLID-TILE THRESHOLD, and the same class of problem.
+#
+# Terrain_Configure sets it per terrain; the handlers reach it as
+# *PTR_DAT_0046cc44, and that pointer - which IS in the file - resolves to
+# 0x00484EF4, exactly where Entities.pas already records it.
+#
+# Left unplaced it reads 0, and "tile >= 0" is true of every tile, so an
+# unmapped tilemap looks SOLID EVERYWHERE. Type 37 was landing and going to
+# state 2 on our side while the original stayed airborne at state 1. Terrain 0's
+# value is 0x32, so with no tilemap the tiles read 0, nothing is solid, and both
+# sides agree about that.
+SOLID_THRESHOLD_AT = 0x00484EF4
+SOLID_THRESHOLD = 0x32
+
 
 def ints(vals):
     return ''.join('%08x' % (v & 0xFFFFFFFF) for v in vals)
@@ -390,6 +404,7 @@ def cases_handler_probe_live():
             continue
         for st in (0, 1, 2, 3):
             gs = 60         # GS_PLAY, which is when entities actually run
+            solid = SOLID_THRESHOLD
             # Types whose sprite table is shorter than the sweep's range, so
             # an out-of-range state or variant makes the original run off the
             # end of it. DIV-011: we clamp, it does not. Tagged so the case
@@ -418,12 +433,14 @@ def cases_handler_probe_live():
             })
             out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=%d %s %s '
                        'mem=0x%X:%s %s mem=0x%X:%s mem=0x%X:%s '
-                       'f.probe=%d f.gamestate=%d f.seed=%d%s'
+                       'mem=0x%X:%s '
+                       'f.probe=%d f.gamestate=%d f.seed=%d f.solid=%d%s'
                        % (typ, st, addr, ENTITY_AT, gs, ent, get,
                           RANDOM_SEED_ADDR, le([12345]), layer_mem(),
                           GAMESTATE_PTR, le([GAMESTATE_AT]),
                           GAMESTATE_AT, le([gs]),
-                          typ, gs, 12345, div))
+                          SOLID_THRESHOLD_AT, le([solid]),
+                          typ, gs, 12345, solid, div))
     return out
 
 
