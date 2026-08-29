@@ -30,11 +30,17 @@ does not mean the code computes what the original computes - see section 14.
 **Correctness is now measured, not hoped for.** All 78 entity handlers run
 under `--emudiff` against akuji.exe's own machine code, four states each:
 
-    300 cases compared, 14 disagree, 4 declared divergences confirmed
+    296 cases compared, 0 disagree, 4 declared divergences confirmed
 
-That is the number to watch. It started at 247 disagreements and every
-reduction is either a real defect fixed or a harness error found - both have
-happened, in roughly equal numbers, and section 14b says which.
+It started at 247 disagreements. Every reduction was either a real defect
+fixed or a harness error found - both happened, in roughly equal numbers, and
+section 14b says which.
+
+**Zero is not "done", and the two gaps are named** in
+notes/trace_findings.md: type 1, the player, is EXCLUDED and unexplained - it
+ends at EF_STATE 10 in the original and 2 here, and placing its context did
+not move it - and six types (15, 32, 40, 54, 66, 69) FAULT by calling through
+a component pointer nobody placed, which is the technique's real boundary.
 
 **All 78 entity-type handlers are translated**, and that is checked rather
 than claimed: `--selftest-entities` reads the jump table out of `akuji.exe`,

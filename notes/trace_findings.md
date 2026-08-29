@@ -92,3 +92,47 @@ handler.
 The session never reached the ending, so `ScreenPhase` 1 — the phase
 `Ending.pas` records as a hole nothing leaves — is still unobserved. It needs a
 run that finishes the game, or one that reaches the ending some other way.
+
+## What the handler sweep still does not cover
+
+`--emudiff handler_live` runs every entity handler against akuji.exe's own
+machine code, four states each:
+
+    296 cases compared, 0 disagree, 4 declared divergences confirmed
+
+Two gaps, both named rather than papered over.
+
+**Type 1, the player, is excluded and unexplained.** It ends at `EF_STATE` 10
+in the original and 2 here, from all four starting states. `Player_Update`
+assigns 10 nowhere in its body, and the original does not zero `POS_X`/`POS_Y`,
+so it never took the case-10 arm either — the 10 is assigned after the switch by
+something not yet identified.
+
+Placing the context did not explain it. Both pointer cells are known now, read
+straight off the prologue:
+
+    mov ebp, DWORD PTR ds:0x46cc58     ; p_InputState
+    mov eax, ds:0x46cff0               ; p_PlayerState
+    inc DWORD PTR [eax+0x11c0]
+
+and both are placed, zeroed, for every case — they matter beyond type 1 because
+several handlers index a difficulty table through `p_PlayerState + 0x11E0`.
+Type 1's answer did not move.
+
+It is excluded rather than left failing, because a sweep that always fails is
+one you stop reading. The controller has `--selftest-trace`; what the player
+actually needs is a differential set of its own that drives real input against a
+real map instead of a zeroed world.
+
+**Six types fault, and this is the technique's real boundary.** Types 15, 32,
+40, 54, 66 and 69 all die the same way:
+
+    Instruction decode failed (invalid memory), PC=00085848
+
+That PC is nowhere in the image, so it is a call THROUGH a pointer nobody
+placed — the sprite engine or another component entry reached via a global or a
+vtable slot. This is the honest limit the harness has always claimed: the
+emulator models the instruction set, not the process. Placing those pointers
+would mean emulating the component layer, which is the layer this project
+replaces wholesale.
+

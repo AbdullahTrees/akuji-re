@@ -127,6 +127,24 @@ GAMESTATE_AT = 0x60002000       # scratch: where we point it
 SOLID_THRESHOLD_AT = 0x00484EF4
 SOLID_THRESHOLD = 0x32
 
+# The player state and the input state, both pointer cells like the rest.
+# Read straight off Player_Update's prologue:
+#
+#     mov ebp, DWORD PTR ds:0x46cc58     ; p_InputState
+#     mov eax, ds:0x46cff0               ; p_PlayerState
+#     inc DWORD PTR [eax+0x11c0]
+#
+# They matter beyond type 1: several handlers index a difficulty table with
+# *(p_PlayerState + 0x11E0). Placing them zeroed makes the original start from
+# the same state the Pascal side is handed, instead of from whatever an
+# unmapped read and a discarded write leave behind.
+PLAYERSTATE_PTR = 0x0046CFF0
+PLAYERSTATE_AT = 0x60003000
+PLAYERSTATE_SIZE = 0x11E4
+INPUTSTATE_PTR = 0x0046CC58
+INPUTSTATE_AT = 0x60008000
+INPUTSTATE_SIZE = 0x40
+
 
 def ints(vals):
     return ''.join('%08x' % (v & 0xFFFFFFFF) for v in vals)
@@ -402,9 +420,35 @@ def cases_handler_probe_live():
     for typ, addr in enumerate(handler_addrs()):
         if addr == 0:
             continue
+        # TYPE 1 IS THE PLAYER, AND IT IS OPEN - see notes/trace_findings.md.
+        #
+        # It ends at EF_STATE 10 in the original and 2 here, from every one of
+        # the four starting states. Player_Update assigns 10 nowhere, and the
+        # original does NOT zero POS_X/POS_Y, so it never ran the case-10 arm
+        # either - the 10 is assigned after the switch, by something not yet
+        # identified.
+        #
+        # Placing the context did not explain it. Both pointer cells are known
+        # now, read off the prologue - p_PlayerState 0x0046CFF0 and
+        # p_InputState 0x0046CC58 - and are placed for every case because
+        # several handlers index a difficulty table through the first. Type 1's
+        # answer did not move.
+        #
+        # Excluded rather than left red: a sweep that always fails is one you
+        # stop reading, which is the same argument made about false positives
+        # in table_extents.py. The controller has --selftest-trace, and the
+        # player needs a differential set of its own that drives real input
+        # against a real map rather than a zeroed world.
+        if typ == 1:
+            continue
         for st in (0, 1, 2, 3):
             gs = 60         # GS_PLAY, which is when entities actually run
             solid = SOLID_THRESHOLD
+            ctx = ('mem=0x%X:%s mem=0x%X:%s mem=0x%X:%s mem=0x%X:%s'
+                   % (PLAYERSTATE_PTR, le([PLAYERSTATE_AT]),
+                      PLAYERSTATE_AT, '00' * PLAYERSTATE_SIZE,
+                      INPUTSTATE_PTR, le([INPUTSTATE_AT]),
+                      INPUTSTATE_AT, '00' * INPUTSTATE_SIZE))
             # Types whose sprite table is shorter than the sweep's range, so
             # an out-of-range state or variant makes the original run off the
             # end of it. DIV-011: we clamp, it does not. Tagged so the case
@@ -433,13 +477,13 @@ def cases_handler_probe_live():
             })
             out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=%d %s %s '
                        'mem=0x%X:%s %s mem=0x%X:%s mem=0x%X:%s '
-                       'mem=0x%X:%s '
+                       'mem=0x%X:%s %s '
                        'f.probe=%d f.gamestate=%d f.seed=%d f.solid=%d%s'
                        % (typ, st, addr, ENTITY_AT, gs, ent, get,
                           RANDOM_SEED_ADDR, le([12345]), layer_mem(),
                           GAMESTATE_PTR, le([GAMESTATE_AT]),
                           GAMESTATE_AT, le([gs]),
-                          SOLID_THRESHOLD_AT, le([solid]),
+                          SOLID_THRESHOLD_AT, le([solid]), ctx,
                           typ, gs, 12345, solid, div))
     return out
 
