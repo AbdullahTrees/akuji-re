@@ -96,6 +96,8 @@
       0x0045EFC8  type 72  a faller, a flyer, and the flyer's trail
       0x0045F218  type 73  a fourth boss, driven by THREE different children
       0x0045F498  type 74  its charge-up and the fan that charge-up fires
+      0x0045F668  type 75  the door that lets type 73 out of state 3
+      0x0045F744  type 76  a sweeper that turns a full circle by steps
 
   And the dispatcher they hang off:
 
@@ -1979,6 +1981,52 @@ const
   T74_SHOT_VARIANT = 1;
   T74_OWNER_STATE = 6;      { what it writes into its parent before it goes }
 
+  { --- Types 75 and 76 --------------------------------------------------
+    TYPE 75 is the child type 73 waits on, and it is the clearest example of
+    the parent-child idiom in the game: eight frames, then it writes a state
+    into its owner and destroys itself. Nothing else.
+
+    Its two states read the SAME eight-int table in opposite directions -
+    state 0 forwards, state 1 as `table[7 - frame]` - and that is the whole
+    difference between opening and closing. On finishing, state 0 plays a
+    sound and sets its owner to 4; state 1 is silent and sets its owner to 1.
+    Type 73 spawns it in state 0, so the closing half belongs to something
+    else.
+
+    It also dies with its parent: the first thing it does after the dying
+    check is read the OWNER's EF_HP, and if that is zero it destroys itself.
+    No other child does this - types 35, 39 and 74 outlive a dead parent.
+
+    TYPE 76 sweeps. Its heading advances one step per reload, and its
+    velocity is DirVelX of that heading times a difficulty speed, so over a
+    full 64-step turn it travels right, slows, reverses, and comes back - the
+    heading-as-oscillator idiom again, but here with a RELOAD between steps
+    rather than one step a frame, so the sweep is slow.
+
+    Its lap sound fires when the new heading equals 63, not when it wraps to
+    0. Type 66's satellite plays the same sound on the wrap itself. One step
+    apart, in two handlers, with the same sound id. Recorded as found. }
+  T75_FRAMES = 8;  T75_TICKS = 4;
+  T75_TABLE_ADDR = $0046C670;
+  T75_SPRITES: array[0..T75_FRAMES - 1] of Integer =
+    (504, 505, 506, 507, 508, 509, 510, 511);
+  T75_OPENING = 0;          { reads the table forwards ... }
+  T75_CLOSING = 1;          { ... and this one backwards }
+  T75_OWNER_AFTER_OPEN = 4;
+  T75_OWNER_AFTER_CLOSE = 1;
+  T75_SND_OPEN = $18;
+
+  T76_FRAMES = 2;  T76_TICKS = 2;
+  T76_TABLE_ADDR = $0046C690;
+  T76_SPRITES: array[0..T76_FRAMES - 1] of Integer = (422, 423);
+  T76_PERIOD_ADDR = $0046C698;
+  T76_SPEED_ADDR  = $0046C6A4;
+  T76_PERIOD: array[0..2] of Integer = (4, 2, 2);   { frames between steps }
+  T76_SPEED:  array[0..2] of Integer = (1, 2, 2);
+  T76_NUDGE = $200;         { 16 px right, once }
+  T76_LAP_AT = $3F;         { the step BEFORE the wrap, not the wrap }
+  T76_SND_LAP = $2E;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2326,6 +2374,16 @@ procedure EntityUpdate_Type73(var E: TEntity; AGameState: Integer;
 { 0x0045F498. Type 73's charge-up, and the fan of shots it throws. The
   charge-up is what writes state 6 back into its parent. }
 procedure EntityUpdate_Type74(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045F668. Eight frames, then it writes a state into its owner and goes.
+  The only child that dies when its parent's health reaches zero. }
+procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045F744. A slow sweep: one heading step per reload, velocity from that
+  heading, so it crosses and comes back over a full turn. }
+procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -4932,6 +4990,95 @@ begin
     Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
   end;
+end;
+
+procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T75_FRAMES) then
+    Frame := 0;
+  { One table, two directions - that is the whole open/close difference. }
+  if E.Raw[EF_STATE] = T75_OPENING then
+    E.Raw[EF_ANIM_ID] := T75_SPRITES[Frame];
+  if E.Raw[EF_STATE] = T75_CLOSING then
+    E.Raw[EF_ANIM_ID] := T75_SPRITES[T75_FRAMES - 1 - Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  { It dies with its parent. No other child checks this. }
+  if World.Pool.Field(E.Raw[EF_OWNER], EF_HP) = 0 then
+  begin
+    World.DestroyEntity(E, False);
+    Exit;
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T75_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    Inc(E.Raw[EF_FLAG1C]);
+    if E.Raw[EF_FLAG1C] > T75_FRAMES - 1 then
+    begin
+      if E.Raw[EF_STATE] = T75_OPENING then
+      begin
+        World.PlaySound(T75_SND_OPEN);
+        World.Pool.SetField(E.Raw[EF_OWNER], EF_STATE, T75_OWNER_AFTER_OPEN);
+      end;
+      if E.Raw[EF_STATE] = T75_CLOSING then
+        World.Pool.SetField(E.Raw[EF_OWNER], EF_STATE, T75_OWNER_AFTER_CLOSE);
+      World.DestroyEntity(E, False);
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T76_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T76_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_X], T76_NUDGE);
+  end;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T76_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T76_FRAMES;
+  end;
+
+  Dec(E.Raw[EF_CHILD_A]);
+  if E.Raw[EF_CHILD_A] < 1 then
+  begin
+    E.Raw[EF_CHILD_A] := T76_PERIOD[D];
+    E.Raw[EF_VEL_X] := DirVelX(E.Raw[EF_FACING]) * T76_SPEED[D];
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+    { On reaching 63, not on the wrap to 0 - see the T76_ block. }
+    if E.Raw[EF_FACING] = T76_LAP_AT then
+      World.PlaySound(T76_SND_LAP);
+  end;
+
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
 end;
 
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
@@ -7632,11 +7779,13 @@ begin
       72: EntityUpdate_Type72(E^, AGameState, World);
       73: EntityUpdate_Type73(E^, AGameState, World);
       74: EntityUpdate_Type74(E^, AGameState, World);
+      75: EntityUpdate_Type75(E^, AGameState, World);
+      76: EntityUpdate_Type76(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 6 arms are in HANDLER_ADDR, untranslated }
+      { the other 4 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

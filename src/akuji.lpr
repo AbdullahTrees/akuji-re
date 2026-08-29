@@ -34,7 +34,7 @@ uses
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
-  SpritePool, Sprites, Dialogue, BgAnime,
+  SpritePool, Sprites, Dialogue, BgAnime, UnitInit,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -4026,6 +4026,8 @@ const
     Both are deliberately generous; a stray dword that happened to look like a
     pointer could only ever make a table look SHORTER, never longer, so this
     cannot pass something it should fail. }
+  { The CODE section, for the write-only scan below. }
+  CODE_LO = $00401000;  CODE_HI = $00468000;
   PTRS_LO = $0046C400;  PTRS_HI = $0046D400;
   { Wide enough to take in the sound table at 0x00468E34 as well as the run of
     sprite tables. Widening only ADDS starts below every existing base, so it
@@ -4040,7 +4042,10 @@ var
   ExeName: string;
   Buf: array of Cardinal;
   Starts: array of Cardinal;
-  I, J, K, Bad, Got, Swept: Integer;
+  I, J, K, Bad, Got, Swept, N: Integer;
+  Code: array of Byte;
+  Op, Op2: array[0..1] of Byte;
+  Init, Ctr, Held: Cardinal;
   V, Next: Cardinal;
 
   { The smallest table start strictly greater than Base. }
@@ -4343,9 +4348,92 @@ begin
     Pin('type 74 skew', T74_SKEW_ADDR, 3, @T74_SKEW[0], 3);
     Pin('type 74 count', T74_COUNT_ADDR, 3, @T74_COUNT[0], 3);
     Pin('type 74 speed', T74_SPEED_ADDR, 3, @T74_SPEED[0], 3);
+    Pin('type 75 sprites', T75_TABLE_ADDR, 8, @T75_SPRITES[0], 8);
+    Pin('type 76 sprites', T76_TABLE_ADDR, 2, @T76_SPRITES[0], 2);
+    Pin('type 76 period', T76_PERIOD_ADDR, 3, @T76_PERIOD[0], 3);
+    Pin('type 76 speed', T76_SPEED_ADDR, 3, @T76_SPEED[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
+    Inc(Result, Bad);
+
+    { --- the unit initialization table, re-derived from the binary --------
+      UnitInit.pas claims fifteen compiler-emitted unit init/finalize pairs,
+      all of one shape, each touching a counter that nothing reads. Every
+      part of that is checked here rather than trusted, because eight of
+      those addresses spent a long time in the backlog looking like unread
+      game logic and the claim that they are not is the whole point. }
+    Bad := 0;
+    if not FileExists(ExeName) then Inc(Bad);
+    SetLength(Code, CODE_HI - CODE_LO);
+    Exe.Position := Int64(CODE_LO) - CODE_VA_BIAS;
+    Exe.ReadBuffer(Code[0], Length(Code));
+    for I := 0 to UNIT_INIT_COUNT - 1 do
+    begin
+      Init := UNIT_INIT_ADDR[I];
+      Ctr  := UNIT_INIT_COUNTER[I];
+
+      { the initialization half: `inc dword ptr [counter]` at +0x11 }
+      Exe.Position := Int64(Init) + $11 - CODE_VA_BIAS;
+      Exe.ReadBuffer(Op, 2);
+      Exe.ReadBuffer(Held, 4);
+      if (Op[0] <> $FF) or (Op[1] <> $05) or (Held <> Ctr) then
+      begin
+        Log.Add(Format('  unit %d at 0x%.6X: not an inc of 0x%.6X',
+          [I, Init, Ctr]));
+        Inc(Bad);
+      end;
+
+      { the finalization half: `sub dword ptr [counter], 1` then `ret` }
+      Exe.Position := Int64(Init) + UNIT_INIT_STUB_GAP - CODE_VA_BIAS;
+      Exe.ReadBuffer(Op, 2);
+      Exe.ReadBuffer(Held, 4);
+      Exe.ReadBuffer(Op2, 2);
+      if (Op[0] <> $83) or (Op[1] <> $2D) or (Held <> Ctr)
+         or (Op2[0] <> $01) or (Op2[1] <> $C3) then
+      begin
+        Log.Add(Format('  unit %d at 0x%.6X: finalization is not a dec of '
+          + '0x%.6X followed by ret', [I, Init + UNIT_INIT_STUB_GAP, Ctr]));
+        Inc(Bad);
+      end;
+
+      { and the counter is WRITE-ONLY: its address appears in the code
+        section exactly twice, which is those two instructions and nothing
+        else. This is the claim that makes the stubs safe to ignore. }
+      N := 0;
+      for J := 0 to Length(Code) - 4 do
+        if PCardinal(@Code[J])^ = Ctr then Inc(N);
+      if N <> 2 then
+      begin
+        Log.Add(Format('  counter 0x%.6X is referenced %d times in the code '
+          + 'section, not 2 - something reads it', [Ctr, N]));
+        Inc(Bad);
+      end;
+    end;
+
+    { the table itself ends where UnitInit.pas says, and its last entry is a
+      pair like all the others }
+    Exe.Position := Int64(UNIT_INIT_TABLE_END) - CODE_VA_BIAS;
+    Exe.ReadBuffer(Held, 4);
+    if Held <> 0 then
+    begin
+      Log.Add(Format('  the init table does not terminate at 0x%.6X',
+        [UNIT_INIT_TABLE_END]));
+      Inc(Bad);
+    end;
+    Exe.Position := Int64(UNIT_INIT_TABLE_END) - 8 - CODE_VA_BIAS;
+    Exe.ReadBuffer(Held, 4);
+    Exe.ReadBuffer(V, 4);
+    if (Held - V <> UNIT_INIT_STUB_GAP)
+       or (V <> UNIT_INIT_ADDR[UNIT_INIT_COUNT - 1]) then
+    begin
+      Log.Add('  the last table entry is not the last recorded unit');
+      Inc(Bad);
+    end;
+
+    if Bad = 0 then
+      Log.Add(Format('%d unit init/finalize pairs, all one shape, every '
+        + 'counter write-only', [UNIT_INIT_COUNT]));
     Inc(Result, Bad);
 
     { --- claims of the form "these two tables hold the same numbers" ------
