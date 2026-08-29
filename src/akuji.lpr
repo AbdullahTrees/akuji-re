@@ -4352,6 +4352,28 @@ begin
     Pin('type 76 sprites', T76_TABLE_ADDR, 2, @T76_SPRITES[0], 2);
     Pin('type 76 period', T76_PERIOD_ADDR, 3, @T76_PERIOD[0], 3);
     Pin('type 76 speed', T76_SPEED_ADDR, 3, @T76_SPEED[0], 3);
+    { The final boss. Each phase's sprite row is exactly as wide as the
+      highest frame that phase's own script can reach - the check below
+      re-derives that from the action table, so the two readings have to keep
+      agreeing. }
+    Pin('type 77 phase 0-1', T77_P01_TABLE_ADDR, 20, @T77_P01_SPRITES[0][0], 20);
+    Pin('type 77 phase 2', T77_P2_TABLE_ADDR, 28, @T77_P2_SPRITES[0][0], 28);
+    Pin('type 77 phase 3', T77_P3_TABLE_ADDR, 26, @T77_P3_SPRITES[0][0], 26);
+    Pin('type 77 phase 4', T77_P4_TABLE_ADDR, 12, @T77_P4_SPRITES[0][0], 12);
+    Pin('type 77 phase 5', T77_P5_TABLE_ADDR, 16, @T77_P5_SPRITES[0][0], 16);
+    Pin('type 77 phase 6', T77_P6_TABLE_ADDR, 2, @T77_P6_SPRITES[0], 2);
+    Pin('type 77 hp', T77_HP_ADDR, 18, @T77_HP[0][0], 18);
+    Pin('type 77 burst vx', T77_BURST_VX_ADDR, 6, @T77_BURST_VX[0], 6);
+    Pin('type 77 burst vy', T77_BURST_VY_ADDR, 6, @T77_BURST_VY[0], 6);
+    Pin('type 77 burst count', T77_BURST_ADDR, 3, @T77_BURST[0], 3);
+    Pin('type 77 slam', T77_SLAM_ADDR, 4, @T77_SLAM[0], 4);
+    Pin('type 77 lob', T77_SHOT_ADDR, 3, @T77_SHOT[0], 3);
+    Pin('type 77 step', T77_STEP_ADDR, 36, @T77_STEP[0][0], 36);
+    Pin('type 77 action', T77_ACTION_ADDR, 36, @T77_ACTION[0][0], 36);
+    Pin('type 77 divisor', T77_DIVISOR_ADDR, 3, @T77_DIVISOR[0], 3);
+    Pin('type 77 slam divisor', T77_SLAM_DIV_ADDR, 3, @T77_SLAM_DIV[0], 3);
+    Pin('type 77 lob divisor', T77_SHOT_DIV_ADDR, 3, @T77_SHOT_DIV[0], 3);
+    Pin('type 77 lob speed', T77_LOB_SPEED_ADDR, 3, @T77_LOB_SPEED[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
@@ -4434,6 +4456,68 @@ begin
     if Bad = 0 then
       Log.Add(Format('%d unit init/finalize pairs, all one shape, every '
         + 'counter write-only', [UNIT_INIT_COUNT]));
+    Inc(Result, Bad);
+
+    { --- the final boss's rows are as wide as its script needs -------------
+      Two facts pinned independently: the sprite row widths come from the
+      binary's pointer layout, and the reachable frames come from the action
+      table's own values. Nothing connects them except the claim in
+      EntityHandlers.pas that each phase's row is exactly as wide as the
+      highest frame that phase's script can reach. That is checked here.
+
+      HIGHEST_FRAME_OF maps each action to the top frame it can produce; the
+      state-1 idle contributes 1 to every phase. Phase 0 is exempt because it
+      SHARES phase 1's table and therefore has slack. }
+    Bad := 0;
+    for I := 0 to T77_PHASES - 1 do
+    begin
+      Got := 1;                          { the idle animation, frames 0..1 }
+      for J := 0 to T77_STEPS - 1 do
+      begin
+        case T77_ACTION[I][J] of
+          0, 2: K := 1;
+          3, 7: K := 5;
+          4:    K := 9;
+          5:    K := 12;
+          6:    K := 13;
+          8:    K := 7;
+        else
+          K := -1;
+          Log.Add(Format('  type 77 phase %d step %d: unknown action %d',
+            [I, J, T77_ACTION[I][J]]));
+          Inc(Bad);
+        end;
+        if K > Got then Got := K;
+      end;
+
+      case I of
+        0: N := High(T77_P01_SPRITES[0]);
+        1: N := High(T77_P01_SPRITES[0]);
+        2: N := High(T77_P2_SPRITES[0]);
+        3: N := High(T77_P3_SPRITES[0]);
+        4: N := High(T77_P4_SPRITES[0]);
+      else N := High(T77_P5_SPRITES[0]);
+      end;
+
+      if I = 0 then
+      begin
+        if Got > N then
+        begin
+          Log.Add(Format('  type 77 phase 0 reaches frame %d, past the %d it '
+            + 'shares with phase 1', [Got, N]));
+          Inc(Bad);
+        end;
+      end
+      else if Got <> N then
+      begin
+        Log.Add(Format('  type 77 phase %d reaches frame %d but its row ends '
+          + 'at %d', [I, Got, N]));
+        Inc(Bad);
+      end;
+    end;
+    if Bad = 0 then
+      Log.Add('type 77: five of six phase rows end exactly where the script '
+        + 'stops reaching, and phase 0 fits inside phase 1''s');
     Inc(Result, Bad);
 
     { --- claims of the form "these two tables hold the same numbers" ------

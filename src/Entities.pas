@@ -1238,6 +1238,16 @@ function PixelOf(Raw: Integer): Integer;
   Sign(X). Differential-tested against the original over 25 cases. }
 function Compare(A, B: Integer): Integer;
 
+{ 0x00451164. Compare's twin, and NOT the same function - it has no zero:
+
+      if B < A then -1 else +1
+
+  so equal counts as +1 where Compare would give 0. The two sit fourteen bytes
+  apart and read almost identically in a decompile. Type 77 uses this one to
+  choose a facing, where a zero would leave the boss with no direction at all
+  and freeze its sprite - which is exactly what Compare would have produced. }
+function CompareNZ(A, B: Integer): Integer;
+
 { E.Raw[Extent] div 2, rounded toward zero the way the original's shift-and-
   correct does it. Exported because Entity_UpdateAll halves an extent four times
   over and must halve it identically. }
@@ -1295,6 +1305,14 @@ begin
   if B < A then
     Result := -1;
   if A < B then
+    Result := 1;
+end;
+
+function CompareNZ(A, B: Integer): Integer;
+begin
+  if B < A then
+    Result := -1
+  else
     Result := 1;
 end;
 

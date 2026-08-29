@@ -110,6 +110,27 @@ var
   DebugLog: Boolean = False;                // p_DebugLog        0x0046CDB8
   GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       0x0046D06C
   SavedGameState: Integer = 0;              // p_SavedGameState  0x0046CBBC
+
+  { --- the screen shake, from TFrm_main_AppIdle @ 0x00464F8A ---------------
+
+    Two globals and no state machine. While the flag is set, the frame loop
+    decrements the timer and draws the whole sprite pass offset by
+
+        RandomBelow($10) - 8
+
+    pixels - so the shake is a fresh random displacement of up to eight pixels
+    either way EVERY FRAME, not an oscillation, and it is applied once to the
+    entire pass rather than per sprite. When the timer reaches zero or below,
+    the flag clears itself.
+
+    GameState_Reset @ 0x004653C8 clears both, and exactly one thing in the
+    game sets them: EntityUpdate_Type77 @ 0x0045FF3F, the final boss, on the
+    frame its ground-slam lands. It asks for 60 frames.
+
+    Plain globals because that is what they are - the frame loop reads them
+    directly and nothing owns them. }
+  ScreenShakeOn: Boolean = False;           //                   0x00484EE9
+  ScreenShakeTimer: Integer = 0;            //                   0x00484EEC
   { 0x0046CF88 is ONE global shared by the title menu and the pause menu -
     Title_MainMenu clamps it to 0..3 and PauseMenu_Update reuses it. That is why
     FormKeyDown stashes it before entering pause and zeroes it. }

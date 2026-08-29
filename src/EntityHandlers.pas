@@ -98,6 +98,7 @@
       0x0045F498  type 74  its charge-up and the fan that charge-up fires
       0x0045F668  type 75  the door that lets type 73 out of state 3
       0x0045F744  type 76  a sweeper that turns a full circle by steps
+      0x0045F85C  type 77  the final boss - six phases, each a six-step script
 
   And the dispatcher they hang off:
 
@@ -2027,6 +2028,142 @@ const
   T76_LAP_AT = $3F;         { the step BEFORE the wrap, not the wrap }
   T76_SND_LAP = $2E;
 
+  { --- Type 77, the final boss ------------------------------------------
+    The largest handler in the game, and the only one that runs from a SCRIPT
+    rather than from a hand-written state chain.
+
+    PHASES. EF_BLOCK_A[1] holds a phase 0..5. Every frame it compares its own
+    EF_HP against a threshold table and, when it drops below, advances the
+    phase - resetting the state, the frame and the script index, and puffing
+    a type-32 emitter (except out of phases 0 and 4, which pass silently).
+    Past phase 5 it sets its own EF_HP to 0 and stops. The thresholds are
+
+        easy   968 936 904 840 808 776
+        normal 968 936 904 840 808 776     <- identical to easy
+        hard   984 952 920 888 856 824
+
+    so it has about a thousand hit points, and easy and normal are the same
+    fight. Types 52 and 54 also share a difficulty row; this is the third.
+
+    THE SCRIPT. Two 6x6 tables - one of durations, one of actions - indexed by
+    [phase][step]. State 1 counts up to duration[phase][step] divided by a
+    difficulty divisor of 1, 2 or 4, then performs action[phase][step] and
+    advances the step, wrapping at 6. The actions:
+
+        0  nothing - wait again
+        2  turn to face the player, sixty frames        (frame 1)
+        3  dash, leaving a trail                        (frames 2..5)
+        4  the ground slam                              (frames 6..9)
+        5  the projectile                               (frames 10..12)
+        6  recoil - like 3 but faster and backwards     (frame 13)
+        7  dash the OTHER way                           (frames 2..5)
+        8  a held pose that spawns a variant-5 part     (frames 6..7)
+
+    THE ROW WIDTHS PROVE THE SCRIPT. Each phase has its own two-row sprite
+    table, and five of the six are EXACTLY as wide as the highest frame that
+    phase's own script can reach: phase 1 tops out at frame 9 and has 10
+    entries, phase 2 at 13 with 14, phase 3 at 12 with 13, phase 4 at 5 with
+    6, phase 5 at 7 with 8. Phase 0 shares phase 1's table. Two independent
+    readings - the table extents from the binary's pointer layout, and the
+    reachable frames from the action table - agree on all five.
+
+    THE SCREEN SHAKE. On frame 9 of the ground slam it sets the two globals in
+    GameState.pas that the frame loop turns into a random per-frame draw
+    offset. This is the only thing in the game that does.
+
+    It also picks its facing with CompareNZ, not Compare - see Entities.pas.
+    A zero there would have left it with no direction and no sprite. }
+  T77_PHASES = 6;
+  T77_STEPS = 6;
+
+  { phases 0 and 1 share this one - the `< 2` test in the original }
+  T77_P01_TABLE_ADDR = $0046C6B0;
+  T77_P01_SPRITES: array[0..1, 0..9] of Integer =
+    ((584, 585, 500, 501, 502, 503, 535, 534, 535, 536),
+     (586, 587, 504, 505, 506, 507, 538, 537, 538, 539));
+  T77_P2_TABLE_ADDR = $0046C700;
+  T77_P2_SPRITES: array[0..1, 0..13] of Integer =
+    ((588, 589, 508, 509, 510, 511, 541, 540, 541, 542, 566, 567, 568, 592),
+     (590, 591, 512, 513, 514, 515, 544, 543, 544, 545, 569, 570, 571, 593));
+  T77_P3_TABLE_ADDR = $0046C770;
+  T77_P3_SPRITES: array[0..1, 0..12] of Integer =
+    ((594, 595, 516, 517, 518, 519, 547, 546, 547, 548, 572, 573, 574),
+     (596, 597, 520, 521, 522, 523, 550, 549, 550, 551, 575, 576, 577));
+  T77_P4_TABLE_ADDR = $0046C7D8;
+  T77_P4_SPRITES: array[0..1, 0..5] of Integer =
+    ((552, 553, 524, 525, 526, 527),
+     (554, 555, 528, 529, 530, 531));
+  T77_P5_TABLE_ADDR = $0046C808;
+  T77_P5_SPRITES: array[0..1, 0..7] of Integer =
+    ((578, 579, 558, 559, 560, 561, 556, 557),
+     (580, 581, 562, 563, 564, 565, 556, 557));
+  { phase 6 is the dead pose, and both directions are the same sprite }
+  T77_P6_TABLE_ADDR = $0046C848;
+  T77_P6_SPRITES: array[0..1] of Integer = (598, 598);
+
+  T77_HP_ADDR = $0046C850;
+  T77_HP: array[0..2, 0..T77_PHASES - 1] of Integer =
+    ((968, 936, 904, 840, 808, 776),
+     (968, 936, 904, 840, 808, 776),    { the same fight as easy }
+     (984, 952, 920, 888, 856, 824));
+
+  T77_STEP_ADDR   = $0046C8B4;
+  T77_ACTION_ADDR = $0046C944;
+  T77_DIVISOR_ADDR = $0046C9D4;
+  T77_STEP: array[0..T77_PHASES - 1, 0..T77_STEPS - 1] of Integer =
+    ((180, 0, 0, 180, 0, 0),
+     (180, 0, 60, 180, 0, 60),
+     (120, 0, 30, 120, 0, 60),
+     (30, 0, 0, 0, 0, 30),
+     (30, 0, 30, 0, 30, 0),
+     (30, 0, 30, 30, 0, 30));
+  T77_ACTION: array[0..T77_PHASES - 1, 0..T77_STEPS - 1] of Integer =
+    ((2, 3, 0, 2, 3, 0),
+     (2, 3, 4, 2, 3, 4),
+     (2, 6, 5, 2, 3, 4),
+     (4, 2, 3, 2, 3, 5),
+     (2, 7, 2, 7, 2, 7),
+     (2, 3, 8, 2, 3, 8));
+  T77_DIVISOR: array[0..2] of Integer = (1, 2, 4);   { harder runs it faster }
+
+  T77_SLAM_ADDR     = $0046C898;
+  T77_SLAM_DIV_ADDR = $0046C9E0;
+  T77_SLAM: array[0..3] of Integer = (4, 90, 2, 60);   { frames 6..9 }
+  T77_SLAM_DIV: array[0..2] of Integer = (1, 1, 2);
+  T77_SHOT_ADDR     = $0046C8A8;
+  T77_SHOT_DIV_ADDR = $0046C9EC;
+  T77_SHOT: array[0..2] of Integer = (90, 4, 60);      { frames 10..12 }
+  T77_SHOT_DIV: array[0..2] of Integer = (1, 1, 2);
+
+  T77_BURST_ADDR   = $0046C588;
+  T77_BURST_VX_ADDR = $0046C558;
+  T77_BURST_VY_ADDR = $0046C570;
+  T77_BURST: array[0..2] of Integer = (1, 3, 5);       { plus one }
+  T77_BURST_VX: array[0..5] of Integer = (2, -2, 5, -5, 10, -10);
+  T77_BURST_VY: array[0..5] of Integer = (-24, -24, -20, -20, -14, -14);
+  T77_BURST_SHIFT = 3;
+  T77_BURST_TYPE = $48;     { 72 variant 0, the faller }
+
+  T77_LOB_SPEED_ADDR = $0046CADC;
+  T77_LOB_SPEED: array[0..2] of Integer = (1, 2, 3);
+
+  T77_ENTRY_VX = -$10;
+  T77_PART_A = $4E;         { 78 - spawned once, at the start }
+  T77_PART_B = $4F;         { 79 - spawned once, and again for every effect }
+  T77_TURN_SPEED = $60;
+  T77_TURN_HOLD = $3C;
+  T77_DASH_FRICTION = 2;
+  T77_RECOIL_FRICTION = 4;
+  T77_IDLE_TICKS = 8;
+  T77_HELD_TICKS = 4;
+  T77_HELD_FIRST = 6;
+  T77_HELD_LAST = 7;
+  T77_PUFF_LIFT = $20;
+  T77_SHAKE_FRAMES = $3C;
+  T77_SND_ROAR = $33;
+  T77_SND_SLAM = $30;
+  T77_SND_LOB = $2E;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2384,6 +2521,11 @@ procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
 { 0x0045F744. A slow sweep: one heading step per reload, velocity from that
   heading, so it crosses and comes back over a full turn. }
 procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045F85C. The final boss: six phases, each running a six-step script
+  out of two tables. See the T77_ block. }
+procedure EntityUpdate_Type77(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -5079,6 +5221,324 @@ begin
   end;
 
   Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+end;
+
+procedure EntityUpdate_Type77(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Dir, Phase, D, Slot, I, N, Act, Speed: Integer;
+  PlayerX: Integer;
+
+  function Clamp(V, Hi: Integer): Integer;
+  begin
+    Result := V;
+    if (Result < 0) or (Result > Hi) then
+      Result := 0;
+  end;
+
+  { Every effect this boss makes is a type 79 carrying its slot. }
+  function Part(Variant, DX, DY: Integer): Integer;
+  begin
+    Result := World.Spawn(EKIND_MINOR, T77_PART_B,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            - World.Layer.DeltaX + DX,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS
+                            - World.Layer.DeltaY + DY);
+    World.SetSpawnField(Result, EF_OWNER, E.Raw[EF_SLOT]);
+    if Variant >= 0 then
+      World.SetSpawnField(Result, EF_VARIANT, Variant);
+  end;
+
+  procedure BackToIdle;
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := 0;
+  end;
+
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  Dir := Ord(E.Raw[EF_VEL_X] > 0);
+  Phase := E.Raw[EF_BLOCK_A + 1];
+
+  if Phase < 2 then
+    E.Raw[EF_ANIM_ID] := T77_P01_SPRITES[Dir][Clamp(Frame, 9)];
+  if Phase = 2 then
+    E.Raw[EF_ANIM_ID] := T77_P2_SPRITES[Dir][Clamp(Frame, 13)];
+  if Phase = 3 then
+    E.Raw[EF_ANIM_ID] := T77_P3_SPRITES[Dir][Clamp(Frame, 12)];
+  if Phase = 4 then
+    E.Raw[EF_ANIM_ID] := T77_P4_SPRITES[Dir][Clamp(Frame, 5)];
+  if Phase = 5 then
+    E.Raw[EF_ANIM_ID] := T77_P5_SPRITES[Dir][Clamp(Frame, 7)];
+  if Phase = 6 then
+    E.Raw[EF_ANIM_ID] := T77_P6_SPRITES[Dir];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  PlayerX := World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X);
+
+  { --- the phase gate, before anything else --- }
+  if (Phase >= 0) and (Phase < T77_PHASES)
+     and (E.Raw[EF_HP] < T77_HP[D][Phase]) then
+  begin
+    { Phases 0 and 4 pass silently; the other four puff. }
+    if (Phase <> 0) and (Phase <> 4) then
+    begin
+      Slot := World.Spawn(EKIND_MINOR, EMITTER_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS - T77_PUFF_LIFT);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 1, 8);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 2, 2);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 3, 1);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 4, 2);
+    end;
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := 0;
+    Inc(E.Raw[EF_BLOCK_A + 1]);
+    E.Raw[EF_CHILD_B] := 0;
+    Phase := E.Raw[EF_BLOCK_A + 1];
+    if Phase > T77_PHASES - 1 then
+    begin
+      E.Raw[EF_HP] := 0;
+      Exit;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_X] := T77_ENTRY_VX;
+    Slot := World.Spawn(EKIND_MINOR, T77_PART_A,
+                        E.Raw[EF_POS_X] - POSITION_BIAS - World.Layer.DeltaX,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS - World.Layer.DeltaY);
+    World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+    Part(-1, 0, 0);
+  end;
+
+  { --- state 1: run the script --- }
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T77_IDLE_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod 2;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    N := Clamp(E.Raw[EF_CHILD_B], T77_STEPS - 1);
+    if T77_STEP[Clamp(Phase, T77_PHASES - 1)][N] div T77_DIVISOR[D]
+       < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      Act := T77_ACTION[Clamp(Phase, T77_PHASES - 1)][N];
+
+      if Act = 2 then
+      begin
+        E.Raw[EF_STATE] := 2;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 1;
+      end;
+      if Act = 3 then
+      begin
+        E.Raw[EF_STATE] := 3;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 2;
+      end;
+      if Act = 4 then
+      begin
+        E.Raw[EF_STATE] := 4;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 6;
+      end;
+      if Act = 5 then
+      begin
+        E.Raw[EF_STATE] := 5;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 10;
+        World.PlaySound(T77_SND_ROAR);
+      end;
+      if Act = 6 then
+      begin
+        E.Raw[EF_STATE] := 6;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 13;
+        E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+      end;
+      if Act = 7 then
+      begin
+        { the same state as action 3, entered facing the other way }
+        E.Raw[EF_STATE] := 3;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := 2;
+        E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+      end;
+      if Act = 8 then
+      begin
+        E.Raw[EF_STATE] := 8;
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_SHOTS] := $1E;
+        E.Raw[EF_FLAG1C] := 6;
+        World.PlaySound(T77_SND_ROAR);
+        Part(5, -$100, -$400);
+      end;
+
+      Inc(E.Raw[EF_CHILD_B]);
+      if E.Raw[EF_CHILD_B] > T77_STEPS - 1 then
+        E.Raw[EF_CHILD_B] := 0;
+    end;
+  end;
+
+  { --- state 2: face the player and hold --- }
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { CompareNZ, not Compare - a zero would leave it with no facing. }
+    E.Raw[EF_VEL_X] := CompareNZ(E.Raw[EF_POS_X], PlayerX) * T77_TURN_SPEED;
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T77_TURN_HOLD then
+      BackToIdle;
+  end;
+
+  { --- states 3 and 7: the dash, trailing as it goes --- }
+  if (E.Raw[EF_STATE] = 3) or (E.Raw[EF_STATE] = 7) then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    { The trail thins as it slows: the interval is 8 - 2 * its speed in
+      pixels, so a fast dash drops one almost every frame. }
+    Speed := Abs(E.Raw[EF_VEL_X]);
+    if Speed < 0 then
+      Inc(Speed, 31);
+    if (Speed shr POSITION_SHIFT) * -2 + 8 < E.Raw[EF_BLOCK_B] then
+    begin
+      Part(4, E.Raw[EF_VEL_X] * -4, $100);
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > 5 then
+        E.Raw[EF_FLAG1C] := 2;
+    end;
+
+    ApproachZero(E.Raw[EF_VEL_X], T77_DASH_FRICTION);
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    if E.Raw[EF_VEL_X] = 0 then
+    begin
+      BackToIdle;
+      { and it comes to rest facing you, at speed 1 }
+      E.Raw[EF_VEL_X] := CompareNZ(E.Raw[EF_POS_X], PlayerX);
+    end;
+  end;
+
+  { --- state 4: the ground slam --- }
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if T77_SLAM[Clamp(E.Raw[EF_FLAG1C] - 6, 3)] div T77_SLAM_DIV[D]
+       < E.Raw[EF_BLOCK_B] then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+
+      if (E.Raw[EF_FLAG1C] = 7) or (E.Raw[EF_FLAG1C] = 9) then
+        World.PlaySound(T77_SND_SLAM);
+
+      if E.Raw[EF_FLAG1C] = 9 then
+      begin
+        Part(1, 0, 0);
+        N := T77_BURST[D];
+        if N >= 0 then
+          for I := 0 to N do
+          begin
+            Slot := World.Spawn(EKIND_MINOR, T77_BURST_TYPE,
+                                CompareNZ(0, E.Raw[EF_VEL_X]) * $1000
+                                  + E.Raw[EF_POS_X] - POSITION_BIAS
+                                  - World.Layer.DeltaX,
+                                E.Raw[EF_POS_Y] - POSITION_BIAS
+                                  - World.Layer.DeltaY + $200);
+            World.SetSpawnField(Slot, EF_VEL_X,
+                                T77_BURST_VX[I] shl T77_BURST_SHIFT);
+            World.SetSpawnField(Slot, EF_VEL_Y,
+                                T77_BURST_VY[I] shl T77_BURST_SHIFT);
+          end;
+        { The only place in the game that starts the screen shake. }
+        ScreenShakeOn := True;
+        ScreenShakeTimer := T77_SHAKE_FRAMES;
+      end;
+
+      if E.Raw[EF_FLAG1C] = 8 then
+        Part(2, 0, 0);
+
+      if E.Raw[EF_FLAG1C] > 9 then
+        BackToIdle;
+    end;
+  end;
+
+  { --- state 5: the lob --- }
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if T77_SHOT[Clamp(E.Raw[EF_FLAG1C] - 10, 2)] div T77_SHOT_DIV[D]
+       < E.Raw[EF_BLOCK_B] then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      if E.Raw[EF_FLAG1C] = $B then
+      begin
+        World.PlaySound(T77_SND_LOB);
+        Part(1, 0, 0);
+        Slot := Part(3, CompareNZ(0, E.Raw[EF_VEL_X]) * $800, -$400);
+        World.SetSpawnField(Slot, EF_VEL_X,
+                            CompareNZ(0, E.Raw[EF_VEL_X]) * $20
+                            * T77_LOB_SPEED[D]);
+      end;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > $C then
+        BackToIdle;
+    end;
+  end;
+
+  { --- state 6: the recoil, action 3's move at twice the friction --- }
+  if E.Raw[EF_STATE] = 6 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > 2 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Part(4, E.Raw[EF_VEL_X] * -8, $100);
+    end;
+
+    ApproachZero(E.Raw[EF_VEL_X], T77_RECOIL_FRICTION);
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    if E.Raw[EF_VEL_X] = 0 then
+    begin
+      BackToIdle;
+      E.Raw[EF_VEL_X] := CompareNZ(E.Raw[EF_POS_X], PlayerX);
+    end;
+  end;
+
+  { --- state 8: a two-frame hold, and nothing leaves it --- }
+  if E.Raw[EF_STATE] = 8 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T77_HELD_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T77_HELD_LAST then
+        E.Raw[EF_FLAG1C] := T77_HELD_FIRST;
+    end;
+  end;
 end;
 
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
@@ -7781,11 +8241,12 @@ begin
       74: EntityUpdate_Type74(E^, AGameState, World);
       75: EntityUpdate_Type75(E^, AGameState, World);
       76: EntityUpdate_Type76(E^, AGameState, World);
+      77: EntityUpdate_Type77(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 4 arms are in HANDLER_ADDR, untranslated }
+      { the other 3 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
