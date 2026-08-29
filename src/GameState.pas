@@ -134,9 +134,29 @@ var
   { 0x0046CF88 is ONE global shared by the title menu and the pause menu -
     Title_MainMenu clamps it to 0..3 and PauseMenu_Update reuses it. That is why
     FormKeyDown stashes it before entering pause and zeroes it. }
+  { 0x0046CC14. ONE sub-phase counter shared by every screen that has to
+    wait for a fade: the game-over screen steps 0 -> 1 -> 2 through it, the
+    opening sequence runs its whole six-beat sequence on it, and the message
+    box uses it as a wait flag. EventRunner.pas already described it from the
+    interpreter's side. GameState_Reset zeroes it. }
+  ScreenPhase: Integer = 0;                 //                   0x0046CC14
+  { 0x0046CEF8. Which of NEW GAME / CONTINUE the title menu chose, and reset
+    to 0 by the game-over screen on its way back to the title. }
+  TitleSubMode: Integer = 0;                // p_TitleSubMode    0x0046CEF8
   PauseMenuIndex: Integer = 0;              // p_MenuIndex       0x0046CF88
   SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  0x0046D2C0
   Input: TInputState;                       // p_InputState      0x0046CC58
+
+{ 0x00466E4C. "Confirm" is EITHER of the first two buttons, and it is an
+  EDGE, not a level:
+
+      (Button[0] and not ButtonLatch[0]) or (Button[1] and not ButtonLatch[1])
+
+  Both halves matter and the reconstruction had neither. TGameWorld's
+  ConfirmPressed returned Button[0] alone, as a level - so event opcode 3, the
+  press-confirm trigger, would have fired on every frame the key was held and
+  would have ignored the attack button entirely. }
+function ConfirmPressed(const Inp: TInputState): Boolean;
 
 { Convenience for the pause path, which the original open-codes. }
 { The tail of TFrm_main_AppIdle @ 0x00464D30, which is where the input record's
@@ -203,6 +223,12 @@ begin
     end;
     if Inp.ButtonRepeat[I] > 0 then Dec(Inp.ButtonRepeat[I]);
   end;
+end;
+
+function ConfirmPressed(const Inp: TInputState): Boolean;
+begin
+  Result := (Inp.Button[0] and not Inp.ButtonLatch[0])
+         or (Inp.Button[1] and not Inp.ButtonLatch[1]);
 end;
 
 procedure EnterPause;

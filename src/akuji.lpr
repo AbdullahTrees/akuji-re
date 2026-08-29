@@ -34,7 +34,7 @@ uses
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
-  SpritePool, Sprites, Dialogue, BgAnime, UnitInit,
+  SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -7303,6 +7303,117 @@ begin
     Log.Add('OK - every shipped line splits into pages and terminates');
 end;
 
+type
+  { Counts the three things GameOver_Update asks its host to do. It does NOT
+    override anything the screen itself decides - a double that answers the
+    question under test only tests the double. }
+  TGameOverProbe = class
+  public
+    Restarts, Fades, Tunes: Integer;
+    procedure Restart;
+    procedure Fade(FadeIn: Boolean);
+    procedure Music(Track: Integer);
+  end;
+
+procedure TGameOverProbe.Restart;
+begin Inc(Restarts); end;
+procedure TGameOverProbe.Fade(FadeIn: Boolean);
+begin Inc(Fades); end;
+procedure TGameOverProbe.Music(Track: Integer);
+begin
+  Inc(Tunes);
+  if Track <> GAMEOVER_MIDI then Tunes := -1000;
+end;
+
+{ Input_ConfirmPressed @ 0x00466E4C and GameOver_Update @ 0x00461A44.
+
+  The confirm half exists because the reconstruction had it wrong in two
+  ways at once - a level instead of an edge, and only one of the two
+  buttons - and neither would have shown up in a test that only ever pressed
+  and released cleanly. The expectations here are literals, not derived from
+  the function under test. }
+function TestConfirmAndGameOver(Log: TStrings): Integer;
+var
+  Inp: TInputState;
+  G: TGameOverScreen;
+  Probe: TGameOverProbe;
+  GS, Bad: Integer;
+  Drawn: Boolean;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- confirm, and the game-over screen ---');
+
+  FillChar(Inp, SizeOf(Inp), 0);
+  Want(not ConfirmPressed(Inp), 'confirm fired with nothing pressed');
+
+  Inp.Button[0] := True;
+  Want(ConfirmPressed(Inp), 'button 0 pressed did not confirm');
+  Inp.ButtonLatch[0] := True;
+  Want(not ConfirmPressed(Inp), 'button 0 HELD still confirmed - it is an edge');
+
+  FillChar(Inp, SizeOf(Inp), 0);
+  Inp.Button[1] := True;
+  Want(ConfirmPressed(Inp), 'button 1 pressed did not confirm - both count');
+  Inp.ButtonLatch[1] := True;
+  Want(not ConfirmPressed(Inp), 'button 1 held still confirmed');
+
+  { The phase machine, with no fader: 0 and 1 run in successive frames and
+    2 holds until the music stops or confirm arrives. }
+  Probe := TGameOverProbe.Create;
+  G := TGameOverScreen.Create;
+  try
+    G.OnRestart := Probe.Restart;
+    G.OnFade := Probe.Fade;
+    G.OnMusic := Probe.Music;
+
+    ScreenPhase := 0;
+    TitleSubMode := 7;
+    GS := GS_PLAY_ALT;
+
+    Drawn := G.Update(False, True, False, GS);
+    Want(not Drawn, 'phase 0 drew something');
+    Want(ScreenPhase = 1, 'phase 0 did not step to 1');
+    Want(Probe.Fades = 1, 'phase 0 did not ask for a fade');
+
+    Drawn := G.Update(False, True, False, GS);
+    Want(Drawn, 'phase 2 did not draw');
+    Want(ScreenPhase = 2, 'phase 1 did not step to 2');
+    Want(Probe.Restarts = 1, 'the run was not torn down');
+    Want(Probe.Tunes = 1, 'the game-over tune was not started');
+    Want(TitleSubMode = 0, 'the title sub-mode was not cleared');
+    Want(GS = GS_PLAY_ALT, 'the state left 100 too early');
+
+    { Held while the tune plays ... }
+    Drawn := G.Update(False, True, False, GS);
+    Want(Drawn and (GS = GS_PLAY_ALT), 'the screen ended while the music ran');
+    { ... and confirm cuts it short. }
+    G.Update(False, True, True, GS);
+    Want(GS = GS_TITLE_INIT, 'confirm did not return to the title');
+    Want(ScreenPhase = 0, 'the phase was not reset on the way out');
+
+    { And the music running out ends it on its own. }
+    ScreenPhase := 2;
+    GS := GS_PLAY_ALT;
+    G.Update(False, False, False, GS);
+    Want(GS = GS_TITLE_INIT, 'the screen outlived its own music');
+  finally
+    G.Free;
+    Probe.Free;
+  end;
+
+  Result := Bad;
+  if Bad = 0 then
+    Log.Add('confirm is an edge on either button, and the game-over screen '
+      + 'runs its three phases');
+end;
+
 function SelfTestSession(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -7650,6 +7761,7 @@ begin
   end;
 
   Inc(Bad, TestDialogue(Log, GameDir));
+  Inc(Bad, TestConfirmAndGameOver(Log));
 
   Result := Bad;
   Log.Add('');

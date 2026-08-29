@@ -298,6 +298,12 @@ const
   PLAYER_STATE_SIZE = $11E4;   { 4580 - the whole of save.dat }
   PROGRESS_START    = 10;      { Game_StartOrLoad clears 0x1195 bytes from here }
   PROGRESS_LENGTH   = $1195;
+  { GameState_Reset @ 0x004653C8 clears 0x1F5 bytes from offset 0xFAA in the
+    struct, which is Progress[4000..4500] - the TOP 501 flags and nothing
+    below them. So the block is really two: 0..3999 are the save, and 4000 up
+    are per-run scratch that any reset wipes. Nothing else in the
+    reconstruction had noticed the split. }
+  PROGRESS_SCRATCH_FIRST = 4000;
 
   DEFAULT_LIVES     = 3;
   DEFAULT_SPAWN_X   = $60;     { 96 pixels = tile 3, flush }

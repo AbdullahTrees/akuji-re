@@ -181,6 +181,32 @@ type
     property Sprites: TSpritePool read FSprites;
     procedure SetFrames(AFrames: TSpriteSet);
 
+    { 0x004653C8, GameState_Reset. Called before a new game, before a
+      continue, and by the game-over screen. Its second argument is a MODE
+      and only two things read it:
+
+        mode 0   also zeroes Settings.CurrentStage, so the run restarts at
+                 the first stage. Every other mode leaves the stage alone.
+        mode 2   SKIPS the camera reset, so a caller that has already placed
+                 the view keeps it.
+
+      What it clears, in the original's order: the shared sub-phase and the
+      menu indices; every sprite in the pool; the screen shake; the three
+      layers' origin and delta (but not their tile geometry); every entity
+      slot's EF_ALIVE, EF_EVENT_ID and EF_SPRITE; the LAST 501 progress
+      flags; and every event record's two runtime bytes.
+
+      That progress range is worth a second look. Progress is 0x1195 bytes
+      and this clears 0x1F5 of them from offset 0xFAA - flags 4000..4500 -
+      leaving 0..3999 untouched. So the top five hundred are per-run scratch
+      that a reset wipes, and everything below them is the save. Nothing in
+      the reconstruction had noticed that split.
+
+      Nine further globals and two objects are cleared in the original that
+      have no counterpart here yet; they belong to the opening sequence and
+      the message box. Listed in the body rather than silently skipped. }
+    procedure ResetState(Mode: Integer);
+
     property World: TGameWorld read FWorld;
     property Pool: TEntityPool read FPool;
     property Events: TEventScript read FEvents;
@@ -310,7 +336,9 @@ end;
 
 function TGameWorld.ConfirmPressed: Boolean;
 begin
-  Result := FSession.Input.Button[0];
+  { Was Button[0] as a LEVEL. Input_ConfirmPressed is an edge, and takes
+    either of the first two buttons - see GameState.pas. }
+  Result := GameState.ConfirmPressed(FSession.Input);
 end;
 
 { --- TGameSession -------------------------------------------------------- }
@@ -357,6 +385,66 @@ begin
   FPool.Free;
   FSprites.Free;
   inherited Destroy;
+end;
+
+procedure TGameSession.ResetState(Mode: Integer);
+var
+  I: Integer;
+  E: PEntity;
+begin
+  if Mode = 0 then
+    Settings.CurrentStage := 0;
+
+  { The shared sub-phase - the game-over screen, the opening and the message
+    box all step through it - and the two menu cursors. }
+  ScreenPhase := 0;
+  TitleSubMode := 0;
+  PauseMenuIndex := 0;
+  SavedMenuIndex := 0;
+
+  if FSprites <> nil then
+    FSprites.Clear;
+
+  ScreenShakeOn := False;
+  ScreenShakeTimer := 0;
+
+  if Mode <> 2 then
+  begin
+    { Origin and delta only. Tile geometry survives, which is why a reset
+      does not need the map reloaded. }
+    FWorld.Layer.OriginX := 0;
+    FWorld.Layer.OriginY := 0;
+    FWorld.Layer.DeltaX := 0;
+    FWorld.Layer.DeltaY := 0;
+  end;
+
+  if FPool <> nil then
+    for I := 0 to ENTITY_UPDATE_COUNT - 1 do
+    begin
+      E := FPool.Entity(I);
+      E^.Raw[EF_ALIVE] := 0;
+      E^.Raw[EF_EVENT_ID] := -1;
+      E^.Raw[EF_SPRITE] := SPRITE_NONE;
+    end;
+
+  { The scratch tail of the progress block - see the note on the
+    declaration. }
+  for I := PROGRESS_SCRATCH_FIRST to PROGRESS_LENGTH - 1 do
+    Player.Progress[I] := 0;
+
+  if FEvents <> nil then
+    for I := 0 to FEvents.Count - 1 do
+    begin
+      FEvents.SetInWindow(I, False);
+      FEvents.SetActive(I, False);
+    end;
+
+  { Not reproduced, because the reconstruction has no counterpart yet:
+    0x0046CE7C, 0x0046D334 (the save slot cursor), 0x0046D028, 0x0046D218,
+    0x0046CC98 and 0x0046CF24 (the message box's line cursors), 0x0046CF28
+    (its mode), 0x0046CD00 (the overlay's dispatch flag) and 0x0046CDA0; and
+    two objects freed through 0x0046D1F0 and 0x0046CEA4, which belong to the
+    opening sequence. }
 end;
 
 procedure TGameSession.SetFrames(AFrames: TSpriteSet);

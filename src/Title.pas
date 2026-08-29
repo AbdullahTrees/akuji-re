@@ -109,7 +109,96 @@ type
     property OnSound: TSoundEvent read FOnSound write FOnSound;
   end;
 
+  { --- GameOver_Update @ 0x00461A44 --------------------------------------
+
+    The game-over screen, and the shortest of the three screens that step
+    through GameState.ScreenPhase:
+
+      0  ask the fader to fade OUT, and move on at once
+      1  wait for the fader to go idle, then tear the run down -
+         GameState_Reset(mode 0), reload the stage assets, re-register the
+         font, clear the title sub-mode, put the state machine on 100, start
+         `midi\gameover`, and fade back IN
+      2  draw the full-screen image from surface slot 3 and wait
+
+    What ends it is `the music has stopped OR confirm was pressed`. So the
+    screen holds for exactly as long as the game-over tune, unless you cut it
+    short - and then it goes to GS_TITLE_INIT, not back to the game.
+
+    Re-registering the font in phase 1 is not redundant: Load_Stage_Assets
+    reloads surface slot 0, which is the font sheet, so the glyph table has
+    to be rebuilt on top of it. Three other places in the original do the
+    same for the same reason (see GameFont.pas).
+
+    The four things it needs from outside are callbacks, the way the title
+    screen's sound is, so the unit stays clear of the component layer. }
+  TFadeEvent = procedure(FadeIn: Boolean) of object;
+  TMusicEvent = procedure(Track: Integer) of object;
+  TRestartEvent = procedure of object;
+
+const
+  GAMEOVER_MIDI = 2;        { AutoLoadMidis[2] is midi\gameover }
+  GAMEOVER_SURFACE = 3;     { the full-screen image }
+
+type
+  TGameOverScreen = class
+  private
+    FOnFade: TFadeEvent;
+    FOnMusic: TMusicEvent;
+    FOnRestart: TRestartEvent;
+  public
+    { Returns True while the screen should be drawn, which is phase 2 only.
+      FadeBusy and MusicPlaying are asked of the host every frame because the
+      original asks its two components every frame. }
+    function Update(FadeBusy, MusicPlaying, Confirm: Boolean;
+                    var AGameState: Integer): Boolean;
+
+    property OnFade: TFadeEvent read FOnFade write FOnFade;
+    property OnMusic: TMusicEvent read FOnMusic write FOnMusic;
+    property OnRestart: TRestartEvent read FOnRestart write FOnRestart;
+  end;
+
 implementation
+
+{ --- TGameOverScreen ----------------------------------------------------- }
+
+function TGameOverScreen.Update(FadeBusy, MusicPlaying, Confirm: Boolean;
+                                var AGameState: Integer): Boolean;
+begin
+  Result := False;
+
+  if ScreenPhase = 0 then
+  begin
+    ScreenPhase := 1;
+    if Assigned(FOnFade) then
+      FOnFade(False);
+  end
+  else if (ScreenPhase = 1) and not FadeBusy then
+  begin
+    { GameState_Reset(mode 0) plus the asset reload and the font rebuild -
+      one callback, because the host owns all three. }
+    if Assigned(FOnRestart) then
+      FOnRestart;
+    ScreenPhase := 2;
+    TitleSubMode := 0;
+    AGameState := GS_PLAY_ALT;
+    if Assigned(FOnMusic) then
+      FOnMusic(GAMEOVER_MIDI);
+    if Assigned(FOnFade) then
+      FOnFade(True);
+  end;
+
+  if ScreenPhase = 2 then
+  begin
+    Result := True;
+    { Held for exactly as long as the tune, unless you cut it short. }
+    if (not MusicPlaying) or Confirm then
+    begin
+      ScreenPhase := 0;
+      AGameState := GS_TITLE_INIT;
+    end;
+  end;
+end;
 
 constructor TTitleScreen.Create;
 begin

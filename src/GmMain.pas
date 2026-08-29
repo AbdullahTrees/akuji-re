@@ -57,6 +57,7 @@ type
       the surface every time and frees it when the panel closes, which is a
       lifetime detail, not a behaviour. }
     FPowerBmp: TBitmap;
+    FGameOver: TGameOverScreen;
     FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
@@ -78,6 +79,10 @@ type
     procedure DispatchState;
     procedure FormPaint(Sender: TObject);
     procedure DrawScene;
+    procedure DrawGameOver;
+    procedure GameOverRestart;
+    procedure GameOverFade(FadeIn: Boolean);
+    procedure GameOverMusic(Track: Integer);
   end;
 
 var
@@ -190,6 +195,10 @@ begin
   DoubleBuffered := True;
 
   FTitleScreen := TTitleScreen.Create;
+  FGameOver := TGameOverScreen.Create;
+  FGameOver.OnRestart := GameOverRestart;
+  FGameOver.OnFade := GameOverFade;
+  FGameOver.OnMusic := GameOverMusic;
   { The original calls MainForm.DDSD1.Play straight from the title function;
     routing it through a callback keeps Title.pas off the component layer. }
   FTitleScreen.OnSound := TitleSound;
@@ -345,6 +354,37 @@ begin
     FMap.Load(FDataDir, MapId);
 
   FStageLoaded := StageIndex;
+end;
+
+{ The three things GameOver_Update needs from the form. Callbacks rather
+  than direct calls so Title.pas stays clear of the component layer, exactly
+  as the title screen's sound already is. }
+procedure TFrm_main.GameOverRestart;
+begin
+  FSession.ResetState(0);
+  { Load_Stage_Assets(MainForm, nil) - stage 0, the placeholder row, which is
+    what reloads surface slot 0 and forces the font rebuild below. }
+  FStageLoaded := -1;
+  LoadStage(0);
+end;
+
+procedure TFrm_main.GameOverFade(FadeIn: Boolean);
+begin
+  { No fader is modelled. Recorded rather than silently dropped: the original
+    sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48 with
+    FadeIn as its third argument. }
+end;
+
+procedure TFrm_main.GameOverMusic(Track: Integer);
+begin
+  KbgmPlayer1.Play(Track, False);
+end;
+
+{ Phase 2 of the game-over screen: surface slot 3, whole screen, no HUD. }
+procedure TFrm_main.DrawGameOver;
+begin
+  if FSurfaces[GAMEOVER_SURFACE] <> nil then
+    DDDD1.Canvas.Draw(0, 0, FSurfaces[GAMEOVER_SURFACE]);
 end;
 
 { HUD_Draw @ 0x00461BA8: a "%3d/%-3d" counter, an h:mm:ss timer, and a row of
@@ -508,8 +548,19 @@ begin
                         FDataDir + 'data' + PathDelim + 'save.dat',
                         GameStateValue);
       end;
+    { 0x00461A44. State 100 is GAME OVER, and it was running the play frame -
+      the dispatch grouped it with 60 and 140 because all three call
+      HUD_Draw, which is the one thing they do share. }
+    GS_PLAY_ALT:
+      begin
+        { No fader is modelled yet, so FadeBusy is always False and the
+          screen steps straight from 0 to 2. That is a configuration, not a
+          stub: the sequence is the same, it just has no dissolve. }
+        if FGameOver.Update(False, KbgmPlayer1.IsPlaying,
+                            ConfirmPressed(FSession.Input), GameStateValue) then
+          DrawGameOver;
+      end;
     GS_PLAY,
-    GS_PLAY_ALT,
     GS_STATE_140:
       begin
         { While the box is up it - not the interpreter - drives the script,
