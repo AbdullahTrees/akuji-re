@@ -23,7 +23,7 @@
 00454ef4  Event_Begin
 0045509c  EventScript_AdvanceStep
 00455210  EventScript_Execute
-00456038  TitleMenu_Update
+00456038  MessageBox_Update
 00456698  PowerUp_Show
 004568d0  Overlay_Update
 00456b14  FUN_00456b14
@@ -149,8 +149,8 @@
 00462330  Title_MainMenu
 00462f40  Game_StartOrLoad
 00463154  Opening_Update
-00463624  FUN_00463624
-00464484  FUN_00464484
+00463624  Ending_Update
+00464484  Ending_ShowPicture
 004645b0  Terrain_Configure
 00464d30  TFrm_main_AppIdle
 004653c8  GameState_Reset
@@ -162,9 +162,9 @@
 00466340  Load_Map
 004665c8  TFrm_main_FormKeyDown
 00466644  TFrm_main_FormDestroy
-00466888  FUN_00466888
+00466888  Debug_DrawOverlay
 004669f8  Load_StageTable
-00466c78  FUN_00466c78
-00466dfc  FUN_00466dfc
+00466c78  Display_SetFullScreen
+00466dfc  Sounds_LoadAll
 00466e4c  Input_ConfirmPressed
 0046716c  entry

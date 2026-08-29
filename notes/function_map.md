@@ -76,11 +76,16 @@ call xrefs and auto-analysis never created them. Two had to be made by hand.
 | 100 | `GameOver_Update` `0x461A44` | corroborated | **game over**: draws surface slot 3 (`gameover.bmp`) and plays MIDI 2 (`midi\gameover`), then waits and returns to the title |
 | 130 | `PauseMenu_Update` `0x461EE4` | read | saves the prior state to `0x46CBBC` |
 | 140 | `EventScript_Execute` `0x455210` | read | the event-script runner |
-| 150 | `FUN_00463624` | inferred | entered by event sub-op 80 (`soulget`) |
+| 150 | `Ending_Update` `0x463624` | read | the results screen, entered by event sub-op 80 (`soulget`) |
 | 999 | — | read | quit: nils `OnIdle` |
 
-`Opening_Update` `0x463154` and `TitleMenu_Update` `0x456038` are dispatched
-separately on their own flags.
+`MessageBox_Update` `0x456038` is dispatched separately, on the mode global at
+`0x0046CF28`. It was filed as `TitleMenu_Update` and has no menu in it - it is
+the message box, and the sibling of `Overlay_Update` `0x4568D0`.
+
+`Opening_Update` `0x463154` is NOT dispatched at all. Its only caller is
+`Game_StartOrLoad`, so it belongs to starting a game rather than to the state
+machine; state 150 is the ending.
 
 ## Asset loading
 

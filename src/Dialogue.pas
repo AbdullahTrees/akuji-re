@@ -34,7 +34,48 @@
   original draws the frame through a DirectDraw component (FUN_0044DE3C) and
   its text through Game_DrawTextOutlined, which takes a fill and an outline
   colour. This draws a filled rectangle and plain font text. The GEOMETRY is
-  the original's; the decoration is not. }
+  the original's; the decoration is not.
+
+  ## The OTHER message box: MessageBox_Update @ 0x00456038
+
+  There are two of these functions, not one. 0x004568D0 is the half this unit
+  was written from; 0x00456038 is the half AppIdle runs whenever the mode
+  global at 0x0046CF28 is non-zero, and it is the one with the typewriter and
+  the yes/no prompt. It was carried in the notes as `TitleMenu_Update`, which
+  it is not - it has no menu in it. Renamed here rather than in Ghidra alone.
+
+  Everything below is read from it, and the constants are in the MB_ block.
+
+  ITS FOUR MARKERS ARE ORDERED, and the order is not the order the tk files
+  list them in:
+
+      \w  ->  mode 4, the yes/no prompt
+      \e  ->  mode 3, the message is over
+      \k  ->  mode 2, wait for a key
+      
+  ->  a line break, and the only one that does not end the scan
+
+  IT READS TWO BYTES AT A TIME. Copy(text, k*2 - 1, 2) - the text is
+  Shift-JIS and a "character" is a pair. That is also why the character that
+  suppresses the typewriter click is 0x81 0x40, the FULL-WIDTH space, and not
+  ASCII 0x20.
+
+  ITS ANSWER IS TWO FLAGS, NOT ONE. This unit wrote Progress[3] alone. The
+  original writes both:
+
+      Yes  ->  Progress[3] := 1;  Progress[4] := 0
+      No   ->  Progress[3] := 0;  Progress[4] := 1
+
+  so a script can guard on either answer directly instead of having to
+  negate. EventRunner.pas already records Progress[1..4] as scratch; this
+  says what the fourth one is for. Fixed below.
+
+  WHAT IS STILL THE HOST'S. The typewriter's per-character delay lives in a
+  global at 0x0046CBA4 and is driven by the same input the box reads; the
+  wait-for-key prompt is a six-frame cycle out of a table at 0x0046D050 drawn
+  from surface slot 1; and the yes/no cursor is a sprite from the same slot,
+  moved 0x34 pixels for the second option. Those are recorded as constants
+  and left to whatever draws. }
 
 unit Dialogue;
 
@@ -47,6 +88,62 @@ uses
   GameState, Entities;
 
 const
+
+  { --- MessageBox_Update @ 0x00456038 ---------------------------------------
+    The constants of the other message box. See the unit header for what it
+    is and why it is not the title menu it was filed as. }
+
+  { The mode global at 0x0046CF28, and the marker that selects each. }
+  MB_MODE_IDLE   = 0;
+  MB_MODE_TYPING = 1;
+  MB_MODE_WAITKEY = 2;      { \k }
+  MB_MODE_END     = 3;      { \e }
+  MB_MODE_PROMPT  = 4;      { \w }
+
+  { The text is Shift-JIS and it is scanned a PAIR of bytes at a time, so the
+    character that suppresses the typewriter click is the full-width space,
+    not ASCII 0x20. }
+  MB_FULLWIDTH_SPACE = #$81#$40;
+
+  { Where the box goes: below the player if the player is high on the screen,
+    above if not. 0x79 is the test, 0x88 the low position. }
+  MB_PLAYER_HIGH  = $79;
+  MB_BOX_LOW_Y    = $88;
+  MB_BOX_HIGH_Y   = 0;
+  { The frame, then three lines 16 apart starting 0x1C down. }
+  MB_FRAME_X      = $30;
+  MB_FRAME_DY     = $10;
+  MB_TEXT_X       = $3C;
+  MB_LINE_FIRST   = $1C;
+  MB_LINE_STEP    = $10;
+  MB_LINES        = 3;
+  { Game_DrawTextOutlined's two colours, fill then outline. }
+  MB_FILL         = $FFFFFF;
+  MB_OUTLINE      = $735400;
+
+  { The wait-for-key prompt: a six-frame cycle from the table at 0x0046D050,
+    stepped every five frames, drawn from surface slot 1. }
+  MB_PROMPT_TABLE_ADDR = $0046D050;
+  MB_PROMPT_FRAMES = 6;
+  MB_PROMPT_TICKS  = 4;
+  MB_PROMPT_X      = $F8;
+  MB_PROMPT_DY     = $40;
+
+  { The yes/no prompt. The two words are one literal with the spacing baked
+    in, and the cursor moves 0x34 for the second. }
+  MB_PROMPT_TEXT   = 'Yes       No  ';
+  MB_PROMPT_TEXT_X = $70;
+  MB_PROMPT_TEXT_DY = $3C;
+  MB_CURSOR_X      = $60;
+  MB_CURSOR_STEP   = $34;
+  MB_SND_OPEN      = $D;    { on entering the prompt }
+  MB_SND_MOVE      = 0;     { and on each move }
+  MB_SND_CHOOSE    = 1;
+
+  { The two scratch flags the answer lands in. }
+  MB_ANSWER_YES = 3;
+  MB_ANSWER_NO  = 4;
+
   { FUN_004568D0's numbers. The box flips to the lower half of the screen when
     the player is in the upper half. }
   BOX_X        = $30;   { 48 }
@@ -69,6 +166,10 @@ const
   PANEL_TEXT_Y  = $D8;   { 216 }
   PANEL_CHAR_W  = 6;
   PANEL_W       = $140;
+
+{ 0x00456038's answer write, both flags. Choice 0 is Yes. Separate from the
+  box so it can be checked without one. }
+procedure DialogueAnswer(var P: TPlayerState; Choice: Integer);
 
 type
   { What the overlay needs to know about the world it interrupts. }
@@ -132,6 +233,12 @@ function SplitPage(const Text: string; out Rest: string;
                    out Prompt: Boolean): string;
 
 implementation
+
+procedure DialogueAnswer(var P: TPlayerState; Choice: Integer);
+begin
+  P.Progress[MB_ANSWER_YES] := Ord(Choice = 0);
+  P.Progress[MB_ANSWER_NO]  := Ord(Choice <> 0);
+end;
 
 function SplitPage(const Text: string; out Rest: string;
                    out Prompt: Boolean): string;
@@ -292,9 +399,11 @@ begin
 
   if FPrompt then
   begin
-    { Progress[3] is the answer, and the guarded steps that follow read it. }
+    { BOTH flags, which is what 0x00456038 writes - see the header. Writing
+      only Progress[3] left every script that guards on "No" unable to see
+      the answer at all. }
     if FPlayer <> nil then
-      FPlayer^.Progress[3] := Ord(FChoice = 0);
+      DialogueAnswer(FPlayer^, FChoice);
     FPrompt := False;
   end;
 

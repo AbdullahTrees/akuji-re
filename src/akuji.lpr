@@ -7165,6 +7165,22 @@ begin
   Log.Add('');
   Log.Add('--- the message box ---');
 
+  { --- the yes/no answer is TWO flags, from 0x00456038 ---------------- }
+  { It used to write Progress[3] alone, so every script guarding on "No" saw
+    nothing. Both directions are checked, with literal expectations. }
+  begin
+    FillChar(P2, SizeOf(P2), 0);
+    P2.Progress[MB_ANSWER_YES] := 9;   { junk, to prove both are WRITTEN }
+    P2.Progress[MB_ANSWER_NO] := 9;
+    DialogueAnswer(P2, 0);
+    Want(P2.Progress[MB_ANSWER_YES] = 1, 'Yes did not set Progress[3]');
+    Want(P2.Progress[MB_ANSWER_NO] = 0, 'Yes did not clear Progress[4]');
+
+    DialogueAnswer(P2, 1);
+    Want(P2.Progress[MB_ANSWER_YES] = 0, 'No did not clear Progress[3]');
+    Want(P2.Progress[MB_ANSWER_NO] = 1, 'No did not set Progress[4]');
+  end;
+
   { --- PowerUp_Show's grant table, from 0x00456698 ------------------- }
   { The weapon's two guards are the only conditional part, and they are the
     part a tidy rewrite would lose: picking up Fire after Charge must not
