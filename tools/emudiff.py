@@ -46,9 +46,27 @@ project. The `handler_probe` and `handler_live` sets went and asked:
 The live sweep is the one that counts. A zeroed entity is dead and has no
 sprite, so most handlers take an early exit and "nothing faulted" would be a
 statement about early exits; the live sweep drives them through real paths with
-a sprite handle, HP, timers and velocity. Not one faulted. The entity layer is
-reachable by differential execution in full, which is the single biggest thing
-this technique can be pointed at.
+a sprite handle, HP, timers and velocity. Not one faulted.
+
+AND "NOT ONE FAULTED" IS WEAKER THAN IT SOUNDS. The emu_sanity controls write
+through a wild pointer and read through one, and BOTH RETURN - only executing
+unmapped memory actually stops the emulator. So an unmapped read yields zero
+silently, and a handler reaching a global nobody placed sees 0 and takes a
+plausible-looking branch with nothing to announce it. Completing is not the
+same as running against sane state, and the first version of this note ran
+those two together.
+
+--poison-diff is what settles it, by filling the globals region with 0x00 and
+then 0xA5 and diffing: a case whose answer moves depends on memory nobody set
+up. Over the live sweep:
+
+    312 cases, 4 moved - all four are type 69
+
+So 308 of 312 read only what the case placed and are trustworthy inputs for
+comparison; type 69 reaches a global that has to be mapped before its result
+means anything. That is the honest shape of the reach claim - much stronger
+than "leaf routines only", and not the blank cheque that "0 faulted" alone
+would have been.
 
 What it does NOT yet say is that they AGREE - reaching a handler and having a
 Pascal counterpart wired up to compare it against are different jobs, and most
@@ -73,6 +91,11 @@ P_LAYERINFO = 0x00483BF4          # the layer array itself, stride 0x20
 ENTITY_AT = 0x60000000            # scratch: somewhere to put a TEntity
 ENTITY_INTS = 0x41
 RANDOM_SEED_ADDR = 0x0046E040   # Delphi's RandSeed, in BSS
+
+# The globals region: DATA through the end of BSS. --poison fills this with a
+# byte so that reading something nobody placed becomes visible.
+GLOBALS_LO = 0x00468000
+GLOBALS_HI = 0x004A0000
 
 
 def ints(vals):
@@ -376,7 +399,33 @@ def cases_handler_probe_live():
     return out
 
 
+def cases_emu_sanity():
+    """Negative controls: cases the emulator MUST fault on.
+
+    "78 handlers, 0 faulted" is only worth something if a fault is a thing that
+    can happen. If the emulator quietly returned zero for unmapped memory
+    instead of stopping, every one of those handlers could have been reading
+    garbage and reporting success, and the sweep would have measured nothing.
+
+    So this asks the question directly: write through a wild pointer, read
+    through one, and execute an address that is not code. All three must come
+    back FAULT. --sanity checks that and exits non-zero if any of them
+    RETURNED, which is the failure that matters here.
+    """
+    wild = 0x11000000        # nothing is mapped there and nothing places it
+    return [
+        '# negative controls - every one of these must FAULT',
+        '# a handler writing through a wild entity pointer',
+        'CASE sanity_mustfault_write 0x0045A944 eax=0x%X' % wild,
+        '# a handler READING through one',
+        'CASE sanity_mustfault_read 0x0045A4F0 eax=0x%X' % wild,
+        '# and executing memory that is not code',
+        'CASE sanity_mustfault_exec 0x%X eax=0' % wild,
+    ]
+
+
 SETS = {
+    'emu_sanity': cases_emu_sanity,
     'handler_probe': cases_handler_probe,
     'handler_live': cases_handler_probe_live,
     'handler_pure': cases_handler_pure,
@@ -389,6 +438,78 @@ SETS = {
 }
 
 
+def run_emulator(work, staged, spec, out, tag=''):
+    """One headless run. Returns 0 on success."""
+    proj = os.path.join(work, 'proj' + tag)
+    os.makedirs(proj, exist_ok=True)
+    cmd = [GHIDRA, proj, 'EmuDiff' + tag, '-import', staged, '-noanalysis',
+           '-scriptPath', os.path.join(REPO, 'ghidra_scripts'),
+           '-postScript', 'EmuDiff.java', spec, out, '-deleteProject']
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        if 'EmuDiff:' in line or 'ERROR' in line:
+            print('  ' + line.split('> ', 1)[-1].strip())
+    if not os.path.exists(out):
+        print('the emulator produced no output')
+        print(r.stdout[-3000:])
+        return 1
+    return 0
+
+
+def answers(path):
+    """case name -> everything after the arrow."""
+    got = {}
+    for line in open(path, encoding='utf-8', errors='replace'):
+        if not line.startswith('CASE') or ' -> ' not in line:
+            continue
+        name = line.split()[1]
+        got[name] = line.split(' -> ', 1)[1].strip()
+    return got
+
+
+def poison_diff(work, staged, lines):
+    """Run the same cases under two different poison fills and report movers.
+
+    An unmapped read returns zero here rather than faulting - emu_sanity proves
+    it - so a handler reaching a global nobody placed sees 0 and takes a
+    plausible branch, silently. Two fills turn that silence into a difference:
+    a case whose answer is identical under both read only what the case placed;
+    a case whose answer MOVED depends on memory nobody set up, and its result
+    means nothing until that global is mapped.
+    """
+    runs = {}
+    for byte in (0x00, 0xA5):
+        fill = 'fill=0x%X:%d:%d' % (GLOBALS_LO, GLOBALS_HI - GLOBALS_LO, byte)
+        poisoned = [(l + ' ' + fill) if l.startswith('CASE') else l
+                    for l in lines]
+        spec = os.path.join(work, 'spec_%02x.txt' % byte)
+        with open(spec, 'w', newline=chr(10)) as fh:
+            fh.write(chr(10).join(poisoned) + chr(10))
+        out = os.path.join(work, 'out_%02x.txt' % byte)
+        print('  poison 0x%02X:' % byte)
+        if run_emulator(work, staged, spec, out, tag='p%02x' % byte) != 0:
+            return 1
+        runs[byte] = answers(out)
+
+    a, b = runs[0x00], runs[0xA5]
+    shared = sorted(set(a) & set(b))
+    movers = [n for n in shared if a[n] != b[n]]
+    print()
+    print('%d cases run under both fills' % len(shared))
+    if not movers:
+        print('none moved - every case read only what it placed itself')
+        return 0
+    print('%d MOVED - these read memory nobody placed, so their agreement '
+          'with the reconstruction (or disagreement) means nothing yet:'
+          % len(movers))
+    for n in movers[:40]:
+        print('  %-24s 0x00 -> %s' % (n, a[n][:60]))
+        print('  %-24s 0xA5 -> %s' % ('', b[n][:60]))
+    if len(movers) > 40:
+        print('  ... and %d more' % (len(movers) - 40))
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -398,6 +519,16 @@ def main():
                     default=os.path.join(REPO, 'English Translated Version 1.1 (D)'))
     ap.add_argument('--keep', action='store_true',
                     help='keep the work directory')
+    ap.add_argument('--sanity', action='store_true',
+                    help='also require every sanity_mustfault_* case to FAULT')
+    ap.add_argument('--poison-diff', action='store_true',
+                    help='run every case twice under two different poison '
+                         'fills and report which answers moved - those read a '
+                         'global nobody placed')
+    ap.add_argument('--poison', type=int, metavar='BYTE',
+                    help='fill the globals region with BYTE before each case. '
+                         'Run twice with different bytes and diff: any case '
+                         'whose answer moved read a global nobody placed.')
     args = ap.parse_args()
 
     for s in args.sets:
@@ -418,6 +549,17 @@ def main():
         lines = []
         for s in args.sets:
             lines += SETS[s]()
+
+        if args.poison is not None:
+            # Underneath every case, so an explicit mem= still wins. An unmapped
+            # read does NOT fault here - emu_sanity proves it - so without this
+            # a handler reading an unplaced global silently sees zero and takes
+            # a real-looking branch. Two runs with different bytes turn that
+            # silence into a difference.
+            fill = 'fill=0x%X:%d:%d' % (GLOBALS_LO, GLOBALS_HI - GLOBALS_LO,
+                                        args.poison & 0xFF)
+            lines = [(l + ' ' + fill) if l.startswith('CASE') else l
+                     for l in lines]
         spec = os.path.join(work, 'spec.txt')
         with open(spec, 'w', newline='\n') as fh:
             fh.write('\n'.join(lines) + '\n')
@@ -425,19 +567,36 @@ def main():
         print('%d cases across %d set(s)' % (ncase, len(args.sets)))
 
         out = os.path.join(work, 'out.txt')
-        proj = os.path.join(work, 'proj')
-        os.makedirs(proj, exist_ok=True)
-        cmd = [GHIDRA, proj, 'EmuDiff', '-import', staged, '-noanalysis',
-               '-scriptPath', os.path.join(REPO, 'ghidra_scripts'),
-               '-postScript', 'EmuDiff.java', spec, out, '-deleteProject']
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        for line in r.stdout.splitlines():
-            if 'EmuDiff:' in line or 'ERROR' in line:
-                print('  ' + line.split('> ', 1)[-1].strip())
-        if not os.path.exists(out):
-            print('the emulator produced no output')
-            print(r.stdout[-3000:])
+        if run_emulator(work, staged, spec, out) != 0:
             return 1
+
+        if args.poison_diff:
+            return poison_diff(work, staged, lines)
+
+        # The negative controls are checked here rather than on the Pascal
+        # side, because what they assert is a property of the EMULATOR: that it
+        # stops on a bad access instead of inventing a zero.
+        sane = 0
+        if args.sanity:
+            bad = []
+            for line in open(out, encoding='utf-8', errors='replace'):
+                if 'sanity_mustfault_' not in line:
+                    continue
+                sane += 1
+                if '-> FAULT' not in line:
+                    bad.append(line.strip())
+            if sane == 0:
+                print('  --sanity asked for, but no control cases were run '
+                      '(add the emu_sanity set)')
+                return 1
+            if bad:
+                print('  %d of %d controls RETURNED instead of faulting - the '
+                      'emulator is not stopping on bad access, so "0 faulted" '
+                      'elsewhere means nothing:' % (len(bad), sane))
+                for b in bad:
+                    print('    %s' % b[:160])
+                return 1
+            print('  %d negative controls all faulted, as they must' % sane)
 
         rec = subprocess.run([os.path.join(REPO, 'src', 'akuji.exe'),
                               '--emudiff', out], capture_output=True, text=True)

@@ -32,6 +32,22 @@
  * states, without a single fault - so the technique is not confined to
  * arithmetic helpers, which is what the project record used to say.
  *
+ * BUT A FAULT IS NOT WHAT MOST BAD ACCESSES DO HERE, and that is the more
+ * important half. The emu_sanity controls in tools/emudiff.py write through a
+ * wild pointer and read through one, and BOTH RETURN: only executing unmapped
+ * memory actually stops. So an unmapped read quietly yields zero, and a handler
+ * that reaches a global nobody placed sees 0 and carries on down a real-looking
+ * branch. "0 faulted" therefore means the handlers COMPLETE, not that they ran
+ * against sane state.
+ *
+ * fill= is the answer to that. Fill the globals region with a poison byte,
+ * run the same case twice with two different poisons, and any case whose answer
+ * changes read something nobody placed. Silence becomes a signal.
+ *
+ * Over the 312-case live handler sweep, 4 moved - all of them type 69. So the
+ * other 308 read only what their case placed, and the reach claim survives its
+ * own caveat with a number attached instead of a hope.
+ *
  * BSS IS NOT IN THE FILE. Globals like p_LayerInfo point into BSS, which a PE
  * does not store, so anything read from there has to be written first with a
  * mem= entry. That is not a workaround - it is the setup the test wants
@@ -45,6 +61,7 @@
  *       stk=a,b,c           further arguments, left to right
  *       mem=ADDR:HEXBYTES   memory to place first; repeatable
  *       get=ADDR:LEN        memory to read back AFTER the call; repeatable
+ *       fill=ADDR:LEN:BYTE  fill a region BEFORE the mem= writes; repeatable
  *       f.<anything>=<int>  ignored here, carried through for the Pascal
  *
  * Each line is echoed to the output with `  -> <eax>` or `  -> FAULT <why>`
@@ -94,6 +111,7 @@ public class EmuDiff extends GhidraScript {
         List<long[]> memAddr = new ArrayList<>();   // {addr}
         List<byte[]> memData = new ArrayList<>();
         List<long[]> getSpec = new ArrayList<>();   // {addr, len}
+        List<long[]> fills = new ArrayList<>();     // {addr, len, byte}
     }
 
     @Override
@@ -161,6 +179,14 @@ public class EmuDiff extends GhidraScript {
                 int colon = v.indexOf(':');
                 c.memAddr.add(new long[]{ num(v.substring(0, colon)) });
                 c.memData.add(hex(v.substring(colon + 1)));
+            } else if (k.equals("fill")) {
+                String[] q = v.split(":");
+                if (q.length != 3)
+                    throw new IllegalArgumentException("fill= wants ADDR:LEN:BYTE");
+                long len = num(q[1]);
+                if (len <= 0 || len > (1 << 22))
+                    throw new IllegalArgumentException("fill= length " + len);
+                c.fills.add(new long[]{ num(q[0]), len, num(q[2]) & 0xFF });
             } else if (k.equals("get")) {
                 int colon = v.indexOf(':');
                 if (colon < 0)
@@ -195,6 +221,13 @@ public class EmuDiff extends GhidraScript {
     private String call(Case c) throws Exception {
         EmulatorHelper emu = new EmulatorHelper(currentProgram);
         try {
+            /* Fills go down FIRST, so an explicit mem= always wins over the
+             * poison underneath it. */
+            for (long[] f : c.fills) {
+                byte[] blk = new byte[(int) f[1]];
+                java.util.Arrays.fill(blk, (byte) f[2]);
+                emu.writeMemory(toAddr(f[0]), blk);
+            }
             for (int i = 0; i < c.memAddr.size(); i++)
                 emu.writeMemory(toAddr(c.memAddr.get(i)[0]), c.memData.get(i));
 
