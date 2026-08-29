@@ -34,3 +34,6 @@ qda_out/
 src/lib/
 src/selftest.log
 src/akuji.exe
+
+# The second build, for tools/bindiff.py. Big, and not ours to redistribute.
+akuji_ver101/

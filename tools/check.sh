@@ -107,6 +107,17 @@ ref analyse_events  "$GAME"
 # and src/Ending.pas carries those two as a literal - so this is the second
 # reader that says the literal is right.
 ref x87_sim check
+
+# The two builds of akuji.exe. The claim src/ leans on is that no INSTRUCTION
+# differs between them - so every oddity reproduced here is the author's and
+# not a translator's patch. --strict fails if a differing run outside .rsrc
+# stops being a string.
+if [ -f "$REPO/akuji_ver101/akuji.exe" ]; then
+    ref bindiff --strict
+else
+    printf '  %-22s skipped - akuji_ver101 is not present
+' "bindiff"
+fi
 python "$REPO/tools/x87_sim.py" ending > "$SCRATCH/ending.log" 2>&1
 if grep -q '(212, 236)' "$SCRATCH/ending.log"; then
     printf '  %-22s exit=0  the two ending deviations still are 212 and 236
