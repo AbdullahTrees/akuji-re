@@ -84,7 +84,7 @@ type
     procedure DDDD1Init(Sender: TObject);
     procedure TitleSound(Index: Integer);
   private
-    FLastFrame: QWord;     // p_LastFrameTime 0x0046D1E0
+    FLastFrame: DWord;     // p_LastFrameTime 0x0046D1E0
     FLimitFrames: Boolean; // flag at 0x0046CE60
     FArchive: TQdaArchive;
     FTitle: TBitmap;
@@ -111,7 +111,7 @@ type
     FEnding: TEndingScreen;
     { 0x00466888's three pieces of state. The stamp and the running count are
       locals of the original's own once-a-second sample. }
-    FDebugStamp: QWord;
+    FDebugStamp: DWord;
     FDebugFrames: Integer;
     FDebugFps: Integer;
     FUseArchive: Boolean;     { p_UseArchive 0x0046CCB4 }
@@ -351,7 +351,10 @@ begin
   FTitleScreen.OnResetOpening := TitleResetOpening;
   FTitleScreen.OnGallery := TitleGallery;
   FLimitFrames := True;
-  FLastFrame := GetTickCount64;
+  { Raise the multimedia timer period before the first frame: without it
+    the Sleep(1) below takes about 15.6 ms and caps the rate anyway. }
+  BeginFrameClock;
+  FLastFrame := FrameClockMs;
 
   { The rest of the original's global reset, in its order. }
   Randomize;
@@ -378,9 +381,13 @@ end;
   --------------------------------------------------------------------------- }
 procedure TFrm_main.AppIdle(Sender: TObject; var Done: Boolean);
 var
-  Now_, Elapsed: QWord;
+  Now_, Elapsed: DWord;
 begin
-  Now_ := GetTickCount64;
+  { FrameClockMs is timeGetTime. Reading the other one stepped 15-16 ms and
+    held the game to 40 fps against the original's 62 - see GameState.pas.
+    DWord arithmetic on purpose: the clock wraps every 49 days and the
+    subtraction wraps with it, exactly as the original's does. }
+  Now_ := FrameClockMs;
   Elapsed := Now_ - FLastFrame;
 
   if FLimitFrames and (Elapsed < FRAME_MS) then
@@ -551,16 +558,16 @@ end;
   the previous second's total. }
 procedure TFrm_main.DrawDebugOverlay;
 var
-  Now: QWord;
+  Now: DWord;
 begin
   if not DebugLog then Exit;
 
-  Now := GetTickCount64;
+  Now := FrameClockMs;
   if Int64(Now) - Int64(FDebugStamp) > 1000 then
   begin
     FDebugFps := FDebugFrames;
     FDebugFrames := 0;
-    FDebugStamp := GetTickCount64;
+    FDebugStamp := FrameClockMs;
   end;
   Inc(FDebugFrames);
 
@@ -1135,6 +1142,8 @@ end;
   --------------------------------------------------------------------------- }
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
+  { Give the multimedia timer period back - raising it is process-wide. }
+  EndFrameClock;
   Application.OnIdle := nil;
   if FDataDir <> '' then
     SaveSettings(FDataDir);

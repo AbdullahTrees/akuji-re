@@ -130,6 +130,25 @@ def main():
                    'nothing, so event sounds and event music are silent')
     if 'FSession.Audio := TFormAudio.Create' not in text:
         bad.append('TFormAudio exists but is not installed on the session')
+
+    # The frame CLOCK. GetTickCount64 steps 15-16 ms on Windows, so reading it
+    # here held the game to 40 fps against the original's 62. The original
+    # reads timeGetTime, which is also the only one of the two that exists on
+    # an XP target.
+    # Comments mention the wrong clock on purpose, to say why it is wrong, so
+    # strip them before looking - the first version of this check failed on its
+    # own explanatory comment.
+    idle_code = re.sub(r'[{][^}]*[}]', ' ', idle)
+    if 'GetTickCount64' in idle_code:
+        bad.append('AppIdle reads GetTickCount64 - it steps 15-16 ms on '
+                   'Windows, which caps the frame rate near 40. The original '
+                   'reads timeGetTime; use FrameClockMs')
+    if 'FrameClockMs' not in idle_code:
+        bad.append('AppIdle does not read FrameClockMs')
+    if 'BeginFrameClock' not in text:
+        bad.append('nothing calls BeginFrameClock - without timeBeginPeriod(1) '
+                   'the Sleep(1) in AppIdle takes about 15.6 ms and caps the '
+                   'frame rate anyway')
     for cb in ('FDialogue.OnSound', 'FDialogue.OnMusic',
                'FDialogue.OnStopMusic'):
         if cb not in text:

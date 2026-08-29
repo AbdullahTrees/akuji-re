@@ -2310,6 +2310,62 @@ begin
     Log.Add('OK - a continue is a new game with a file read over the top');
 end;
 
+{ The frame clock's RESOLUTION, which is what the frame rate actually rests on.
+
+  The limiter proceeds when the elapsed time reaches FRAME_MS, so the clock's
+  step size is the frame rate's floor. GetTickCount64 steps 15-16 ms on Windows,
+  which put the game at 40 fps against the original's 62; timeGetTime steps 1 ms
+  once the multimedia timer period is raised.
+
+  Measured, not asserted about: the tolerance is deliberately loose - anything
+  at or under 5 ms passes - because the point is to tell a 1 ms clock from a
+  15.6 ms one, and a loaded machine must not make that a flaky test. }
+function TestFrameClock(Log: TStrings): Integer;
+var
+  A, B, Step, Worst, Seen: DWord;
+  Guard: Integer;
+begin
+  Result := 0;
+  BeginFrameClock;
+  try
+    Worst := 0;
+    Seen := 0;
+    Guard := 0;
+    A := FrameClockMs;
+    while (Seen < 8) and (Guard < 20000000) do
+    begin
+      B := FrameClockMs;
+      if B <> A then
+      begin
+        Step := B - A;
+        if Step > Worst then
+          Worst := Step;
+        A := B;
+        Inc(Seen);
+      end;
+      Inc(Guard);
+    end;
+    if Seen < 8 then
+    begin
+      Log.Add('FAILED: the frame clock did not advance - it cannot pace a '
+        + 'frame loop at all');
+      Inc(Result);
+    end
+    else if Worst > FRAME_CLOCK_MAX_STEP_MS then
+    begin
+      Log.Add(Format('FAILED: the frame clock steps %d ms at worst. That is '
+        + 'the GetTickCount64 granularity, and it holds the game to about '
+        + '40 fps where the original runs at 62', [Worst]));
+      Inc(Result);
+    end
+    else
+      Log.Add(Format('  frame clock steps %d ms at worst over %d samples',
+                     [Worst, Seen]));
+  finally
+    EndFrameClock;
+  end;
+end;
+
 { The outlined drawer's font name, pinned against akuji.exe.
 
   Worth a check of its own because it was asked as a direct question - "Arial
@@ -2888,6 +2944,7 @@ begin
   Inc(Result, TestPixelConversion(Log));
   Inc(Result, TestOpeningTiming(Log));
   Inc(Result, TestOutlinedFontName(Log, GameDir));
+  Inc(Result, TestFrameClock(Log));
 
   Log.Add('');
   if Result = 0 then
