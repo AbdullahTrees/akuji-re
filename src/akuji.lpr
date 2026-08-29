@@ -8219,6 +8219,24 @@ begin
   end;
 end;
 
+{ entry @ 0x0046716C - the .dpr program block, which Delphi compiles into a
+  function of its own. Four statements:
+
+      Application.Initialize
+      Application.Title := 'Akuji the Demon'
+      Application.CreateForm(TFrm_main, Frm_main)
+      Application.Run
+
+  and everything the game does hangs off the last one, because
+  TApplication.Run's idle handler is TFrm_main_AppIdle.
+
+  The self-test dispatch above the four is OURS. It is not in the original
+  and it is deliberately before Application.Initialize so a test run never
+  creates a window.
+
+  This is the one routine in the language with no declaration to hang an
+  address on, which is why it sat in the backlog looking unwritten;
+  tools/implemented.py now recognises a program block specifically. }
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or

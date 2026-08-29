@@ -20,20 +20,14 @@ Toolchain: Lazarus at `E:\lazarus`, FPC 3.2.2, targets Win64.
 Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 
 **Coverage** (`python tools/implemented.py`): of 149 game-layer functions,
-**141 have executable Pascal and 0 are untouched**. The remaining 8 are
-*described* - read and written up, no code - and are listed by
-`tools/implemented.py --described`. They are, in order of what they would buy:
+**all 149 have executable Pascal.** Nothing is untouched and nothing is
+description-only.
 
-| Address | Name | Why it is still prose |
-|---|---|---|
-| `0x461BA8` | `HUD_Draw` | needs the life-icon art wired |
-| `0x461EE4` | `PauseMenu_Update` | the pause screen paints the frozen scene and steps nothing |
-| `0x462330` | `Title_MainMenu` | `Title.pas` has the logic; the screen is not driven from it |
-| `0x46214C` | `Title_Init` | the boot path, partly inlined in `GmMain` |
-| `0x4568D0` | `Overlay_Update` | `Dialogue.pas` is written from it but not attributed |
-| `0x463154` | `Opening_Update` | called from `Game_StartOrLoad`, not a state handler |
-| `0x465584` | `TFrm_main_DDDD1Init` | init, partly inlined in `GmMain` |
-| `0x46716C` | `entry` | the `.dpr` block |
+That number is coverage, NOT correctness. It means every function has code
+with its address above the declaration and tests pinning its constants. It
+does not mean the code computes what the original computes - see section 14
+for what actually establishes that, and note that the only direct
+original-versus-ours comparison covers four leaf functions.
 
 **All 78 entity-type handlers are translated**, and that is checked rather
 than claimed: `--selftest-entities` reads the jump table out of `akuji.exe`,

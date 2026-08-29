@@ -148,6 +148,35 @@ def scan(src_dir):
                                         (name, m.group(2)))
             i += 1
 
+        # A program's main block is a routine with no declaration.
+        #
+        # Delphi compiles a .dpr's `begin ... end.` into a function - it is
+        # `entry` at 0x0046716C - but there is nothing for the rule above to
+        # anchor to, so the one construct in the language that has no
+        # declaration could never be counted however complete it was.
+        #
+        # This recognises exactly that: in a .lpr, the LAST top-level `begin`,
+        # with the address in the comment block immediately above it. It is
+        # not a loosening - it names one construct that the rule cannot
+        # otherwise reach.
+        if name.lower().endswith('.lpr'):
+            for j in range(len(lines) - 1, -1, -1):
+                if lines[j].rstrip() == 'begin':
+                    k = j - 1
+                    while k >= 0 and not lines[k].strip():
+                        k -= 1
+                    end = k
+                    while k >= 0 and '{' not in lines[k]:
+                        k -= 1
+                    if k >= 0:
+                        blk = '\n'.join(lines[k:end + 1])
+                        for am in ADDR.finditer(blk):
+                            a = int(am.group(1), 16)
+                            if GAME_LO <= a < GAME_HI:
+                                impl.setdefault(a, []).append(
+                                    (name, 'program block'))
+                    break
+
         # A near miss: the address sits in a COMMENT BLOCK that is followed
         # by a routine declaration within NEAR_LINES - close enough that the
         # block is plausibly about that routine - but not immediately above
