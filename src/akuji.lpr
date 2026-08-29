@@ -7972,7 +7972,7 @@ var
   BoxA, BoxB: TBox;
   IsBool, HasMem: Boolean;
   WantMem, GotMem: string;
-  Divergent, DivConfirmed, DivStale, HandlerType: Integer;
+  Divergent, DivConfirmed, DivStale, HandlerType, HSlot: Integer;
   HW: TCountingWorld;
   HPool: TEntityPool;
   HP: TPlayerState;
@@ -8237,10 +8237,37 @@ begin
           FillChar(HL, SizeOf(HL), 0);
           FillChar(HInp, SizeOf(HInp), 0);
           RandomSeed := Cardinal(Key('f.seed', 0));
+
+          { THE ENTITY GOES INTO THE POOL, AT ITS OWN SLOT, AND THE HANDLER
+            RUNS ON THAT COPY.
+
+            Not a detail. Several handlers reach back through the pool by slot
+            index rather than through the reference they were handed - Steer
+            @ 0x00461738 is the clearest, taking a slot number and working on
+            FSlots[Slot]. Run the handler on a standalone record and those
+            writes land on a different entity, so the record read back is
+            missing everything the helper did. That is what made types 46, 48,
+            51, 55 and 57 all differ on int 19: our Steer was correct and was
+            faithfully updating the wrong entity.
+
+            In the original there is no distinction to get wrong - the handler
+            is passed a pointer straight into the pool array. Putting the
+            entity in the pool is what makes the two the same storage. }
+          HSlot := E.Raw[EF_SLOT];
+          if (HSlot < 0) or (HSlot >= ENTITY_COUNT) then
+          begin
+            Log.Add(Format('  %-26s EF_SLOT is %d, outside the pool',
+                           [Name, HSlot]));
+            Inc(Bad);
+            Inc(Ran);
+            Continue;
+          end;
+          HPool.Entity(HSlot)^ := E;
           { The game state the ORIGINAL will read out of its global, not
             the register - see the note in tools/emudiff.py. }
-          EntityRunHandler(E, HP, HL, HInp, HW, Key('f.gamestate', 0));
-          GotMem := HexOfEntity(E);
+          EntityRunHandler(HPool.Entity(HSlot)^, HP, HL, HInp, HW,
+                           Key('f.gamestate', 0));
+          GotMem := HexOfEntity(HPool.Entity(HSlot)^);
           HasMem := True;
           Got := 0;
         finally
