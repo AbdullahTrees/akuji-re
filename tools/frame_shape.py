@@ -80,6 +80,10 @@ def main():
     # And the ordering in AppIdle: pre, then the entity update, then post.
     idle = text[text.index('procedure TFrm_main.AppIdle'):]
     idle = idle[:idle.index('\nprocedure ')]
+    # Comments name the wrong thing on purpose, to say why it is wrong, so
+    # strip them before matching - two checks here have now failed on
+    # their own explanatory comments.
+    idle_code = re.sub(r'[{][^}]*[}]', ' ', idle)
     order = [m.group(1) for m in re.finditer(
         r'\b(DispatchPre|FSession\.TickEntities|DispatchPost)\b', idle)]
     want_order = ['DispatchPre', 'FSession.TickEntities', 'DispatchPost']
@@ -128,6 +132,31 @@ def main():
     if 'TFormAudio = class(TSessionAudio)' not in text:
         bad.append("there is no TFormAudio - the TSessionAudio defaults do "
                    'nothing, so event sounds and event music are silent')
+    # Step 7. Player_Update's dash tests InputState[$10] = 0 AND AxisX <> 0,
+    # which is only satisfiable if $10 - Moving - holds the PREVIOUS frame's
+    # value. That means InputEndOfFrame has to run after the dispatch, not
+    # before it. Setting Moving in PollInput made the two conditions
+    # contradictory and the dash could never fire.
+    if 'InputEndOfFrame' not in text:
+        bad.append("nothing calls InputEndOfFrame - step 7. The dash tests "
+                   "Moving = 0 AND AxisX <> 0, which only works if Moving is "
+                   "the PREVIOUS frame's value")
+    else:
+        # Comment-stripped, like the clock check above - matching raw text
+        # here picked up the arm table in AppIdle's own comment.
+        order7 = [m.group(1) for m in re.finditer(
+            r'(DispatchPost|InputStep7)', idle_code)]
+        if order7 != ['DispatchPost', 'InputStep7']:
+            bad.append("step 7 does not run after DispatchPost; the handlers "
+                       "would read this frame's Moving instead of the "
+                       "previous frame's")
+    poll = text[text.index('procedure TFrm_main.PollInput;'):]
+    poll = poll[:poll.index(chr(10) + 'end;')]
+    poll_code = re.sub(r'[{][^}]*[}]', ' ', poll)
+    if 'Moving' in poll_code or 'HoldTimer' in poll_code:
+        bad.append('PollInput touches Moving or HoldTimer - both belong to '
+                   'step 7, and doing them at poll time is what broke the dash')
+
     if 'FDialogue.OnResumeMusic' not in text:
         bad.append('FDialogue.OnResumeMusic is not wired - Overlay_Update '
                    'restores the remembered track when the fanfare ends '
@@ -140,10 +169,6 @@ def main():
     # here held the game to 40 fps against the original's 62. The original
     # reads timeGetTime, which is also the only one of the two that exists on
     # an XP target.
-    # Comments mention the wrong clock on purpose, to say why it is wrong, so
-    # strip them before looking - the first version of this check failed on its
-    # own explanatory comment.
-    idle_code = re.sub(r'[{][^}]*[}]', ' ', idle)
     if 'GetTickCount64' in idle_code:
         bad.append('AppIdle reads GetTickCount64 - it steps 15-16 ms on '
                    'Windows, which caps the frame rate near 40. The original '

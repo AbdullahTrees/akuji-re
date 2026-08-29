@@ -38,6 +38,7 @@ var F_OVERLAY_UPDATE = 0x4568d0;
 var F_ENTITY_DESTROY = 0x461400;
 var F_PLAYER_TOUCH = 0x457880;
 var F_ADVANCE_STEP = 0x45509c;
+var F_PLAYER_UPDATE = 0x4585a8;
 
 /* Pointer CELLS. Each holds the address of the thing, not the thing. */
 var P_PLAYERSTATE = 0x46cff0;
@@ -46,6 +47,7 @@ var P_EVENTTABLE = 0x46cce0;
 var P_EVENTID = 0x46ce7c;
 var P_OVERLAY_ACTIVE = 0x46cd00;
 var P_OVERLAY_MODE = 0x46cda0;
+var P_INPUTSTATE = 0x46cc58;
 
 /* Layout, all established elsewhere in the project. */
 var ENTITY_STRIDE = 0x104;
@@ -56,6 +58,25 @@ var EF_ALIVE_AT = 0x08;
 var EF_VARIANT_AT = 0x18;
 var PS_WEAPON_AT = 0x11cc;
 var PS_JUMP_AT = 0x11d0;
+
+/* The double-tap dash, read straight off Player_Update's ground-state arm.
+ * It fires only when ALL of these hold:
+ *
+ *     InputState[0x10] == 0        no button held
+ *     AxisX (+0x00) != 0           a direction is pressed
+ *     HoldTimer (+0x18) != 0       a tap window is open
+ *     AxisX == HeldX (+0x08)       the SAME direction as the first tap
+ *     PlayerState[4] == 1          and the ability is owned
+ *
+ * A broken tap window and a missing ability look identical from outside the
+ * game, which is why both are traced here. The window is armed with 0x1E -
+ * thirty frames - by the same branch that fails the test. */
+var IN_AXIS_X_AT = 0x00;
+var IN_HELD_X_AT = 0x08;
+var IN_BUTTON_AT = 0x10;
+var IN_HOLD_TIMER_AT = 0x18;
+var EF_STATE_AT = 0x20;
+var PLAYER_STATE_DASH = 1;
 
 var mod = Process.mainModule;
 var slide = mod.base.sub(IMAGE_BASE);
@@ -180,6 +201,52 @@ Interceptor.attach(slide.add(F_PLAYER_TOUCH), {
             emit('      before ' + this.before);
             emit('      after  ' + after);
         }
+    }
+});
+
+/* --- the dash trigger ---------------------------------------------------
+ *
+ * Player_Update runs every frame, so logging unconditionally would bury
+ * everything else. Only transitions are reported: the tap window opening, the
+ * window running out, and the dash actually firing. */
+var lastTimer = -1;
+var lastState = -1;
+
+Interceptor.attach(slide.add(F_PLAYER_UPDATE), {
+    onEnter: function () { this.ent = this.context.eax; },
+    onLeave: function () {
+        var inp = deref(P_INPUTSTATE);
+        var ps = deref(P_PLAYERSTATE);
+        if (inp === null || ps === null) { return; }
+        var ax, held, btn, timer, state, canDash;
+        try {
+            ax = inp.add(IN_AXIS_X_AT).readS32();
+            held = inp.add(IN_HELD_X_AT).readS32();
+            btn = inp.add(IN_BUTTON_AT).readU8();
+            timer = inp.add(IN_HOLD_TIMER_AT).readS32();
+            state = this.ent.add(EF_STATE_AT).readS32();
+            canDash = ps.add(4).readU8();
+        } catch (e) { return; }
+
+        if (timer !== lastTimer && (timer === 0x1e || timer === 0)) {
+            emit('dash window ' + (timer === 0x1e ? 'OPENED' : 'expired') +
+                 '  axis=' + ax + ' held=' + held + ' btn=' + btn +
+                 ' ability=' + canDash);
+        }
+        if (state === PLAYER_STATE_DASH && lastState !== PLAYER_STATE_DASH) {
+            emit('DASH FIRED  axis=' + ax + ' held=' + held +
+                 ' timer=' + timer + ' ability=' + canDash);
+        }
+        /* The near miss: in the window, pressing a direction, and it did NOT
+         * fire. Whichever of the five conditions failed is visible here. */
+        if (timer > 0 && ax !== 0 && state !== PLAYER_STATE_DASH &&
+            lastTimer === timer + 1) {
+            emit('dash NOT taken  axis=' + ax + ' held=' + held +
+                 ' btn=' + btn + ' timer=' + timer + ' ability=' + canDash +
+                 ' state=' + state);
+        }
+        lastTimer = timer;
+        lastState = state;
     }
 });
 

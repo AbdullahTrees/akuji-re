@@ -135,6 +135,7 @@ type
     procedure DrawHud;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
+    procedure InputStep7;
     { The state dispatch is in two halves with the entity update between
       them - see the note in AppIdle. }
     procedure DispatchPre;
@@ -429,7 +430,9 @@ begin
   DispatchPre;
   FSession.TickEntities(GameStateValue);
   DispatchPost;
-  { TODO step 7: button edge-detection and repeat timers }
+  { Step 7. Must come after the dispatch: the handlers read Moving and the
+    button latches expecting the PREVIOUS frame's values. }
+  InputStep7;
   DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
   DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
 
@@ -442,21 +445,30 @@ end;
   The axes are the two-key form the original's are: left and right both held
   cancel to zero rather than one winning, which is what a real d-pad does and
   what the controller's double-tap window assumes. }
+{ POLLING ONLY. Everything this used to do besides reading the device belongs
+  to the END of the frame, and doing it here is what broke the dash.
+
+  Player_Update's ground arm fires the dash when
+
+      InputState[$10] = 0  and  AxisX <> 0  and  HoldTimer <> 0
+        and  AxisX = HeldX  and  PlayerState[4] = 1
+
+  and byte $10 is Moving. Setting Moving from this frame's axes BEFORE the
+  handlers run makes the first two conditions contradictory: Moving is true
+  exactly when AxisX is non-zero, so the dash could never fire, ever. It has to
+  hold the PREVIOUS frame's value while the handlers run, which is what makes
+  the test an EDGE - "a direction is pressed now and was not last frame".
+
+  InputEndOfFrame is what does all of it, and it existed, and was tested, and
+  the frame loop simply never called it - AppIdle's step 7. Title.pas even
+  describes the ordering it depends on. The HoldTimer countdown below was a
+  second copy of the same work at the wrong end of the frame. }
 procedure TFrm_main.PollInput;
-var
-  I: Integer;
 begin
   Joy.Update;
 
-  { The previous frame's buttons become the latch, which is what turns a held
-    key into an edge. Player_Update reads both. }
-  for I := 0 to 3 do
-    FSession.Input.ButtonLatch[I] := FSession.Input.Button[I];
-
   FSession.Input.AxisX := Ord(Joy.IsDown(abRight)) - Ord(Joy.IsDown(abLeft));
   FSession.Input.AxisY := Ord(Joy.IsDown(abDown)) - Ord(Joy.IsDown(abUp));
-  FSession.Input.Moving := (FSession.Input.AxisX <> 0)
-                           or (FSession.Input.AxisY <> 0);
 
   { The confirm edge the message box needs, taken before Button[0] is
     overwritten below. }
@@ -466,17 +478,20 @@ begin
   FSession.Input.Button[1] := Joy.IsDown(abAction2);
   FSession.Input.Button[2] := Joy.IsDown(abAction3);
   FSession.Input.Button[3] := Joy.IsDown(abAux1);
+end;
 
-  { The double-tap window. Player_Update opens it and this counts it down. }
-  if FSession.Input.HoldTimer > 0 then
-  begin
-    Dec(FSession.Input.HoldTimer);
-    if FSession.Input.HoldTimer = 0 then
-    begin
-      FSession.Input.HeldX := 0;
-      FSession.Input.HeldY := 0;
-    end;
-  end;
+{ Step 7, which had been a TODO: the edge detection and the repeat timers, and
+  the double-tap window with them. AFTER the state handlers, so that what they
+  read is the previous frame's. }
+procedure TFrm_main.InputStep7;
+var
+  Down: array[0..3] of Boolean;
+begin
+  Down[0] := Joy.IsDown(abAction1);
+  Down[1] := Joy.IsDown(abAction2);
+  Down[2] := Joy.IsDown(abAction3);
+  Down[3] := Joy.IsDown(abAux1);
+  InputEndOfFrame(FSession.Input, Down);
 end;
 
 { The map, then the sprites, then the HUD. The camera is the session's layer
