@@ -50,7 +50,7 @@ against independent Python implementations (section 13).
 **The event system is decoded end to end** - both halves of the mini-language
 and the placement machinery around it. Section 8b.
 
-**Before committing, run `tools/check.sh`.** One command: build, eleven
+**Before committing, run `tools/check.sh`.** One command: build, thirteen
 self-tests, five reference implementations, a records check and a negative
 control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
