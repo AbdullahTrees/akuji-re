@@ -1151,7 +1151,14 @@ silently remove the accident.
 is done too" — the moment it builds and its test passes. Everything below is a
 consequence of not doing that.
 
-**Never `git checkout -- <path>` on source.** It is unrecoverable. If a revert
+**Never use ANY git command to restore a source file.** Not
+`git checkout -- <path>`, not `git checkout-index`, not `git restore`. The rule
+was written naming `git checkout` and has now been broken a third time by
+reaching for a *different* git command in a mutation-test script -
+`git checkout-index -f` restored GmMain.pas from the index, where none of that
+session's work was staged. The rule is about the CLASS, not the spelling.
+
+It is unrecoverable. If a revert
 is genuinely wanted, `git stash push` keeps a copy. `git checkout` has now
 destroyed uncommitted work here **twice**, and both times this file already
 said not to use it — so the rule was never the problem, the habit was. The
