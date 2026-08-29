@@ -362,6 +362,23 @@ const
     ((204, 205, 206, 207), (208, 209, 210, 211));
 
   T7_FRAMES = 4;  T7_TICKS = 4;
+  { TWO rows, and I briefly made it three. Worth recording because the wrong
+    answer looked well-evidenced.
+
+    --emudiff ran type 7 with EF_VARIANT 2 and the original answered 50 where
+    this answers 40. Reading the image at index 8 gives (50, 51, 52, 53), and
+    the next address I happened to have recorded was T9's at 0x0046BCDC - which
+    is 0x30 further on, twelve ints, three rows. So a third row was added.
+
+    It is type 8's table. TYPE8_SPRITES is at 0x0046BCCC, exactly 0x20 past
+    T7's, and tools/table_extents.py said so within minutes of being written:
+    a twelve-int T7_SPRITES overruns into it. The 50 the original returned is
+    type 8's first sprite, reached by running off the end of type 7's.
+
+    Which makes this DIV-011, the same shape as DIV-010, and makes the lesson
+    the one already written down: an adjacent table's contents are evidence
+    about the ADJACENT table. Picking the next recorded address, rather than
+    the next actual one, is how a boundary check gets the boundary wrong. }
   T7_ROWS = 2;
   T7_TABLE_ADDR = $0046BCAC;
   T7_SPRITES: array[0..T7_ROWS - 1, 0..T7_FRAMES - 1] of Integer =

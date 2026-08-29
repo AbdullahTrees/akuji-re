@@ -139,6 +139,17 @@ printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
 [ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
 
 note ""
+note "=== table lengths are pinned from OUTSIDE the table ==="
+# The 181 value-pins in --selftest-entities cannot catch a short table: the
+# count they check with comes from the array being checked. This bounds each
+# table by the address of the next one instead.
+python "$REPO/tools/table_extents.py" > "$SCRATCH/extents.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "table_extents" "$rc"     "$(grep -E 'flush against' "$SCRATCH/extents.log" | tail -1 | sed 's/^ *//')"
+[ $rc -ne 0 ] && { fail=1; sed -n '/OVERRUNS/,$p' "$SCRATCH/extents.log" | head -10; }
+
+note ""
 note "=== the Ghidra scripts still compile ==="
 # analyzeHeadless compiles a script at run time, so a typo in EmuDiff.java
 # only surfaces two minutes into a headless run. javac says it in a second,
