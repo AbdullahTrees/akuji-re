@@ -101,6 +101,14 @@ const
   MB_MODE_END     = 3;      { \e }
   MB_MODE_PROMPT  = 4;      { \w }
 
+  { Sub-op 80's phases, on the same ScreenPhase counter the ending and the
+    game-over screen use. }
+  SOULGET_IDLE    = 0;
+  SOULGET_PLAYING = 1;
+  SOULGET_FADING  = 2;
+  { AutoLoadMidis[11] - the byte offset in the original is 0x2C. }
+  SOULGET_MIDI    = 11;
+
   { The text is Shift-JIS and it is scanned a PAIR of bytes at a time, so the
     character that suppresses the typewriter click is the full-width space,
     not ASCII 0x20. }
@@ -209,6 +217,9 @@ type
   TOverlayResumeMusic = procedure of object;
   TOverlayStartFade = procedure(FadeOut: Boolean) of object;
   TOverlayFadeBusy = function: Boolean of object;
+  TOverlaySoulGetDone = procedure of object;
+  { 0x00450FD0 - "is a track still playing". Phase 1 waits on it. }
+  TOverlayMusicBusy = function: Boolean of object;
 
   { The message overlay as the interpreter's collaborator. It owns no drawing
     surface - the form hands it a canvas - and it advances the script itself,
@@ -244,9 +255,13 @@ type
     FOnFadeBusy: TOverlayFadeBusy;
     FOnFadeMusic: TOverlayMusic;
     FMap: TTileMap;
+    FSaveFileName: string;
+    FOnSoulGetDone: TOverlaySoulGetDone;
+    FOnMusicBusy: TOverlayMusicBusy;
     procedure TakePage(const Text: string);
     procedure PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY: Integer);
     function EventSlot(EventId: Integer): Integer;
+    function MusicBusy: Boolean;
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -290,6 +305,23 @@ type
     procedure PlayMusic(Track: Integer; Loop: Boolean); override;
     { Sub-op 14 @ 0x00455Exx: TileMap_Set on layer 0. }
     procedure SetTile(X, Y, Tile: Integer); override;
+    { Sub-op 13 @ 0x00455Dxx. Writes the RESUME POINT into the record first -
+      the stage, the player's live position and the camera - and only then
+      dumps all 0x11E4 bytes over data\save.dat. }
+    procedure SaveGame(var P: TPlayerState); override;
+    { Sub-op 80, `soulget` @ 0x00455Exx - a THREE-PHASE machine on ScreenPhase,
+      not a one-shot, and the only route to the ending:
+
+          phase 0   -> 1   effect $10, playlist entry 11 once, destroy the
+                           entity that was touched
+          phase 1   -> 2   once the music has stopped, fade OUT
+          phase 2   -> 0   once the fade has landed, fade IN, reset the game
+                           state, reload the title assets, and set
+                           GameState 150 with the opening's counters cleared
+
+      The middle phase is why it cannot be a single call: it waits a track
+      and a fade, which is thirty frames on its own. }
+    procedure SoulGet; override;
 
     { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
       not the level. Returns True while the box is up, which is the caller's
@@ -318,6 +350,15 @@ type
       the original, so two callbacks here. }
     property OnFadeMusic: TOverlayMusic read FOnFadeMusic write FOnFadeMusic;
     property Map: TTileMap read FMap write FMap;
+    { Where sub-op 13 writes. The original hard-codes data\save.dat relative
+      to the working directory; this is given the resolved path. }
+    property SaveFileName: string read FSaveFileName write FSaveFileName;
+    { What phase 2 needs and this unit cannot reach: GameState_Reset, the
+      title asset load and the font definition all live on the form. }
+    property OnSoulGetDone: TOverlaySoulGetDone read FOnSoulGetDone
+                                                write FOnSoulGetDone;
+    property OnMusicBusy: TOverlayMusicBusy read FOnMusicBusy
+                                            write FOnMusicBusy;
     { The panel stays up for as long as its fanfare plays - Overlay_Update
       asks the music player and closes when it stops. The form owns the
       player, so it answers. }
@@ -509,6 +550,68 @@ procedure TDialogueBox.SetTile(X, Y, Tile: Integer);
 begin
   if FMap <> nil then
     FMap.SetTileRaw(X, Y, Tile);
+end;
+
+procedure TDialogueBox.SaveGame(var P: TPlayerState);
+begin
+  { The resume point, in the original's order. Note these are the LIVE
+    position and camera converted back to pixels, not the values the stage
+    started at - saving mid-room has to come back to the same spot.
+
+    The conversion is PixelOf: subtract the bias, and for a negative subtract
+    bias-31 instead so the shift truncates toward zero. The original writes
+    that idiom out four times in a row at 0x00455Dxx. }
+  P.SavedStage := Settings.CurrentStage;
+  if FPool <> nil then
+  begin
+    P.SpawnX := PixelOf(FPool.Field(SLOT_SINGLE_FIRST, EF_POS_X));
+    P.SpawnY := PixelOf(FPool.Field(SLOT_SINGLE_FIRST, EF_POS_Y));
+  end;
+  if FWorld <> nil then
+  begin
+    P.ScrollX := PixelOf(FWorld.Layer.OriginX);
+    P.ScrollY := PixelOf(FWorld.Layer.OriginY);
+  end;
+  if FSaveFileName <> '' then
+    SaveTo(P, FSaveFileName);
+end;
+
+function TDialogueBox.MusicBusy: Boolean;
+begin
+  Result := Assigned(FOnMusicBusy) and FOnMusicBusy;
+end;
+
+procedure TDialogueBox.SoulGet;
+begin
+  { The order below is the original's, and it is NOT phase order: the
+    music-finished test is written first and reads the phase the previous
+    frame left, so phase 0 falls through to phase 1 on the same frame it
+    starts. Reproduced rather than tidied into a case. }
+  if (ScreenPhase = SOULGET_PLAYING) and (not MusicBusy) then
+  begin
+    ScreenPhase := SOULGET_FADING;
+    StartFade(True);
+  end;
+
+  if ScreenPhase = SOULGET_IDLE then
+  begin
+    ScreenPhase := SOULGET_PLAYING;
+    if Assigned(FOnSound) then
+      FOnSound(POWERUP_SOUND);
+    { Playlist entry 11, and NOT looping - it is what phase 1 waits on. }
+    if Assigned(FOnMusic) then
+      FOnMusic(SOULGET_MIDI, False);
+    DestroyEventEntity(FRunner.EventId);
+  end;
+
+  if (ScreenPhase = SOULGET_FADING) and (not FadeBusy) then
+  begin
+    StartFade(False);
+    ScreenPhase := SOULGET_IDLE;
+    TitleSubMode := 0;
+    if Assigned(FOnSoulGetDone) then
+      FOnSoulGetDone;
+  end;
 end;
 
 procedure TDialogueBox.StartFade(Out_: Boolean);

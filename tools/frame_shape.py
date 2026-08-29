@@ -157,6 +157,25 @@ def main():
         bad.append('PollInput touches Moving or HoldTimer - both belong to '
                    'step 7, and doing them at poll time is what broke the dash')
 
+    # EVERY TEventHost virtual must be overridden. This is the general form of
+    # the check that was previously written one wiring at a time, by name,
+    # after each was found - and it is what would have caught all seven of
+    # them at once. A virtual with a do-nothing default is invisible until
+    # someone plays the game.
+    runner = open(os.path.join(REPO, 'src', 'EventRunner.pas'),
+                  encoding='utf-8').read()
+    k = runner.index('TEventHost = class')
+    hostdecl = runner[k:runner.index('end;', k)]
+    hosts = ''.join(open(os.path.join(REPO, 'src', f), encoding='utf-8').read()
+                    for f in ('Dialogue.pas', 'GameSession.pas', 'GmMain.pas'))
+    for m in sorted(set(re.findall(r'(?:procedure|function)\s+(\w+)', hostdecl))):
+        # The parameter list can contain ';', so match through to `override`
+        # rather than stopping at the first semicolon.
+        if not re.search(r'(procedure|function)\s+%s[^A-Za-z0-9_].{0,200}?override\s*;' % m,
+                         hosts, re.S):
+            bad.append('TEventHost.%s is never overridden - its default does '
+                       'nothing, so the event command silently has no effect' % m)
+
     if 'FDialogue.OnResumeMusic' not in text:
         bad.append('FDialogue.OnResumeMusic is not wired - Overlay_Update '
                    'restores the remembered track when the fanfare ends '

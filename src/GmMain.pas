@@ -165,6 +165,9 @@ type
       object at 0x0046CB6C. }
     procedure DialogueStartFade(FadeOut: Boolean);
     function DialogueFadeBusy: Boolean;
+    function DialogueMusicBusy: Boolean;
+    { Sub-op 80's last phase, which is all form-level work. }
+    procedure DialogueSoulGetDone;
     procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
@@ -352,6 +355,8 @@ begin
   FDialogue.OnFadeBusy := DialogueFadeBusy;
   { Sub-op 12 goes through the FADE wrapper; the power-up fanfare cuts. }
   FDialogue.OnFadeMusic := PlayMusicFading;
+  FDialogue.OnMusicBusy := DialogueMusicBusy;
+  FDialogue.OnSoulGetDone := DialogueSoulGetDone;
   FOpening.OnPicture := OpeningPicture;
   FOpening.OnMusic := PlayMusicCut;
   FOpening.OnStopMusic := StopMusicTrack;
@@ -714,6 +719,22 @@ begin
   Result := DDDD1.FadeBusy;
 end;
 
+function TFrm_main.DialogueMusicBusy: Boolean;
+begin
+  Result := KbgmPlayer1.IsPlaying;
+end;
+
+procedure TFrm_main.DialogueSoulGetDone;
+begin
+  { GameState_Reset(form, 0), the title asset load, and the font - then the
+    ending, with the opening's two counters cleared so a later new game does
+    not resume mid-cutscene. }
+  FSession.ResetState(0);
+  LoadStage(0);
+  GameStateValue := GS_ENDING;
+  FOpening.Reset;
+end;
+
 procedure TFrm_main.StopMusicTrack;
 begin
   KbgmPlayer1.Stop;
@@ -1016,6 +1037,7 @@ begin
                        FSession.Pool, FSession.World);
         { Sub-op 14 writes a tile, and the original writes to p_TileMaps[0]. }
         FDialogue.Map := FMap;
+        FDialogue.SaveFileName := FDataDir + 'data' + PathDelim + 'save.dat';
       end;
     GS_PLAY,
     GS_STATE_140:
