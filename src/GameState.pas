@@ -248,25 +248,9 @@ function SaveSettings(const AGameDir: string): Boolean;
 procedure SettingsToGlobals;
 procedure GlobalsToSettings;
 
-{ The frame clock, and it has to be timeGetTime.
-
-  THE GAME RAN AT 40 FPS INSTEAD OF ABOUT 62, and this is why. The limiter read
-  GetTickCount64, which on Windows only advances on the system timer tick -
-  measured here at 15 and 16 ms steps, never smaller. An elapsed of 15 fails the
-  `>= 16` test, so the frame waits for the NEXT tick some 31 ms later. Measured
-  directly: 40 frames in a second.
-
-  The original reads timeGetTime, a 1 ms clock once the multimedia timer period
-  is set - measured at 1 ms steps flat. So this is not a refinement, it is the
-  reconstruction: the original's own call at the original's own resolution. It
-  is also the portable-backwards choice, since timeGetTime dates to Win95 while
-  GetTickCount64 is Vista and later and would not link on an XP target at all.
-
-  BeginFrameClock fixes a second problem that is easy to miss. Sleep is rounded
-  up to the timer period too, so without timeBeginPeriod(1) the one-millisecond
-  yield in AppIdle actually sleeps about 15.6 ms - which would cap the frame
-  rate near 64 even with a perfect clock, and makes the sleep-instead-of-spin
-  divergence (DIV-001) unworkable on its own. }
+{ The frame clock. MsClock.pas carries the reasoning and the
+  measurements; these are here so the game layer does not have to
+  name a component-level unit at every call site. }
 function FrameClockMs: DWord;
 procedure BeginFrameClock;
 procedure EndFrameClock;
@@ -274,11 +258,7 @@ procedure EndFrameClock;
 implementation
 
 uses
-  Classes, SysUtils
-{$IFDEF WINDOWS}
-  , Windows, MMSystem   { timeGetTime, and the timer period it needs }
-{$ENDIF}
-  ;
+  Classes, SysUtils, MsClock;
 
 { The order is the original's, from FormKeyDown @ 0x004665C8: the menu index is
   saved and cleared BEFORE the game state is saved. }
@@ -404,26 +384,17 @@ end;
 
 function FrameClockMs: DWord;
 begin
-{$IFDEF WINDOWS}
-  Result := timeGetTime;
-{$ELSE}
-  { Elsewhere the millisecond clock has no such granularity problem. }
-  Result := DWord(GetTickCount64);
-{$ENDIF}
+  Result := MsNow;
 end;
 
 procedure BeginFrameClock;
 begin
-{$IFDEF WINDOWS}
-  timeBeginPeriod(1);
-{$ENDIF}
+  BeginMsClock;
 end;
 
 procedure EndFrameClock;
 begin
-{$IFDEF WINDOWS}
-  timeEndPeriod(1);
-{$ENDIF}
+  EndMsClock;
 end;
 
 initialization

@@ -33,7 +33,7 @@ unit KbgmPlayer;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, MidiFile, MidiOut;
+  Classes, SysUtils, SyncObjs, MsClock, MidiFile, MidiOut;
 
 const
   { KBGMFadeOut's own arithmetic: twenty volume steps, one every arg*50 ms. }
@@ -138,11 +138,11 @@ type
     FLoop: Boolean;
     FIndex: Integer;
     FCursor: Integer;
-    FStartMs: QWord;
+    FStartMs: DWord;
 
     FMasterGain: Integer;      { 0..1024 }
     FFadeFrom, FFadeTo: Integer;
-    FFadeStartMs: QWord;
+    FFadeStartMs: DWord;
     FFadeMs: Integer;
     FFading: Boolean;
     FStopAfterFade: Boolean;
@@ -219,7 +219,7 @@ var
   I: Integer;
 begin
   FCursor := 0;
-  FStartMs := GetTickCount64;
+  FStartMs := MsNow;
   for I := 0 to MIDI_CHANNELS - 1 do
     FChannelVolume[I] := DEFAULT_CHANNEL_VOLUME;
   FDirtyVolume := True;
@@ -272,7 +272,7 @@ end;
 
 procedure TKbgmThread.Execute;
 var
-  NowMs: QWord;
+  NowMs: DWord;
   ElapsedUs: Int64;
   Done, Fading: Boolean;
   T: Integer;
@@ -283,7 +283,7 @@ begin
     try
       if FPlaying then
       begin
-        NowMs := GetTickCount64;
+        NowMs := MsNow;
 
         { Fade ramp. Recomputed every tick and pushed to the channels, which is
           cheap - 16 short messages every few milliseconds. }
@@ -380,7 +380,7 @@ begin
       FFadeFrom := 0;
       FFadeTo := 1024;
       FFadeMs := AFadeInMs;
-      FFadeStartMs := GetTickCount64;
+      FFadeStartMs := MsNow;
       FFading := True;
       FMasterGain := 0;
     end
@@ -419,7 +419,7 @@ begin
     FFadeFrom := FMasterGain;
     FFadeTo := 0;
     FFadeMs := MilliSeconds;
-    FFadeStartMs := GetTickCount64;
+    FFadeStartMs := MsNow;
     FFading := True;
     FStopAfterFade := True;
   finally

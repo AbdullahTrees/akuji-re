@@ -563,7 +563,12 @@ begin
   if not DebugLog then Exit;
 
   Now := FrameClockMs;
-  if Int64(Now) - Int64(FDebugStamp) > 1000 then
+  { DWord, not Int64. Widening the subtraction defeats the wrap: the clock
+    rolls over every 49 days and 32-bit arithmetic carries through it,
+    where a 64-bit difference goes hugely negative and the counter stops
+    updating. The original subtracts in 32 bits because it has nothing
+    else. }
+  if Now - FDebugStamp > 1000 then
   begin
     FDebugFps := FDebugFrames;
     FDebugFrames := 0;
