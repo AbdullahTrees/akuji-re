@@ -60,6 +60,7 @@ type
     FGameOver: TGameOverScreen;
     FPause: TPauseMenu;
     FOpening: TOpeningScreen;
+    FTitleSlept: Boolean;     { the once-only flag at 0x0046CFE8 }
     FEnding: TEndingScreen;
     { 0x00466888's three pieces of state. The stamp and the running count are
       locals of the original's own once-a-second sample. }
@@ -98,6 +99,7 @@ type
     procedure TitleResetState;
     procedure TitleResetOpening;
     procedure TitleGallery(Slot: Integer);
+    procedure TitleInit;
     procedure GameOverRestart;
     procedure GameOverFade(FadeIn: Boolean);
     procedure GameOverMusic(Track: Integer);
@@ -492,6 +494,56 @@ begin
   KbgmPlayer1.Stop;
 end;
 
+{ Title_Init @ 0x0046214C, in the order the original does it.
+
+  Three things were missing from the version this replaces, all of them
+  before the music:
+
+    * GameState_Reset(mode 0) is the FIRST thing it does. Without it, entering
+      the title from a running game left the pool, the events and the camera
+      as they were.
+    * ScreenPhase and the title sub-mode are both cleared. ScreenPhase is the
+      counter the game-over screen, the opening and the message box share, so
+      a title reached from any of them would have inherited a live phase.
+    * a once-only Sleep of 0x168 ms, guarded by a flag at 0x0046CFE8 that is
+      set the first time through. It is 360 milliseconds of nothing, exactly
+      once per run, and it is reproduced rather than dropped because a pause
+      at the point the audio device has just been opened is more likely to be
+      load-bearing than decorative.
+
+  It does NOT draw. The old version blitted the title background here; the
+  original leaves that to Title_MainMenu, which paints it every frame.
+
+  The Font_Define arguments match GameFont.pas exactly - 32 columns, 9x9
+  cells, 8 pixel advance, last character 0x5F - which is independent
+  confirmation of constants first read off the font sheet itself. }
+procedure TFrm_main.TitleInit;
+begin
+  FSession.ResetState(0);
+  { Load_Stage_Assets(Self, nil) - stage 0, which is also what rebuilds the
+    font sheet in surface slot 0. }
+  FStageLoaded := -1;
+  LoadStage(0);
+
+  { Track 0 is init.mid: a GM Reset and two Roland GS writes, not music. The
+    original passes 0 as the repeat flag - a one-shot reset would not loop. }
+  KbgmPlayer1.Play(0, False);
+
+  ScreenPhase := 0;
+  TitleSubMode := 0;
+  GameStateValue := GS_TITLE_MENU;
+
+  if not FTitleSlept then
+  begin
+    FTitleSlept := True;
+    Sleep(TITLE_INIT_SLEEP_MS);
+  end;
+
+  { The volume sweep over all 57 effect buffers, which is the last thing it
+    does and the reason it comes after the sleep. }
+  DDSD1.Volume := Settings.Volume;
+end;
+
 { What Title_MainMenu reaches out for on NEW GAME / CONTINUE, and for the
   gallery. Callbacks so Title.pas stays off the session and the archive. }
 procedure TFrm_main.TitleResetState;
@@ -661,18 +713,7 @@ begin
         arguments match GameFont.pas exactly - 32 columns, 9x9 cells, 8 pixel
         advance, last character $5F - which is independent confirmation of
         constants that were originally read out of the font sheet itself. }
-      begin
-        { Track 0 is init.mid: a GM Reset and two Roland GS writes, not music.
-          The original passes ECX = 0 here, believed to be the repeat flag -
-          a one-shot reset would not loop. }
-        KbgmPlayer1.Play(0, False);
-        DDSD1.Volume := Settings.Volume;
-
-        if Assigned(FTitle) then
-          DDDD1.Canvas.Draw(0, 0, FTitle);
-        { Original Title_Init falls straight through to the menu. }
-        GameStateValue := GS_TITLE_MENU;
-      end;
+      TitleInit;
     GS_TITLE_MENU:
       begin
         FTitleScreen.Update(FMoveY, FMoveX, FConfirm);

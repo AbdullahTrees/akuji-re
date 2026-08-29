@@ -38,6 +38,10 @@ const
   PAUSE_RESTART  = 1;     // -> GS_TITLE_INIT
   PAUSE_QUIT     = 2;     // -> GS_QUIT
 
+  { Title_Init sleeps this long the first time it runs and never again -
+    0x0046CFE8 is the flag that remembers. }
+  TITLE_INIT_SLEEP_MS = $168;   { 360 ms }
+
   SCREEN_W = 320;
   SCREEN_H = 240;
 
