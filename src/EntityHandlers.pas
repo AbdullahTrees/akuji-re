@@ -94,6 +94,8 @@
       0x0045EC4C  type 70  a hundred-hp thing that dies of any wound at all
       0x0045ED88  type 71  a walker that is only vulnerable while it rests
       0x0045EFC8  type 72  a faller, a flyer, and the flyer's trail
+      0x0045F218  type 73  a fourth boss, driven by THREE different children
+      0x0045F498  type 74  its charge-up and the fan that charge-up fires
 
   And the dispatcher they hang off:
 
@@ -1903,6 +1905,80 @@ const
   T72_SELF_TYPE = $48;      { 72 - the flyer trails copies of itself }
   T72_TRAIL_VARIANT = 2;
 
+  { --- Types 73 and 74 --------------------------------------------------
+    TYPE 73 is the biggest parent-child state machine in the game. Types
+    31/35, 38/39, 50/39 and 52/53 each hand ONE state transition to a spawned
+    child; this one hands over three, to three DIFFERENT children:
+
+        state 3   waits for a type 75 to move it on
+        state 5   waits for a type 74 to move it on - and type 74 below is
+                  where that write lives, `owner.EF_STATE := 6`
+        state 8   waits for a type 35, the same marker type 31 uses
+
+    Nothing in its own handler leaves 3, 5 or 8. Read alone it looks like it
+    deadlocks three times over.
+
+    Its float wait is WAIT[difficulty] * (EF_HP div 4) + 20, so it is the
+    THIRD boss paced off its own health, after 52 and 54 - and the only one
+    where the multiplier is difficulty-keyed as well.
+
+    `if EF_HP = 0 then frame := 4` sits BEFORE Entity_UpdateDying, so the
+    dead pose shows on the same frame the death sequence starts rather than
+    one frame later.
+
+    TYPE 74 is its charge-up (variant 0) and the fan that charge-up throws
+    (variant 1). The fan is type 56's, rebuilt line for line - aim, add a
+    difficulty SKEW, wrap a negative by 64, then step the heading by four per
+    shot with the same `if next > 63 then next := aim - 0x3C` wrap.
+
+    And the three tables are the SAME NUMBERS as type 56's, at different
+    addresses: skew (0, -4, -8), count (0, 2, 4), speed (2, 2, 3). Types 52
+    and 54 duplicate an HP table the same way. Whoever built these bosses
+    copied a working attack and re-entered its constants rather than sharing
+    them.
+
+    Variant 0 destroys itself the moment it fires, after writing state 6 into
+    whatever spawned it. }
+  T73_FRAMES = 4;  T73_TICKS = 8;
+  T73_TABLE_ADDR = $0046C5FC;
+  T73_SPRITES: array[0..4] of Integer = (500, 501, 502, 501, 503);
+  T73_DEAD_FRAME = 4;
+  T73_WAIT_ADDR   = $0046C610;
+  T73_CHARGE_ADDR = $0046C61C;
+  T73_WAIT:   array[0..2] of Integer = (20, 15, 10);
+  T73_CHARGE: array[0..2] of Integer = (60, 30, 10);
+  T73_HP_PACE_DIV = 4;      { hp div 4, times the wait, plus ... }
+  T73_HP_PACE_ADD = $14;    { ... twenty }
+  T73_ENTRY_SHIFT = -$100;  { 8 px left and 8 px up, once }
+  T73_CHILD_LEFT = $400;    { every child appears 32 px to the left }
+  T73_CHILD_DOWN_A = $C0;   { 6 px for the type 75 and the type 35 ... }
+  T73_CHILD_DOWN_B = $100;  { ... and 8 px for the type 74 }
+  T73_CHILD_ONE = $4B;      { 75 - moves it out of state 3 }
+  T73_CHILD_TWO = $4A;      { 74 - moves it out of state 5 }
+  T73_CHILD_THREE = $23;    { 35 - the marker type 31 uses too }
+  T73_RECOVER = $1E;
+  T73_SND_CHARGE = $32;
+
+  T74_V0_FRAMES = 5;  T74_V0_TICKS = 4;
+  T74_V0_TABLE_ADDR = $0046C628;
+  T74_V0_SPRITES: array[0..T74_V0_FRAMES - 1] of Integer =
+    (512, 513, 514, 515, 516);
+  T74_V1_FRAMES = 4;  T74_V1_TICKS = 2;
+  T74_V1_TABLE_ADDR = $0046C63C;
+  T74_V1_SPRITES: array[0..T74_V1_FRAMES - 1] of Integer = (515, 516, 515, 516);
+  T74_SKEW_ADDR  = $0046C64C;
+  T74_COUNT_ADDR = $0046C658;
+  T74_SPEED_ADDR = $0046C664;
+  { The same three sets of numbers as T56_SKEW, T56_COUNT and T56_SPEED. }
+  T74_SKEW:  array[0..2] of Integer = (0, -4, -8);
+  T74_COUNT: array[0..2] of Integer = (0, 2, 4);
+  T74_SPEED: array[0..2] of Integer = (2, 2, 3);
+  T74_FAN_STEP = 4;
+  T74_FAN_WRAP = $3C;
+  T74_SELF_TYPE = $4A;      { 74 - the charge-up throws copies of itself }
+  T74_SHOT_VARIANT = 1;
+  T74_OWNER_STATE = 6;      { what it writes into its parent before it goes }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2240,6 +2316,16 @@ procedure EntityUpdate_Type71(var E: TEntity; AGameState: Integer;
 { 0x0045EFC8. A faller, a flyer that picks its sprite by heading, and the
   trail the flyer drops. See the T72_ block. }
 procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045F218. The fourth boss. Three of its states are left by a spawned
+  child rather than by anything here. See the T73_ block. }
+procedure EntityUpdate_Type73(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045F498. Type 73's charge-up, and the fan of shots it throws. The
+  charge-up is what writes state 6 back into its parent. }
+procedure EntityUpdate_Type74(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -4650,6 +4736,201 @@ begin
       if E.Raw[EF_FLAG1C] > T72_V2_FRAMES - 1 then
         World.DestroyEntity(E, False);
     end;
+  end;
+end;
+
+procedure EntityUpdate_Type73(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, Hp: Integer;
+
+  function SpawnChild(TypeId, Down: Integer): Integer;
+  begin
+    Result := World.Spawn(EKIND_MINOR, TypeId,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            - World.Layer.DeltaX - T73_CHILD_LEFT,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS
+                            - World.Layer.DeltaY + Down);
+    World.SetSpawnField(Result, EF_OWNER, E.Raw[EF_SLOT]);
+  end;
+
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T73_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T73_SPRITES[Frame];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_X], T73_ENTRY_SHIFT);
+    Inc(E.Raw[EF_POS_Y], T73_ENTRY_SHIFT);
+  end;
+
+  { BEFORE the dying check, so the dead pose shows on the same frame. }
+  if E.Raw[EF_HP] = 0 then
+    E.Raw[EF_FLAG1C] := T73_DEAD_FRAME;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    { Half of the heading's X component, and one step a frame - a sway. }
+    Inc(E.Raw[EF_POS_X], HalfExtent(DirVelX(E.Raw[EF_FACING])));
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T73_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T73_FRAMES;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    Hp := E.Raw[EF_HP] div T73_HP_PACE_DIV;
+    { Paced off its own health, like types 52 and 54. }
+    if T73_WAIT[D] * Hp + T73_HP_PACE_ADD < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_CHILD_A] := 0;
+    E.Raw[EF_FLAG1C] := 0;
+    Slot := SpawnChild(T73_CHILD_ONE, T73_CHILD_DOWN_A);
+    World.SetSpawnField(Slot, EF_STATE, 0);
+  end;
+
+  { State 3 is left by the type 75. }
+
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    E.Raw[EF_FLAG1C] := T73_DEAD_FRAME;
+    Inc(E.Raw[EF_CHILD_A]);
+    if T73_CHARGE[D] < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_STATE] := 5;
+      E.Raw[EF_CHILD_A] := 0;
+      World.PlaySound(T73_SND_CHARGE);
+      SpawnChild(T73_CHILD_TWO, T73_CHILD_DOWN_B);
+    end;
+  end;
+
+  { State 5 is left by the type 74 - see EntityUpdate_Type74. }
+
+  if E.Raw[EF_STATE] = 6 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T73_RECOVER then
+    begin
+      E.Raw[EF_STATE] := 7;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 7 then
+  begin
+    E.Raw[EF_STATE] := 8;
+    E.Raw[EF_FLAG1C] := 0;
+    Slot := SpawnChild(T73_CHILD_THREE, T73_CHILD_DOWN_A);
+    World.SetSpawnField(Slot, EF_STATE, 1);
+  end;
+
+  { And state 8 is left by the type 35. }
+end;
+
+procedure EntityUpdate_Type74(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Aim, I, N, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    if (Frame < 0) or (Frame >= T74_V0_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T74_V0_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    if (Frame < 0) or (Frame >= T74_V1_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T74_V1_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T74_V0_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T74_V0_FRAMES - 1 then
+      begin
+        { Type 56's fan, rebuilt with type 56's numbers. }
+        Aim := AngleBetween(E.Raw[EF_POS_X], E.Raw[EF_POS_Y],
+                            World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X),
+                            World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_Y));
+        Inc(Aim, T74_SKEW[D]);
+        if Aim < 0 then
+          Inc(Aim, DIR_COUNT);
+
+        N := T74_COUNT[D];
+        if N >= 0 then
+          for I := 0 to N do
+          begin
+            Slot := World.Spawn(EKIND_MINOR, T74_SELF_TYPE,
+                                E.Raw[EF_POS_X] - POSITION_BIAS
+                                  - World.Layer.DeltaX,
+                                E.Raw[EF_POS_Y] - POSITION_BIAS
+                                  - World.Layer.DeltaY);
+            World.SetSpawnField(Slot, EF_VARIANT, T74_SHOT_VARIANT);
+            World.SetSpawnField(Slot, EF_VEL_X,
+                                T74_SPEED[D] * DirVelX(Aim));
+            World.SetSpawnField(Slot, EF_VEL_Y,
+                                T74_SPEED[D] * DirVelY(Aim));
+            if Aim + T74_FAN_STEP > DIR_COUNT - 1 then
+              Aim := Aim - T74_FAN_WRAP
+            else
+              Inc(Aim, T74_FAN_STEP);
+          end;
+
+        { The write that lets type 73 leave state 5. }
+        World.Pool.SetField(E.Raw[EF_OWNER], EF_STATE, T74_OWNER_STATE);
+        World.DestroyEntity(E, False);
+        Exit;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T74_V1_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T74_V1_FRAMES;
+    end;
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
   end;
 end;
 
@@ -7349,11 +7630,13 @@ begin
       70: EntityUpdate_Type70(E^, AGameState, World);
       71: EntityUpdate_Type71(E^, AGameState, World);
       72: EntityUpdate_Type72(E^, AGameState, World);
+      73: EntityUpdate_Type73(E^, AGameState, World);
+      74: EntityUpdate_Type74(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 8 arms are in HANDLER_ADDR, untranslated }
+      { the other 6 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

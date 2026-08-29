@@ -167,3 +167,23 @@ cannot reach the rounding boundary. Handle the ties and the rest is division.
 |---|---|
 | `coverage.py` | how much of the game layer has a Pascal counterpart. Deliberately matches only the `0x` address form, so `HANDLER_ADDR`'s table of 78 addresses does not inflate it — a table of addresses is a to-do list, not a translation |
 | `check_function_map.py` | keeps `notes/function_map.md` and the name database from disagreeing |
+
+## A hand-run mutation can silently not rebuild
+
+`tools/mutate.sh` builds with `lazbuild -B`, which rebuilds everything, and is
+safe. A mutation run BY HAND with a plain `lazbuild` is not.
+
+FPC decides a unit is up to date by comparing the source's mtime against the
+`.ppu`'s, at one-second resolution. Editing a file and restoring it inside the
+same second leaves a `.ppu` whose timestamp equals the source's, and the unit is
+not recompiled - so the binary under test is the OTHER version of the source.
+
+This actually happened while checking the type 74 fan tables: the mutated build
+was fine, the restore was not rebuilt, and a green tree reported a failure.
+It fails the other way just as easily - a mutation that never got compiled looks
+like a mutation the tests did not catch, which is a false finding, not a false
+alarm.
+
+Either pass `-B`, or delete `src/lib/x86_64-win64/<unit>.ppu` and `.o` before
+building. `tools/check.sh` does not pass `-B` on purpose - the gate runs often
+and a full rebuild is slow - so this is a hazard of hand-mutating only.

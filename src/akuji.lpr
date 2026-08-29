@@ -4335,9 +4335,36 @@ begin
     Pin('type 72 speed', T72_SPEED_ADDR, 3, @T72_SPEED[0], 3);
     Pin('type 72 trail rate', T72_TRAIL_ADDR, 3, @T72_TRAIL[0], 3);
     Pin('type 72 trail sprites', T72_V2_TABLE_ADDR, 4, @T72_V2_SPRITES[0], 4);
+    Pin('type 73 sprites', T73_TABLE_ADDR, 5, @T73_SPRITES[0], 5);
+    Pin('type 73 wait', T73_WAIT_ADDR, 3, @T73_WAIT[0], 3);
+    Pin('type 73 charge', T73_CHARGE_ADDR, 3, @T73_CHARGE[0], 3);
+    Pin('type 74 charge sprites', T74_V0_TABLE_ADDR, 5, @T74_V0_SPRITES[0], 5);
+    Pin('type 74 shot sprites', T74_V1_TABLE_ADDR, 4, @T74_V1_SPRITES[0], 4);
+    Pin('type 74 skew', T74_SKEW_ADDR, 3, @T74_SKEW[0], 3);
+    Pin('type 74 count', T74_COUNT_ADDR, 3, @T74_COUNT[0], 3);
+    Pin('type 74 speed', T74_SPEED_ADDR, 3, @T74_SPEED[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
+    Inc(Result, Bad);
+
+    { --- claims of the form "these two tables hold the same numbers" ------
+      Each table above is pinned to its own address, so these do not re-check
+      the values. What they check is the RELATIONSHIP, which is stated in
+      prose in EntityHandlers.pas and would otherwise rot silently if either
+      side were ever corrected. }
+    Bad := 0;
+    for I := 0 to 2 do
+    begin
+      if T52_HP[I] <> T54_HP[I] then Inc(Bad);
+      if T56_SKEW[I]  <> T74_SKEW[I]  then Inc(Bad);
+      if T56_COUNT[I] <> T74_COUNT[I] then Inc(Bad);
+      if T56_SPEED[I] <> T74_SPEED[I] then Inc(Bad);
+    end;
+    if Bad <> 0 then
+      Log.Add(Format('FAILED: %d duplicated-table claims no longer hold', [Bad]))
+    else
+      Log.Add('the two boss hp tables and the two fan tables still agree');
     Inc(Result, Bad);
 
     { A sweep that checked nothing would also report zero wrong. }
