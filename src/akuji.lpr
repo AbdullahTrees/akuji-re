@@ -35,6 +35,7 @@ uses
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
   SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title, Ending, Opening,
+  GameFont,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -2287,6 +2288,95 @@ begin
     Log.Add('OK - a continue is a new game with a file read over the top');
 end;
 
+{ The outlined drawer's font name, pinned against akuji.exe.
+
+  Worth a check of its own because it was asked as a direct question - "Arial
+  should be used" - and the binary answers it. Game_DrawTextOutlined
+  @ 0x00451004 sets Font.Name from a literal at 0x00451028, and that literal is
+  'MS Sans Serif', the Delphi TFont default. Windows maps it to Microsoft Sans
+  Serif, which is metrically close enough to Arial to be mistaken for it on
+  screen - which is exactly how the question arose.
+
+  So this asserts both halves: the name the original asks for IS present, and
+  'Arial' is NOT anywhere in the image. Delphi stores TFont.Name as a
+  ShortString, a length byte then the text, which is what is searched for. }
+function TestOutlinedFontName(Log: TStrings; const GameDir: string): Integer;
+var
+  F: TFileStream;
+  Buf: TBytes;
+  Path, Found: string;
+  I, N: Integer;
+
+  function HasShortString(const Want: string): Boolean;
+  var
+    K, J: Integer;
+  begin
+    Result := False;
+    for K := 0 to N - Length(Want) - 2 do
+      if (Buf[K] = Byte(Length(Want))) then
+      begin
+        for J := 1 to Length(Want) do
+          if Char(Buf[K + J]) <> Want[J] then
+            Break
+          else if J = Length(Want) then
+            Exit(True);
+      end;
+  end;
+
+  function HasText(const Want: string): Boolean;
+  var
+    K, J: Integer;
+  begin
+    Result := False;
+    for K := 0 to N - Length(Want) - 1 do
+    begin
+      for J := 1 to Length(Want) do
+        if Char(Buf[K + J - 1]) <> Want[J] then
+          Break
+        else if J = Length(Want) then
+          Exit(True);
+    end;
+  end;
+
+begin
+  Result := 0;
+  Path := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+  if not FileExists(Path) then
+  begin
+    Log.Add('FAILED: no akuji.exe to pin the font name against');
+    Exit(1);
+  end;
+  F := TFileStream.Create(Path, fmOpenRead or fmShareDenyNone);
+  try
+    N := F.Size;
+    SetLength(Buf, N);
+    F.ReadBuffer(Buf[0], N);
+  finally
+    F.Free;
+  end;
+
+  if not HasShortString(OUTLINED_FONT_NAME) then
+  begin
+    Log.Add(Format('FAILED: %s is not a ShortString in akuji.exe',
+                   [OUTLINED_FONT_NAME]));
+    Inc(Result);
+  end;
+  if HasText('Arial') then
+  begin
+    Log.Add('FAILED: Arial IS in the binary after all - re-read '
+      + 'Game_DrawTextOutlined before trusting the note beside it');
+    Inc(Result);
+  end;
+  if Result = 0 then
+  begin
+    Found := OUTLINED_FONT_NAME;
+    Log.Add(Format('  outlined text draws in "%s", size %d; no Arial in the '
+      + 'image', [Found, OUTLINED_FONT_SIZE]));
+  end;
+  I := 0; { silence the unused-variable hint }
+  if I <> 0 then Exit;
+end;
+
 { The opening cutscene's timing, against the frame counts the REAL GAME
   produced. tools/make_trace.py captured a 20,304 frame session; the slide
   counter changed at these frames:
@@ -2775,6 +2865,7 @@ begin
   Inc(Result, TestStageBegin(Log));
   Inc(Result, TestPixelConversion(Log));
   Inc(Result, TestOpeningTiming(Log));
+  Inc(Result, TestOutlinedFontName(Log, GameDir));
 
   Log.Add('');
   if Result = 0 then

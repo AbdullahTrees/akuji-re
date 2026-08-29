@@ -50,6 +50,11 @@ uses
   Classes, SysUtils, Graphics;
 
 const
+  { 0x00451028. Not Arial - see the note on Game_DrawTextOutlined. }
+  OUTLINED_FONT_NAME = 'MS Sans Serif';
+  { Every one of the sixteen call sites passes 10. }
+  OUTLINED_FONT_SIZE = 10;
+
   FONT_FIRST_CHAR = $20;   { space }
   FONT_LAST_CHAR  = $5F;   { underscore - no lowercase in the sheet }
   FONT_COLS       = 32;    { glyphs per sheet row }
@@ -81,6 +86,36 @@ type
 
     property Variants: Integer read FVariants;
   end;
+
+{ Game_DrawTextOutlined @ 0x00451004 - the game's OTHER text drawer, and the
+  one every piece of narrative text goes through: the message box, the pickup
+  overlay, the opening and the ending, sixteen call sites in all.
+
+  It has nothing to do with the bitmap font above. It sets a Windows font on
+  the canvas and draws the string five times - four one-pixel offsets in the
+  fill colour's place for the outline, then once in the middle:
+
+      Font.Name := 'MS Sans Serif';  Font.Size := Size;
+      Font.Color := Outline;  Brush.Style := bsClear;
+      TextOut(X-1, Y);  TextOut(X+1, Y);  TextOut(X, Y-1);  TextOut(X, Y+1);
+      Font.Color := Fill;
+      TextOut(X, Y);
+
+  FOUR OFFSETS, NOT EIGHT - the diagonals are not drawn, so the outline is a
+  plus rather than a ring. That is visible at the corners of a glyph and is
+  reproduced.
+
+  THE FONT IS 'MS Sans Serif'. There is no 'Arial' anywhere in the binary; the
+  string is right here at 0x00451028 and it is the Delphi TFont default.
+  Windows maps it to Microsoft Sans Serif, which is metrically close to Arial,
+  so it renders very much like one - but the name the original asks for is this
+  one, and the 2003 Japanese build asks for 'MS Gothic' in the same place.
+
+  The parameter ORDER is the original's, canvas last, so a call here lines up
+  with a call site in the disassembly without mental reordering. }
+procedure Game_DrawTextOutlined(X, Y: Integer; const S: string;
+                                Outline, Fill: TColor; Size: Integer;
+                                Dest: TCanvas);
 
 implementation
 
@@ -164,6 +199,25 @@ procedure TGameFont.TextOutCentered(Dest: TCanvas; Y: Integer; const S: string;
   ScreenW: Integer; AVariant: Integer);
 begin
   TextOut(Dest, (ScreenW - TextWidth(S)) div 2, Y, S, AVariant);
+end;
+
+procedure Game_DrawTextOutlined(X, Y: Integer; const S: string;
+                                Outline, Fill: TColor; Size: Integer;
+                                Dest: TCanvas);
+begin
+  if (Dest = nil) or (S = '') then
+    Exit;
+  { The order is the original's: name, size, outline colour, then the brush. }
+  Dest.Font.Name := OUTLINED_FONT_NAME;
+  Dest.Font.Size := Size;
+  Dest.Font.Color := Outline;
+  Dest.Brush.Style := bsClear;
+  Dest.TextOut(X - 1, Y, S);
+  Dest.TextOut(X + 1, Y, S);
+  Dest.TextOut(X, Y - 1, S);
+  Dest.TextOut(X, Y + 1, S);
+  Dest.Font.Color := Fill;
+  Dest.TextOut(X, Y, S);
 end;
 
 end.

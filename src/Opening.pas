@@ -247,13 +247,19 @@ begin
   if (OpeningPictureFor(Slide) <> -1) and (Picture <> nil) then
     C.Draw(OPENING_PIC_X, OPENING_PIC_Y, Picture);
 
-  if F = nil then Exit;
   T := OPENING_TEXT_INDEX[Slide - 1];
-  { Outlined in the original; plain here until Game_DrawTextOutlined is
-    written - see the note in Dialogue.pas about the same gap. }
-  F.TextOut(C, OPENING_TEXT_X, OPENING_LINE1_Y, OPENING_LINES[T], 0);
+  { Game_DrawTextOutlined @ 0x00451004, exactly as Opening_Update calls it at
+    0x00463572 and 0x004635B4 - x 0x38, y 200 and 0xD8, outline then fill,
+    size 10, on the component's canvas.
+
+    This used to go through the 9x9 bitmap font, which is why the text came out
+    in capitals: that sheet holds $20..$5F and has NO LOWERCASE. The original
+    never uses it here. }
+  Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE1_Y, OPENING_LINES[T],
+                        OPENING_OUTLINE, OPENING_FILL, OUTLINED_FONT_SIZE, C);
   if T + 1 <= High(OPENING_LINES) then
-    F.TextOut(C, OPENING_TEXT_X, OPENING_LINE2_Y, OPENING_LINES[T + 1], 0);
+    Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE2_Y, OPENING_LINES[T + 1],
+                          OPENING_OUTLINE, OPENING_FILL, OUTLINED_FONT_SIZE, C);
 end;
 
 end.

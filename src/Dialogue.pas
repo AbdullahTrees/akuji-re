@@ -163,6 +163,28 @@ const
     character step for this line - `(0x140 - len * 6) >> 1` - which is not the
     8 the tile font advances by, so the panel's text is a different metric and
     almost certainly a different sheet. Recorded, not yet reproduced. }
+  { Colours, straight off the Game_DrawTextOutlined call sites. FUN_00406aa8
+    takes r, g, b and returns a TColor, which is BGR - so RGB(200,$E6,$FF)
+    is $FFE6C8. }
+  BOX_TEXT_FILL    = $FFE6C8;   { RGB(200, $E6, $FF), Overlay_Update 0x004569xx }
+  BOX_TEXT_OUTLINE = $735400;   { RGB(0, $54, $73) }
+  PANEL_TEXT_FILL    = $FFFFFF; { RGB($FF, $FF, $FF), Overlay_Update 0x00456980 }
+  PANEL_TEXT_OUTLINE = $FF0000; { RGB(0, 0, $FF) }
+
+  { The yes/no prompt colours. The geometry and the wording were already
+    recorded in the MB_ block above when MessageBox_Update was read -
+    MB_PROMPT_TEXT, MB_PROMPT_TEXT_X $70 and MB_PROMPT_TEXT_DY $3C - and that
+    reading stands: it is ONE padded string on the THIRD line, not two draws on
+    the second, which is what this used to do.
+
+    The SELECTION is a sprite, not a highlight on the text: the choice index at
+    0x0046CF70 places a cursor, MB_CURSOR_X plus MB_CURSOR_STEP. Drawing it
+    needs the surface layer, so for now both options show with nothing marking
+    which is chosen. Left that way rather than keeping the old two-colour
+    highlight, which was a highlight the original does not have. }
+  MB_PROMPT_FILL    = $FFFFFF;
+  MB_PROMPT_OUTLINE = $735400;
+
   PANEL_TEXT_Y  = $D8;   { 216 }
   PANEL_CHAR_W  = 6;
   PANEL_W       = $140;
@@ -464,9 +486,13 @@ begin
     { The original blits bmp\power.bmp over the whole screen first. The form
       has the surfaces; this draws only the line, centred by the original's
       own 6-pixel step. }
-    if Font <> nil then
-      Font.TextOut(Dest, (PANEL_W - Length(FPanelText) * PANEL_CHAR_W) div 2,
-                   PANEL_TEXT_Y, FPanelText, 0);
+    { Centred on a 6-pixel step - the original computes
+      (0x140 - len * 6) >> 1 and then draws with a PROPORTIONAL font, so the
+      step is a centring convention rather than the real glyph width. }
+    Game_DrawTextOutlined((PANEL_W - Length(FPanelText) * PANEL_CHAR_W) div 2,
+                          PANEL_TEXT_Y, FPanelText,
+                          PANEL_TEXT_OUTLINE, PANEL_TEXT_FILL,
+                          OUTLINED_FONT_SIZE, Dest);
     Exit;
   end;
 
@@ -480,22 +506,18 @@ begin
   Dest.Pen.Color := TColor($C0C0FF);
   Dest.Rectangle(BOX_X, BoxY + 8, BOX_X + BOX_W, BoxY + 8 + BOX_H);
 
-  if Font = nil then
-    Exit;
   for I := 0 to BOX_LINES - 1 do
     if FLines[I] <> '' then
-      Font.TextOut(Dest, BOX_TEXT_X, BoxY + BOX_FIRST_LINE + I * BOX_LINE_STEP,
-                   FLines[I], 0);
+      Game_DrawTextOutlined(BOX_TEXT_X,
+                            BoxY + BOX_FIRST_LINE + I * BOX_LINE_STEP,
+                            FLines[I], BOX_TEXT_OUTLINE, BOX_TEXT_FILL,
+                            OUTLINED_FONT_SIZE, Dest);
 
   if FPrompt then
-  begin
-    Font.TextOut(Dest, BOX_TEXT_X + 120,
-                 BoxY + BOX_FIRST_LINE + BOX_LINE_STEP,
-                 'YES', Ord(FChoice <> 0) * 2);
-    Font.TextOut(Dest, BOX_TEXT_X + 160,
-                 BoxY + BOX_FIRST_LINE + BOX_LINE_STEP,
-                 'NO', Ord(FChoice <> 1) * 2);
-  end;
+    Game_DrawTextOutlined(MB_PROMPT_TEXT_X, BoxY + MB_PROMPT_TEXT_DY,
+                          MB_PROMPT_TEXT,
+                          MB_PROMPT_OUTLINE, MB_PROMPT_FILL,
+                          OUTLINED_FONT_SIZE, Dest);
 end;
 
 end.
