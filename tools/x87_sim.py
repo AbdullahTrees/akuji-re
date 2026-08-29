@@ -32,6 +32,9 @@ WHAT IT DOES
                                        --selftest-entities asserts, as Pascal
     python tools/x87_sim.py compare    show how 80-bit, 64-bit and exact
                                        arithmetic differ, and where
+    python tools/x87_sim.py ending     the counters at which the ending
+                                       screen's percentage comes out a point
+                                       low, which src/Ending.pas names
 
 GENERALISING IT
 
@@ -235,8 +238,73 @@ def cmd_compare():
     return 0
 
 
+# --- the ending screen's completion percentage ------------------------------
+#
+# Ending_Update @ 0x00463624 computes
+#
+#     FILD  [PlayerState + 0x11C4]     the collectible counter
+#     FDIV  [0x00464420]               / 400.0
+#     FMUL  [0x00464424]               * 100.0
+#     CALL  0x00402948                 Trunc - its control word 0x1D6C sets
+#                                      rounding control 3, toward zero
+#
+# which MEANS Counter / 4, and is not always equal to it: two rounding steps
+# at 64-bit significands can land a ulp below an exact integer, and Trunc then
+# takes a whole point off. Round would not have.
+#
+# This prints the counters where that happens. src/Ending.pas carries the
+# answer as a literal; this is the independent reader that says the literal is
+# right.
+#
+#     python tools/x87_sim.py --ending
+
+def ending_deviations():
+    from fractions import Fraction as F
+
+    def rnd64(x):
+        """Round an exact rational to a 64-bit-significand binary float,
+        nearest-even, which is what the x87 does at its default precision."""
+        if x == 0:
+            return F(0)
+        neg = x < 0
+        if neg:
+            x = -x
+        e = 0
+        while x >= 2:
+            x /= 2
+            e += 1
+        while x < 1:
+            x *= 2
+            e -= 1
+        scaled = x * (1 << 63)
+        lo = scaled.numerator // scaled.denominator
+        rem = scaled - lo
+        if rem > F(1, 2) or (rem == F(1, 2) and lo % 2 == 1):
+            lo += 1
+        r = F(lo, 1 << 63) * F(2) ** e
+        return -r if neg else r
+
+    out = []
+    for c in range(0, 401):
+        v = rnd64(rnd64(F(c) / 400) * 100)
+        if int(v) != c // 4:          # int() truncates toward zero
+            out.append(c)
+    return out
+
+
+def cmd_ending():
+    devs = ending_deviations()
+    print('ending percentage: %d counters differ from Counter div 4' % len(devs))
+    for c in devs:
+        print('  counter %d: exact %d, x87 %d' % (c, c // 4, c // 4 - 1))
+    print('Pascal: ENDING_PCT_DEVIATIONS: array[0..%d] of Integer = (%s);'
+          % (len(devs) - 1, ', '.join(str(c) for c in devs)))
+    return 0
+
+
 def main():
-    cmds = {'check': cmd_check, 'table': cmd_table, 'compare': cmd_compare}
+    cmds = {'check': cmd_check, 'table': cmd_table, 'compare': cmd_compare,
+            'ending': cmd_ending}
     what = sys.argv[1] if len(sys.argv) > 1 else 'check'
     if what not in cmds:
         print(__doc__)

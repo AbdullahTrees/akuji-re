@@ -34,7 +34,7 @@ uses
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
-  SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title,
+  SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title, Ending,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -7414,6 +7414,91 @@ begin
       + 'runs its three phases');
 end;
 
+{ Ending_Update @ 0x00463624: the completion percentage, the rank, and the two
+  sets of persistent flags it banks.
+
+  Every expectation here is a LITERAL. The percentage in particular is not
+  compared against Counter div 4, because the whole point is that the original
+  is not Counter div 4 at two values - `python tools/x87_sim.py ending` is the
+  independent reader that says which two, and it is run by tools/check.sh. }
+function TestEnding(Log: TStrings): Integer;
+var
+  S: TGameSettings;
+  P: TPlayerState;
+  Bad, I: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('  ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the ending screen ---');
+
+  Want(EndingPercent(0) = 0, 'zero collected is not zero percent');
+  Want(EndingPercent(400) = 100, 'all four hundred is not a hundred percent');
+  Want(EndingPercent(7) = 1, '7 of 400 should truncate to 1');
+  Want(EndingPercent(200) = 50, '200 of 400 should be 50');
+  { The two the original gets wrong. }
+  Want(EndingPercent(212) = 52, 'counter 212 should read 52, not 53');
+  Want(EndingPercent(236) = 58, 'counter 236 should read 58, not 59');
+  Want(EndingPercent(213) = 53, 'counter 213 is not one of the two');
+  Want(EndingPercent(237) = 59, 'counter 237 is not one of the two');
+
+  { A long run, so the time gate never fires and the percentage gates decide. }
+  Want(EndingRank(200, 9999) = 0, '50 percent should not beat the first gate');
+  Want(EndingRank(204, 9999) = 1, '51 percent should reach rank 1');
+  Want(EndingRank(284, 9999) = 2, '71 percent should reach rank 2');
+  Want(EndingRank(364, 9999) = 3, '91 percent should reach rank 3');
+  { And the time gate overriding a poor percentage. }
+  Want(EndingRank(0, 1800) = 4, 'thirty minutes exactly should reach rank 4');
+  Want(EndingRank(400, 1801) = 3,
+       'one second over thirty minutes should not reach rank 4');
+
+  FillChar(S, SizeOf(S), 0);
+  FillChar(P, SizeOf(P), 0);
+  P.Counter := 364;  P.ElapsedSec := 9999;
+  EndingApplyUnlocks(S, P);
+  Want(S.ExtraDoor1 = 1, 'rank 3 did not unlock the first door');
+  Want(S.ExtraDoor2 = 0, 'rank 3 unlocked the second door too');
+
+  FillChar(S, SizeOf(S), 0);
+  P.Counter := 0;  P.ElapsedSec := 1800;
+  EndingApplyUnlocks(S, P);
+  Want((S.ExtraDoor1 = 1) and (S.ExtraDoor2 = 1),
+       'a fast run did not unlock both doors');
+
+  { The gallery: one byte per flag, in order, and never taken away. }
+  FillChar(S, SizeOf(S), 0);
+  FillChar(P, SizeOf(P), 0);
+  P.Progress[GALLERY_FIRST_FLAG + 3] := 1;
+  EndingApplyUnlocks(S, P);
+  Want(S.Unknown2C[3] = 1, 'gallery flag 3 did not carry across');
+  for I := 0 to GALLERY_COUNT - 1 do
+    if I <> 3 then
+      Want(S.Unknown2C[I] = 0, Format('gallery entry %d unlocked itself', [I]));
+
+  S.Unknown2C[5] := 1;
+  FillChar(P, SizeOf(P), 0);
+  EndingApplyUnlocks(S, P);
+  Want(S.Unknown2C[5] = 1, 'a worse run took a gallery entry away');
+
+  Want(EndingTimeText(3725) = '01:02:05', 'the clock does not format h:mm:ss');
+  { NOT '052%'. The format string is '%03d%%', which looks like C's zero-pad
+    and is not: Delphi's Format parses the digits as a WIDTH, leading zero and
+    all, and pads with spaces. So the original prints a space, not a zero. }
+  Want(EndingPercentText(212) = ' 52%',
+       'the percentage should be space-padded to three - %03d is a width');
+  Want(EndingPercentText(400) = '100%', 'a full run should not be padded');
+
+  Result := Bad;
+  if Bad = 0 then
+    Log.Add('the percentage carries the original''s two off-by-ones, and the '
+      + 'rank banks the right flags');
+end;
+
 function SelfTestSession(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -7762,6 +7847,7 @@ begin
 
   Inc(Bad, TestDialogue(Log, GameDir));
   Inc(Bad, TestConfirmAndGameOver(Log));
+  Inc(Bad, TestEnding(Log));
 
   Result := Bad;
   Log.Add('');

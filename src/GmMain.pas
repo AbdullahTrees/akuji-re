@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
+  QdaArchive, Title, Ending, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
   Entities, GameSession, SpritePool, Dialogue;
 
 type
@@ -58,12 +58,14 @@ type
       lifetime detail, not a behaviour. }
     FPowerBmp: TBitmap;
     FGameOver: TGameOverScreen;
+    FEnding: TEndingScreen;
     { 0x00466888's three pieces of state. The stamp and the running count are
       locals of the original's own once-a-second sample. }
     FDebugStamp: QWord;
     FDebugFrames: Integer;
     FDebugFps: Integer;
     FUseArchive: Boolean;     { p_UseArchive 0x0046CCB4 }
+    FEndingBmp: TBitmap;      { the surface at 0x0046D1F0 }
     FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
@@ -88,6 +90,9 @@ type
     procedure DrawDebugOverlay;
     procedure SetFullScreen(Enable: Boolean);
     procedure DrawGameOver;
+    procedure EndingPicture(Index: Integer);
+    procedure EndingMusic(Track: Integer; Loop: Boolean);
+    procedure EndingStopMusic;
     procedure GameOverRestart;
     procedure GameOverFade(FadeIn: Boolean);
     procedure GameOverMusic(Track: Integer);
@@ -210,6 +215,10 @@ begin
 
   FTitleScreen := TTitleScreen.Create;
   FGameOver := TGameOverScreen.Create;
+  FEnding := TEndingScreen.Create;
+  FEnding.OnPicture := EndingPicture;
+  FEnding.OnMusic := EndingMusic;
+  FEnding.OnStopMusic := EndingStopMusic;
   FGameOver.OnRestart := GameOverRestart;
   FGameOver.OnFade := GameOverFade;
   FGameOver.OnMusic := GameOverMusic;
@@ -448,6 +457,30 @@ begin
   end;
 end;
 
+{ 0x00464484. One ending picture at a time: free whatever surface is up,
+  build a 320x240 one, and load `ed%.3d.bmp` into it - from bmp.qda when the
+  archive is in use and from bmp\ loose otherwise, which is the same pair of
+  format strings every other loader here uses.
+
+  The original keeps the surface in a global at 0x0046D1F0 and frees it on
+  the next call; holding one TBitmap is the same lifetime. }
+procedure TFrm_main.EndingPicture(Index: Integer);
+begin
+  FreeAndNil(FEndingBmp);
+  if FArchive <> nil then
+    FEndingBmp := FArchive.LoadBitmapByName(Format(ENDING_PICTURE_FMT, [Index]));
+end;
+
+procedure TFrm_main.EndingMusic(Track: Integer; Loop: Boolean);
+begin
+  KbgmPlayer1.Play(Track, Loop);
+end;
+
+procedure TFrm_main.EndingStopMusic;
+begin
+  KbgmPlayer1.Stop;
+end;
+
 { The three things GameOver_Update needs from the form. Callbacks rather
   than direct calls so Title.pas stays clear of the component layer, exactly
   as the title screen's sound already is. }
@@ -682,7 +715,11 @@ begin
         so a state that paints nothing leaves a black screen - which is what
         pausing looked like. Redraw the frozen scene and step no logic. }
       DrawScene;
-    GS_OPENING:     ;  { TODO Opening_Update       0x00463154 }
+    GS_ENDING:
+      begin
+        FEnding.Update(Settings, FSession.Player, GameStateValue);
+        DrawScene;
+      end;
     GS_QUIT:
       begin
         { Original nils FOnIdle then terminates - same shape. }

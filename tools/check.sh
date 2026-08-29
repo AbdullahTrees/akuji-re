@@ -102,6 +102,21 @@ ref decode_wav_ref  "$GAME" "$SCRATCH/pcm"
 ref parse_midi_ref  "$GAME"
 ref analyse_events  "$GAME"
 
+# The x87 models. `check` is the one behind ScaleByPercent; `ending` prints the
+# two counters at which the ending screen's percentage comes out a point low,
+# and src/Ending.pas carries those two as a literal - so this is the second
+# reader that says the literal is right.
+ref x87_sim check
+python "$REPO/tools/x87_sim.py" ending > "$SCRATCH/ending.log" 2>&1
+if grep -q '(212, 236)' "$SCRATCH/ending.log"; then
+    printf '  %-22s exit=0  the two ending deviations still are 212 and 236
+'         "x87_sim ending"
+else
+    printf '  %-22s FAILED  the ending deviations moved
+' "x87_sim ending"
+    fail=1
+fi
+
 note ""
 note "=== records agree with the database ==="
 # function_map.md is the meaning authority, game_functions.txt the address

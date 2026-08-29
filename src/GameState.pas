@@ -25,7 +25,12 @@ const
   GS_PLAY_ALT    = 100;   // FUN_00461A44 + HUD_Draw
   GS_PAUSE       = 130;   // PauseMenu_Update      0x00461EE4
   GS_STATE_140   = 140;   // FUN_00454790, FUN_00455210, HUD_Draw
-  GS_OPENING     = 150;   // Opening_Update        0x00463154  intro cutscene
+  { CORRECTED. This was recorded as Opening_Update @ 0x00463154, an intro
+    cutscene. It is neither. AppIdle's arm for 150 calls 0x00463624, which is
+    the ENDING - the results screen the soulget sub-op sends you to - and
+    0x00463154's only caller is Game_StartOrLoad, so it is part of starting a
+    game and not a state handler at all. }
+  GS_ENDING      = 150;   // Ending_Update         0x00463624  results screen
   GS_QUIT        = 999;   // clears OnIdle, terminates
 
   { PauseMenu_Update selection, p_PauseMenuIndex @ 0x0046CF88 }
