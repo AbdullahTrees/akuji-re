@@ -159,6 +159,10 @@ type
     { 0x00450EDC / 0x00450EF0 - see KbgmPlayer.pas. }
     procedure RememberMusicTrack;
     procedure ResumeMusicTrack;
+    { The screen fade lives on the display component - 0x0044DC48 and the
+      object at 0x0046CB6C. }
+    procedure DialogueStartFade(FadeOut: Boolean);
+    function DialogueFadeBusy: Boolean;
     procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
@@ -342,6 +346,8 @@ begin
   FDialogue.OnMusic := PlayMusicCut;
   FDialogue.OnRememberMusic := RememberMusicTrack;
   FDialogue.OnResumeMusic := ResumeMusicTrack;
+  FDialogue.OnStartFade := DialogueStartFade;
+  FDialogue.OnFadeBusy := DialogueFadeBusy;
   FOpening.OnPicture := OpeningPicture;
   FOpening.OnMusic := PlayMusicCut;
   FOpening.OnStopMusic := StopMusicTrack;
@@ -433,6 +439,9 @@ begin
   { Step 7. Must come after the dispatch: the handlers read Moving and the
     button latches expecting the PREVIOUS frame's values. }
   InputStep7;
+  { The fade advances once a frame, which is what makes FadeBusy fall to
+    False after thirty of them and lets the interpreter's wait finish. }
+  DDDD1.TickFade;
   DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
   DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
 
@@ -683,6 +692,17 @@ end;
 procedure TFrm_main.ResumeMusicTrack;
 begin
   KbgmPlayer1.ResumeRemembered;
+end;
+
+procedure TFrm_main.DialogueStartFade(FadeOut: Boolean);
+begin
+  { Every caller writes the step to self+0x10 first and passes Mode 0. }
+  DDDD1.StartFade(0, FadeOut);
+end;
+
+function TFrm_main.DialogueFadeBusy: Boolean;
+begin
+  Result := DDDD1.FadeBusy;
 end;
 
 procedure TFrm_main.StopMusicTrack;

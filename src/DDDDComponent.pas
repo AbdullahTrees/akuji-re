@@ -19,6 +19,12 @@ interface
 uses
   Classes, SysUtils, Graphics, Controls, Forms;
 
+const
+  { 0x78 and the step every caller writes to self+0x10 before starting one.
+    120 at 4 a frame is thirty frames. }
+  FADE_FULL = $78;
+  FADE_STEP = 4;
+
 type
   TDDDDDebugOptionItem = (ddoHaltOnError);
   TDDDDDebugOption = set of TDDDDDebugOptionItem;
@@ -40,6 +46,11 @@ type
     FVsyncAtWindowed: Boolean;
     FOnInit: TNotifyEvent;
     FSurface: TBitmap;
+    { The fade's four fields, at the original's own offsets. }
+    FFadeLevel: Integer;      { +0x08 }
+    FFadeMode: Integer;       { +0x04 }
+    FFadeOut: Boolean;        { +0x0C }
+    FFadeBusy: Boolean;       { +0x0D }
     function GetSurfaceCanvas: TCanvas;
   protected
     { Streaming calls this once the .lfm has been applied - the original's
@@ -61,6 +72,32 @@ type
 
     procedure Clear;
     procedure Present;
+
+    { THE SCREEN FADE, from the object at 0x0046CB6C. It belongs to the display
+      layer in the original too, which is why it is here rather than in the
+      game units.
+
+      0x0044DC48 is the whole of starting one:
+
+          self+0x08 := 0            the counter
+          self+0x04 := Mode         0 at every call site
+          self+0x0C := Direction    1 fades OUT, 0 fades IN
+          self+0x0D := 1            busy
+          if Mode = 0 and Direction = 0 then self+0x08 := 0x78
+
+      so a fade-in starts the counter at 120 and runs down, a fade-out starts
+      at 0 and runs up. Every caller sets self+0x10 := 4 first, which is the
+      step, so a fade is 120/4 = THIRTY FRAMES - half a second at the
+      original's 62 fps.
+
+      FadeBusy is self+0x0D, and the event interpreter's stage-load and warp
+      both wait on it: fade out, wait, then load. With it stuck at False the
+      wait passed on the frame it started and transitions happened instantly. }
+    procedure StartFade(Mode: Integer; FadeOut: Boolean);
+    procedure TickFade;
+    function FadeBusy: Boolean;
+    { 0 = clear, FADE_FULL = black. What a real fader would draw. }
+    property FadeLevel: Integer read FFadeLevel;
     procedure DrawSprite(Src: TBitmap; X, Y: Integer; const SrcRect: TRect;
                          Transparent: Boolean = True);
 
@@ -117,6 +154,46 @@ begin
   FSurface.Canvas.FillRect(0, 0, FInitialScreenWidth, FInitialScreenHeight);
   if Assigned(FOnInit) then
     FOnInit(Self);
+end;
+
+procedure TDDDD.StartFade(Mode: Integer; FadeOut: Boolean);
+begin
+  FFadeLevel := 0;
+  FFadeMode := Mode;
+  FFadeOut := FadeOut;
+  FFadeBusy := True;
+  { The one asymmetry: a fade IN starts full and runs down. }
+  if (Mode = 0) and (not FadeOut) then
+    FFadeLevel := FADE_FULL;
+end;
+
+procedure TDDDD.TickFade;
+begin
+  if not FFadeBusy then
+    Exit;
+  if FFadeOut then
+  begin
+    Inc(FFadeLevel, FADE_STEP);
+    if FFadeLevel >= FADE_FULL then
+    begin
+      FFadeLevel := FADE_FULL;
+      FFadeBusy := False;
+    end;
+  end
+  else
+  begin
+    Dec(FFadeLevel, FADE_STEP);
+    if FFadeLevel <= 0 then
+    begin
+      FFadeLevel := 0;
+      FFadeBusy := False;
+    end;
+  end;
+end;
+
+function TDDDD.FadeBusy: Boolean;
+begin
+  Result := FFadeBusy;
 end;
 
 procedure TDDDD.Clear;

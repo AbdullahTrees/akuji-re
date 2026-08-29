@@ -206,6 +206,8 @@ type
     remembers what was playing; the second brings it back, looping. }
   TOverlayRememberMusic = procedure of object;
   TOverlayResumeMusic = procedure of object;
+  TOverlayStartFade = procedure(FadeOut: Boolean) of object;
+  TOverlayFadeBusy = function: Boolean of object;
 
   { The message overlay as the interpreter's collaborator. It owns no drawing
     surface - the form hands it a canvas - and it advances the script itself,
@@ -237,8 +239,11 @@ type
     FOnMusic: TOverlayMusic;
     FOnRememberMusic: TOverlayRememberMusic;
     FOnResumeMusic: TOverlayResumeMusic;
+    FOnStartFade: TOverlayStartFade;
+    FOnFadeBusy: TOverlayFadeBusy;
     procedure TakePage(const Text: string);
     procedure PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY: Integer);
+    function EventSlot(EventId: Integer): Integer;
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -267,6 +272,16 @@ type
     procedure WarpPlayer(PlayerTileX, PlayerTileY,
                          CamTileX, CamTileY: Integer); override;
 
+    { Sub-op 8 @ 0x004557xx: Entity_Destroy on the event's own entity, then
+      advance. The interpreter advances; this only destroys. }
+    procedure DestroyEventEntity(EventId: Integer); override;
+    { Sub-op 16 @ 0x00455Fxx: writes EF_STATE (+0x20) on the event's entity. }
+    procedure SetEventEntityState(EventId, Value: Integer); override;
+    { The screen fade, which lives on the display component - see
+      DDDDComponent. Routed through callbacks so this unit stays off it. }
+    procedure StartFade(Out_: Boolean); override;
+    function FadeBusy: Boolean; override;
+
     { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
       not the level. Returns True while the box is up, which is the caller's
       cue to step no game logic.
@@ -287,6 +302,9 @@ type
                                                     write FOnRememberMusic;
     property OnResumeMusic: TOverlayResumeMusic read FOnResumeMusic
                                                 write FOnResumeMusic;
+    property OnStartFade: TOverlayStartFade read FOnStartFade
+                                            write FOnStartFade;
+    property OnFadeBusy: TOverlayFadeBusy read FOnFadeBusy write FOnFadeBusy;
     { The panel stays up for as long as its fanfare plays - Overlay_Update
       asks the music player and closes when it stops. The form owns the
       player, so it answers. }
@@ -432,6 +450,51 @@ procedure TDialogueBox.WarpPlayer(PlayerTileX, PlayerTileY,
 begin
   { Sub-op 1: the same placement without a stage change. }
   PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY);
+end;
+
+{ The event's own entity, which is what sub-ops 8 and 16 both operate on:
+  pool + eventTable[EventId].EntitySlot. }
+function TDialogueBox.EventSlot(EventId: Integer): Integer;
+begin
+  Result := SLOT_NONE;
+  if (FScript <> nil) and (EventId >= 0) and (EventId < FScript.Count) then
+    Result := FScript[EventId].EntitySlot;
+end;
+
+procedure TDialogueBox.DestroyEventEntity(EventId: Integer);
+var
+  Slot: Integer;
+begin
+  Slot := EventSlot(EventId);
+  if (Slot = SLOT_NONE) or (FPool = nil) then
+    Exit;
+  { Entity_Destroy, not a kill - the same distinction that left the power-up
+    orb on screen. DropLoot is 0 at this call site. }
+  if FWorld <> nil then
+    FWorld.DestroyEntity(FPool.Entity(Slot)^, False)
+  else
+    FPool.Kill(Slot);
+end;
+
+procedure TDialogueBox.SetEventEntityState(EventId, Value: Integer);
+var
+  Slot: Integer;
+begin
+  Slot := EventSlot(EventId);
+  if (Slot = SLOT_NONE) or (FPool = nil) then
+    Exit;
+  FPool.SetField(Slot, EF_STATE, Value);
+end;
+
+procedure TDialogueBox.StartFade(Out_: Boolean);
+begin
+  if Assigned(FOnStartFade) then
+    FOnStartFade(Out_);
+end;
+
+function TDialogueBox.FadeBusy: Boolean;
+begin
+  Result := Assigned(FOnFadeBusy) and FOnFadeBusy;
 end;
 
 procedure TDialogueBox.SubMode;
