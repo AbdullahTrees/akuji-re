@@ -3454,6 +3454,12 @@ var
   Variant: Integer;
 begin
   Variant := E.Raw[EF_VARIANT];
+  { DIVERGENCE DIV-010. The original does not check, and out of range reads on
+    into the next type's sprite table - the emulator says variant 3 gives 83
+    and variant 7 gives 84, which are the DATA words at 0x0046BE14 and
+    0x0046BE24. Every one of the 160 shipped placements carries 0, 1 or 2, and
+    nothing writes EF_VARIANT on a live type 25, so the clamp is unreachable
+    rather than corrective. }
   if (Variant < 0) or (Variant >= ITEM25_VARIANTS) then
     Variant := 0;
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];

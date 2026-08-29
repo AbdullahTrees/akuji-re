@@ -139,6 +139,13 @@ printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
 [ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
 
 note ""
+note "=== the Ghidra scripts still compile ==="
+# analyzeHeadless compiles a script at run time, so a typo in EmuDiff.java
+# only surfaces two minutes into a headless run. javac says it in a second,
+# and says it against the real API rather than my memory of it.
+bash "$REPO/tools/javac_check.sh" || fail=1
+
+note ""
 note "=== the divergence ledger agrees with the source ==="
 # Every place we knowingly differ from the binary has to be written down. This
 # cannot find an UNdeclared divergence - only the differential tests can - but

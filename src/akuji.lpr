@@ -7912,6 +7912,24 @@ end;
   recomputes each case with the reconstruction, and requires them to agree.
   tools/emudiff.py drives both halves.
 
+  TWO CHANNELS, not one. A leaf function's answer is EAX and an integer
+  comparison is the whole test. An entity HANDLER returns nothing meaningful:
+  its answer is the entity it mutated. So a case may also carry `get=<hex>`
+  after the arrow - the bytes the emulator read back out of the original's
+  entity - and this compares those against the same region of ours, naming the
+  int index that differs rather than dumping 260 bytes at the reader.
+
+  AND A CASE MAY BE EXPECTED TO DIFFER. `f.div=<n>` marks a case that exercises
+  a declared entry in notes/divergences.md - somewhere we knowingly do not
+  reproduce the original. Those cases invert: agreement is the failure, because
+  it means the ledger describes a divergence that is no longer there.
+
+  That inversion is the point. A category D entry in the ledger is a claim about
+  what the original does and what we do instead, and prose cannot be wrong
+  loudly. This makes the claim executable: the original's actual behaviour is
+  printed beside ours on every run, and the entry cannot quietly outlive the
+  code it describes.
+
   WHAT IT CANNOT REACH. The emulator models the instruction set, not the
   process: no Windows, no imports, no VCL. A function that calls the RTL or
   touches a handle faults, and that is an honest boundary rather than a bug.
@@ -7936,7 +7954,9 @@ var
   E, E2: TEntity;
   L: TLayerInfo;
   BoxA, BoxB: TBox;
-  IsBool: Boolean;
+  IsBool, HasMem: Boolean;
+  WantMem, GotMem: string;
+  Divergent, DivConfirmed, DivStale: Integer;
 
   function Num(const S: string): Integer;
   begin
@@ -8015,9 +8035,56 @@ var
     L.TileH   := Key('f.tile', 32);
   end;
 
+  { The entity as the emulator would have read it back: little-endian int32s,
+    lowercase hex, which is exactly what EmuDiff.java's get= emits. }
+  function HexOfEntity(const Ent: TEntity): string;
+  var
+    N, B: Integer;
+    V: LongWord;
+  begin
+    Result := '';
+    for N := 0 to High(Ent.Raw) do
+    begin
+      V := LongWord(Ent.Raw[N]);
+      for B := 0 to 3 do
+        Result := Result + LowerCase(IntToHex((V shr (B * 8)) and $FF, 2));
+    end;
+  end;
+
+  { The get= value carried AFTER the arrow, which is the original's answer.
+    A get= before the arrow would be the request, so the search starts past
+    it. Empty when the case has no memory channel. }
+  function WantedMem(From: Integer): string;
+  var
+    N: Integer;
+  begin
+    Result := '';
+    for N := From to F.Count - 1 do
+      if Copy(F[N], 1, 4) = 'get=' then
+      begin
+        Result := LowerCase(Copy(F[N], 5, MaxInt));
+        Exit;
+      end;
+  end;
+
+  { Which int index first differs, so a failure points at a field instead of
+    at 520 hex digits. -1 when they agree. }
+  function FirstDifferingInt(const A, B: string): Integer;
+  var
+    N: Integer;
+  begin
+    Result := -1;
+    for N := 0 to (Length(A) div 8) - 1 do
+      if Copy(A, N * 8 + 1, 8) <> Copy(B, N * 8 + 1, 8) then
+        Exit(N);
+    if A <> B then
+      Result := Length(A) div 8;
+  end;
+
 begin
   Result := 0;
   Bad := 0; Ran := 0; Faulted := 0; NoRef := 0;
+  DivConfirmed := 0; DivStale := 0;
   if not FileExists(ParamStr(2)) then
   begin
     Log.Add('FAILED: no emulator output at ' + ParamStr(2));
@@ -8066,6 +8133,10 @@ begin
       ReadStack;
       Want := AsSigned(StrToInt64(F[Arrow + 1]));
       IsBool := False;
+      WantMem := WantedMem(Arrow + 1);
+      GotMem := '';
+      HasMem := False;
+      Divergent := Key('f.div', 0);
 
       case Addr of
         $004513E0:
@@ -8098,6 +8169,27 @@ begin
             Got := Ord(RectOverlap(BoxA, BoxB, Key('f.sx', 0),
                                    Key('f.sy', 0)));
             IsBool := True;
+          end;
+        { The two handlers that are pure functions of their entity. Both are
+          run on an entity built the same way the emulator's was, and the
+          whole record is handed back for comparison. }
+        $0045A944:
+          begin
+            FillChar(E, SizeOf(E), 0);
+            E.Raw[EF_VARIANT] := Key('f.variant', 0);
+            EntityUpdate_Type16_Sign(E);
+            GotMem := HexOfEntity(E);
+            HasMem := True;
+            Got := 0;
+          end;
+        $0045A4F0:
+          begin
+            FillChar(E, SizeOf(E), 0);
+            E.Raw[EF_VARIANT] := Key('f.variant', 0);
+            EntityUpdate_Type25(E);
+            GotMem := HexOfEntity(E);
+            HasMem := True;
+            Got := 0;
           end;
         $00457F98:
           begin
@@ -8132,7 +8224,51 @@ begin
         Want := Ord((Want and $FF) <> 0);
 
       Inc(Ran);
-      if Got <> Want then
+
+      { The memory channel, where there is one. EAX is not compared for a
+        handler: it returns whatever its last expression left behind, which is
+        not a value the original means anything by. }
+      if HasMem then
+      begin
+        if WantMem = '' then
+        begin
+          Log.Add(Format('  %-26s asked for memory back and the emulator '
+            + 'returned none', [Name]));
+          Inc(Bad);
+        end
+        else if Divergent <> 0 then
+        begin
+          { A declared divergence. Differing is what the ledger predicts, so
+            AGREEING is the failure - the entry would be describing something
+            that is no longer true. }
+          if WantMem = GotMem then
+          begin
+            Log.Add(Format('  %-26s DIV-%.3d says this should differ from the '
+              + 'original and it does not - the ledger entry is stale',
+              [Name, Divergent]));
+            Inc(DivStale);
+            Inc(Bad);
+          end
+          else
+          begin
+            J := FirstDifferingInt(WantMem, GotMem);
+            Log.Add(Format('  %-26s DIV-%.3d confirmed: entity int %d, '
+              + 'original %s, ours %s', [Name, Divergent, J,
+              Copy(WantMem, J * 8 + 1, 8), Copy(GotMem, J * 8 + 1, 8)]));
+            Inc(DivConfirmed);
+          end;
+        end
+        else if WantMem <> GotMem then
+        begin
+          J := FirstDifferingInt(WantMem, GotMem);
+          if Bad < 15 then
+            Log.Add(Format('  %-26s entity int %d: original %s, '
+              + 'reconstruction %s', [Name, J,
+              Copy(WantMem, J * 8 + 1, 8), Copy(GotMem, J * 8 + 1, 8)]));
+          Inc(Bad);
+        end;
+      end
+      else if Got <> Want then
       begin
         if Bad < 15 then
           Log.Add(Format('  %-26s original %d, reconstruction %d',
@@ -8142,6 +8278,12 @@ begin
     end;
 
     Log.Add(Format('%d cases compared, %d disagree', [Ran, Bad]));
+    if DivConfirmed > 0 then
+      Log.Add(Format('%d declared divergence(s) exercised and confirmed - the '
+        + 'original really does differ there', [DivConfirmed]));
+    if DivStale > 0 then
+      Log.Add(Format('%d declared divergence(s) no longer exist - fix '
+        + 'notes/divergences.md', [DivStale]));
     if Faulted > 0 then
       Log.Add(Format('%d faulted in the emulator - it models the instruction '
         + 'set, not the process', [Faulted]));

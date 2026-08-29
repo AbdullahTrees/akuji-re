@@ -39,10 +39,19 @@
  *       eax= edx= ecx=      the register arguments, default 0
  *       stk=a,b,c           further arguments, left to right
  *       mem=ADDR:HEXBYTES   memory to place first; repeatable
+ *       get=ADDR:LEN        memory to read back AFTER the call; repeatable
  *       f.<anything>=<int>  ignored here, carried through for the Pascal
  *
  * Each line is echoed to the output with `  -> <eax>` or `  -> FAULT <why>`
  * appended, so the output file is the input file plus the original's answers.
+ *
+ * WHY get= EXISTS. Returning EAX is enough for a leaf function that computes a
+ * number. It is not enough for most of the game: an entity handler returns
+ * nothing meaningful and its whole answer is the entity it MUTATED, plus any
+ * slot it spawned into. Without a way to read memory back, the technique could
+ * only ever reach arithmetic helpers - which is exactly where it had stalled at
+ * six case sets, while the 8,800 lines of entity handlers went unverified.
+ * Each get= appends `  get=ADDR:HEX` to the answer, in the order given.
  * `akuji.exe --emudiff <that file>` then recomputes each case and diffs.
  *
  * USAGE - tools/emudiff.py drives all of this; prefer that.
@@ -79,6 +88,7 @@ public class EmuDiff extends GhidraScript {
         List<Long> stack = new ArrayList<>();
         List<long[]> memAddr = new ArrayList<>();   // {addr}
         List<byte[]> memData = new ArrayList<>();
+        List<long[]> getSpec = new ArrayList<>();   // {addr, len}
     }
 
     @Override
@@ -146,6 +156,14 @@ public class EmuDiff extends GhidraScript {
                 int colon = v.indexOf(':');
                 c.memAddr.add(new long[]{ num(v.substring(0, colon)) });
                 c.memData.add(hex(v.substring(colon + 1)));
+            } else if (k.equals("get")) {
+                int colon = v.indexOf(':');
+                if (colon < 0)
+                    throw new IllegalArgumentException("get= wants ADDR:LEN");
+                long len = num(v.substring(colon + 1));
+                if (len <= 0 || len > 65536)
+                    throw new IllegalArgumentException("get= length " + len);
+                c.getSpec.add(new long[]{ num(v.substring(0, colon)), len });
             }
             /* f.* keys are for the Pascal side and ignored here. */
         }
@@ -168,8 +186,8 @@ public class EmuDiff extends GhidraScript {
         return b;
     }
 
-    /** One __register call. Returns EAX as an unsigned 32-bit value. */
-    private long call(Case c) throws Exception {
+    /** One __register call. Returns EAX, then any get= regions read back. */
+    private String call(Case c) throws Exception {
         EmulatorHelper emu = new EmulatorHelper(currentProgram);
         try {
             for (int i = 0; i < c.memAddr.size(); i++)
@@ -201,13 +219,31 @@ public class EmuDiff extends GhidraScript {
                     throw new Exception(err == null ? "step failed" : err);
                 }
                 long pc = emu.readRegister(pcName).longValue() & 0xFFFFFFFFL;
-                if (pc == RETURN_TO)
-                    return emu.readRegister("EAX").longValue() & 0xFFFFFFFFL;
+                if (pc == RETURN_TO) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(emu.readRegister("EAX").longValue()
+                              & 0xFFFFFFFFL);
+                    /* Read the watched regions back in the order asked for.
+                     * A region the code never wrote still reads back - as
+                     * whatever mem= put there - so an absent write is a
+                     * visible difference rather than a missing field. */
+                    for (long[] g : c.getSpec) {
+                        byte[] b = emu.readMemory(toAddr(g[0]), (int) g[1]);
+                        sb.append("  get=").append(hexOf(b));
+                    }
+                    return sb.toString();
+                }
             }
             throw new Exception("did not return within " + STEP_CAP + " steps");
         } finally {
             emu.dispose();
         }
+    }
+
+    private static String hexOf(byte[] b) {
+        StringBuilder sb = new StringBuilder(b.length * 2);
+        for (byte x : b) sb.append(String.format("%02x", x & 0xFF));
+        return sb.toString();
     }
 
     private static byte[] int32(long v) {

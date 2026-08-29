@@ -20,8 +20,15 @@ a failing case can be re-run by hand from its own line.
 
 Fields on a CASE line: eax=, edx=, ecx= are the register arguments; stk= is any
 further ones; mem=ADDR:HEX places memory first (BSS is not in the PE, so
-anything reached through a global has to be written); f.* carries values the
-Pascal side needs to rebuild a record, and the emulator ignores them.
+anything reached through a global has to be written); get=ADDR:LEN reads memory
+back AFTER the call; f.* carries values the Pascal side needs to rebuild a
+record, and the emulator ignores them.
+
+get= is what lets this reach past arithmetic. A leaf function's answer is EAX,
+but an entity handler returns nothing meaningful - its answer is the entity it
+MUTATED. Reading the entity back turns "does it compute the same number" into
+"does it leave the same 260 bytes", which is the question that actually matters
+for 8,800 lines of handlers.
 
 WHAT IT CANNOT DO. The emulator models the instruction set, not the process -
 no Windows, no imports, no VCL - so a function that calls the RTL faults. That
@@ -226,7 +233,40 @@ def cases_random():
     return out
 
 
+def cases_handler_pure():
+    """The two entity handlers that are pure functions of their entity.
+
+    Type 16 @ 0x0045A944 sets one field. Type 25 @ 0x0045A4F0 indexes a
+    three-entry sprite table by EF_VARIANT.
+
+    These are first because they need nothing but an entity: no player
+    position, no layer, no pool, no RNG. Everything else in EntityHandlers
+    takes a TEntityWorld, which is OUR abstraction over globals the original
+    reads directly, and each of those globals has to be placed by hand before
+    a handler can be run. Proving the readback path on a handler that needs
+    none of that separates "does get= work" from "did I map the globals right".
+
+    THE VARIANT SWEEP IS A PREDICTION, not a regression test. Our type 25
+    clamps EF_VARIANT to 0..2; the note beside it says the original indexes
+    unchecked. Both cannot be true. Variants 3, 4 and -1 are in the sweep to
+    settle it, and are expected to disagree if the note is right.
+    """
+    out = ['# type 16 @ 0x0045A944 and type 25 @ 0x0045A4F0 - entity in EAX,',
+           '# and the whole entity read back afterwards']
+    get = 'get=0x%X:%d' % (ENTITY_AT, ENTITY_INTS * 4)
+    for v in (0, 1, 2, 3, 4, -1, 7):
+        # Outside 0..2 type 25 runs off its table, which DIV-010 declares we do
+        # not reproduce. Tagged so those cases invert: they must differ.
+        div = '' if 0 <= v <= 2 else ' f.div=10'
+        out.append('CASE t16_v%d 0x0045A944 eax=0x%X %s %s f.variant=%d'
+                   % (v, ENTITY_AT, entity_mem(i6=v), get, v))
+        out.append('CASE t25_v%d 0x0045A4F0 eax=0x%X %s %s f.variant=%d%s'
+                   % (v, ENTITY_AT, entity_mem(i6=v), get, v, div))
+    return out
+
+
 SETS = {
+    'handler_pure': cases_handler_pure,
     'random': cases_random,
     'compare': cases_compare,
     'angle': cases_angle,

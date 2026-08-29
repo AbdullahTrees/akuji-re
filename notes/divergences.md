@@ -137,3 +137,26 @@ rather than a line, but it must then say what stands in for it.
   p_Surfaces[1] and [2] are not loaded.
 - behaviour: AFFECTING - the options screen cannot change anything.
 - exit: surface loading in the SDL2 layer, plus raw button polling for rebinding.
+
+## DIV-010 - type 25 clamps EF_VARIANT instead of running off its table
+- category: D
+- sites: src/EntityHandlers.pas
+- original: 0x0045A4F0 EntityUpdate_Type25, table at 0x0046BE08
+- The original indexes a three-entry sprite table by EF_VARIANT and does not
+  check it. Out of range it reads whatever DATA follows, which is the next
+  type's sprite table - the emulator confirms variant 3 gives 83, variant 4
+  gives 99, variant 7 gives 84 and variant -1 gives 481, and every one of those
+  matches the bytes at 0x0046BE08 read at that offset. We clamp to 0..2.
+- behaviour: AFFECTING outside 0..2 and identical inside it.
+- unreachable: all 160 type-25 records in the 65 shipped stages carry ParamA 0,
+  1 or 2 - `tools/entity_usage.py <gamedir> --type 25` reports the range as
+  flush with the table - and type 25's handler never writes EF_VARIANT, so a
+  spawned one keeps the value it was placed with.
+- why not reproduce it: the values it reads are deterministic static DATA, not
+  uninitialised memory, so unlike DIV-003 they COULD be copied. They are not,
+  because writing them into an array called ITEM25_SPRITES would assert that
+  the table is sixteen entries long when it is three, and the project has
+  already been bitten once by inferring a table's length from the values that
+  happen to follow it. The three entries are the table; the rest is the next
+  one. What is reproduced instead is the FACT of the overrun, in the emudiff
+  case set, where it is exercised and printed on every run.
