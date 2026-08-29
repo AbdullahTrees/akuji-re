@@ -110,8 +110,50 @@ type
     InputDevice: Integer;    // +0x34  from system.ini [device] input
   end;
 
+{ THE p_* ADDRESSES BELOW ARE POINTER CELLS, NOT THE VARIABLES.
+
+  Recorded here because it is a systematic error in this project's notes, found
+  by running the game rather than reading it. tools/make_trace.py's first trace
+  reported gameState, screenPhase and titleSubMode as 0x47EF98, 0x47EF9C and
+  0x47EFA0 - three consecutive addresses that did not change across 862 frames
+  sitting on the title menu, where the state had to be GS_TITLE_MENU. The
+  disassembly at 0x00459EE5 says why:
+
+      mov edx, DWORD PTR ds:0x46d06c    ; load
+      mov edx, DWORD PTR [edx]          ; DEREFERENCE
+      sub edx, 0x3c                     ; compare with 60, which is GS_PLAY
+
+  and objdump confirms the shape across the whole set: of the seven cells
+  traced, every one is LOADED many times and STORED to never -
+
+      0x0046D06C  68 loads, 0 stores      0x0046CBBC   5 loads, 0 stores
+      0x0046CC14  46 loads, 0 stores      0x0046CEF8  16 loads, 0 stores
+      0x0046CF88  39 loads, 0 stores      0x0046D268   5 loads, 0 stores
+      0x0046D0E8  69 loads, 0 stores
+
+  A variable the game sets is written somewhere. These are not. By contrast
+  RandSeed at 0x0046E040 - which belongs to the RTL, not to the game - has 2
+  stores and is a real variable.
+
+  Following the pointer gives exactly the documented semantics: gameState* reads
+  0, then 10, then 20 through boot, matching GS_TITLE_INIT and GS_TITLE_MENU.
+  So the MEANINGS below are right and were always right; the addresses name the
+  wrong cell by one indirection.
+
+  Nothing here needs to change for behaviour - these are real globals in the
+  reconstruction and the addresses are documentation. It matters for anything
+  that reads the original's memory: a snapshot or trace using these addresses
+  reads a pointer and reports it as a value. WHAT the pointers point into has
+  not been established - the consecutive targets suggest fields of one
+  structure - and that is worth a pass of its own.
+
+  The addresses are left as they are rather than rewritten, because they are
+  what Ghidra labels and what every other note refers to; changing them here
+  alone would put the two out of step. }
+
 var
-  { Globals matching the original's. Names follow the p_* labels now in Ghidra. }
+  { Globals matching the original's. Names follow the p_* labels now in Ghidra.
+    See the note above: these addresses are pointer CELLS in the original. }
   Settings: TGameSettings;                  // p_Settings        0x0046D0E8
   FullScreenOn: Boolean = False;            // p_FullScreenOn    0x0046D268
   WaitOn: Boolean = False;                  // p_WaitOn          0x0046D2E4
