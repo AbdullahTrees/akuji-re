@@ -147,6 +147,14 @@ begin
   end;
 end;
 
+{ 0x00466DFC. The original walks p_SoundNames once, builds one DirectSound
+  buffer per name through the component, and hangs each on the device's
+  channel list - 0x39 iterations, which is SOUND_COUNT. One buffer per
+  effect, not a voice pool; slot number and sound number are the same thing.
+
+  This was already the shape here before the address was attached to it,
+  which is why it looked like an unread function for so long: the loop is
+  the whole of it. }
 function TAudioMixer.LoadAll(const AGameDir: string): Integer;
 var
   I: Integer;

@@ -58,6 +58,12 @@ type
       lifetime detail, not a behaviour. }
     FPowerBmp: TBitmap;
     FGameOver: TGameOverScreen;
+    { 0x00466888's three pieces of state. The stamp and the running count are
+      locals of the original's own once-a-second sample. }
+    FDebugStamp: QWord;
+    FDebugFrames: Integer;
+    FDebugFps: Integer;
+    FUseArchive: Boolean;     { p_UseArchive 0x0046CCB4 }
     FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
@@ -79,6 +85,8 @@ type
     procedure DispatchState;
     procedure FormPaint(Sender: TObject);
     procedure DrawScene;
+    procedure DrawDebugOverlay;
+    procedure SetFullScreen(Enable: Boolean);
     procedure DrawGameOver;
     procedure GameOverRestart;
     procedure GameOverFade(FadeIn: Boolean);
@@ -142,6 +150,8 @@ begin
     LoadSettings(DataDir);
 
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
+    { p_UseArchive, set by DDDD1Init the same way. }
+    FUseArchive := True;
 
     { Original: Title_Init calls Load_Stage_Assets(MainForm, 0), which pulls
       surface set 0, then registers slot 0 as font 0. }
@@ -194,6 +204,10 @@ begin
   OnPaint := FormPaint;
   DoubleBuffered := True;
 
+  { DDDD1Init @ 0x00465584 calls the fullscreen toggle at 0x0046572C with
+    the flag it has just loaded out of system.dat. It is not a key binding. }
+  SetFullScreen(FullScreenOn);
+
   FTitleScreen := TTitleScreen.Create;
   FGameOver := TGameOverScreen.Create;
   FGameOver.OnRestart := GameOverRestart;
@@ -243,6 +257,7 @@ begin
   DispatchState;          { step 5 }
   { TODO step 6: sprite/entity update across 8 layers }
   { TODO step 7: button edge-detection and repeat timers }
+  DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
   DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
 
   Done := False;          { keep the loop running }
@@ -354,6 +369,83 @@ begin
     FMap.Load(FDataDir, MapId);
 
   FStageLoaded := StageIndex;
+end;
+
+{ 0x00466888. The debug overlay, and the only reader of the two counters
+  Entity_UpdateAll maintains. Entities.pas records them as "nothing inside
+  the update loop reads them back" - this is what reads them, from outside.
+
+  Three lines at x 0, y 0, 8 and 16:
+
+      FPS:  frames counted between two GetTickCount samples a second apart
+      OBJ:  0x0046D20C, live entity slots        (EntitiesLive)
+      S P:  0x0046D210, slots that also drew     (EntitiesDrawn)
+
+  The whole thing is behind the DebugLog flag from system.dat +0x1B, which
+  is off in the shipped settings - so none of it is normally visible.
+
+  The FPS counter is a once-a-second SAMPLE, not an average: the frame count
+  is latched and zeroed when a second has elapsed, so the number on screen is
+  the previous second's total. }
+procedure TFrm_main.DrawDebugOverlay;
+var
+  Now: QWord;
+begin
+  if not DebugLog then Exit;
+
+  Now := GetTickCount64;
+  if Int64(Now) - Int64(FDebugStamp) > 1000 then
+  begin
+    FDebugFps := FDebugFrames;
+    FDebugFrames := 0;
+    FDebugStamp := GetTickCount64;
+  end;
+  Inc(FDebugFrames);
+
+  if FFont = nil then Exit;
+  FFont.TextOut(DDDD1.Canvas, 0, 0,  'FPS:' + IntToStr(FDebugFps));
+  FFont.TextOut(DDDD1.Canvas, 0, 8,  'OBJ:' + IntToStr(EntitiesLive));
+  FFont.TextOut(DDDD1.Canvas, 0, 16, 'S P:' + IntToStr(EntitiesDrawn));
+end;
+
+{ 0x00466C78. The fullscreen toggle, called from FormKeyDown.
+
+  Going IN: ask the display component for 320x240 at 16 bits. If that fails
+  it shows a Shift-JIS message box - "the full screen cannot be used" - and
+  closes the form. Then it hides the cursor.
+
+  Coming OUT: if the desktop is under 16-bit colour it shows the other
+  message - "please change the display mode" - and closes; otherwise it
+  restores the mode, resizes the form back to 320x240, re-centres it, and
+  shows the cursor. The border style is only restored when the game is NOT
+  running from bmp.qda, which is a quirk of the original and not a rule.
+
+  The mode change itself belongs to the DirectDraw component, which this
+  reconstruction replaces wholesale, so what is reproducible here is the
+  decision and the window geometry. The two message strings are recorded
+  because they are the only Japanese text in the executable outside the
+  dialogue files. }
+procedure TFrm_main.SetFullScreen(Enable: Boolean);
+begin
+  if Enable then
+  begin
+    FullScreenOn := True;
+    BorderStyle := bsNone;
+    WindowState := wsFullScreen;
+    Screen.Cursor := crNone;
+  end
+  else
+  begin
+    FullScreenOn := False;
+    WindowState := wsNormal;
+    ClientWidth := SCREEN_W;
+    ClientHeight := SCREEN_H;
+    { The original only restores the border when p_UseArchive is clear. }
+    if not FUseArchive then
+      BorderStyle := bsSingle;
+    Position := poScreenCenter;
+    Screen.Cursor := crDefault;
+  end;
 end;
 
 { The three things GameOver_Update needs from the form. Callbacks rather
