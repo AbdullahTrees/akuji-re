@@ -6539,12 +6539,26 @@ begin
     end;
 
     E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
-    { A quarter of the heading's Y component, with the original's
-      round-toward-zero shift. }
-    Step := DirVelY(E.Raw[EF_FACING]);
-    if Step < 0 then
-      Inc(Step, (1 shl T49_BOB_SHIFT) - 1);
-    Inc(E.Raw[EF_POS_Y], Step shr T49_BOB_SHIFT);
+    { A quarter of the heading's Y component.
+
+      THIS WAS `shr` AND HAD TO BE `div`. The original is
+
+          if v < 0 then v := v + 3;
+          v := v sar 2
+
+      which is not a shift the author wrote - it is what Delphi EMITS for
+      `div 4` on a signed value: the +3 turns the arithmetic shift's floor
+      into truncation toward zero. Transcribing the codegen literally is what
+      caused the bug, because Pascal's `shr` on an Integer is a LOGICAL shift.
+      With Step = -1 the original gives -1 and `shr 2` gives $3FFFFFFF, so
+      EF_POS_Y came out $400103BF against the original's $000103BF - the low
+      bits identical and $40000000 of nonsense on top.
+
+      Caught by --emudiff on type 49 in states 0, 1 and 3. `div` is both the
+      correct behaviour and, being what the codegen came from, the more
+      faithful transcription. }
+    Inc(E.Raw[EF_POS_Y],
+        DirVelY(E.Raw[EF_FACING]) div (1 shl T49_BOB_SHIFT));
   end;
 
   if E.Raw[EF_STATE] = 1 then
@@ -7305,6 +7319,7 @@ var
   Frame, Row, D, Slot: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
+  { DIVERGENCE DIV-011: the original does not check. }
   if (Frame < 0) or (Frame >= T38_FRAMES) then
     Frame := 0;
   Row := E.Raw[EF_VARIANT];
@@ -7467,6 +7482,7 @@ var
   Frame, Row, I, Slot, Facing, SparkRow: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
+  { DIVERGENCE DIV-011: the original does not check. }
   if (Frame < 0) or (Frame >= T2_FRAMES) then
     Frame := 0;
   Row := E.Raw[EF_STATE];
@@ -8147,6 +8163,7 @@ var
   Frame, Row: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
+  { DIVERGENCE DIV-011: the original does not check. }
   if (Frame < 0) or (Frame >= T7_FRAMES) then
     Frame := 0;
   Row := E.Raw[EF_VARIANT];
@@ -8510,6 +8527,7 @@ begin
     a bad variant. Clamping instead of faulting is the one deviation here, and
     it cannot change behaviour for any shipped placement: the data's range is
     0..15 and the table is 16 rows. }
+  { DIVERGENCE DIV-011: the original does not check. }
   if (Variant < 0) or (Variant >= ITEM_VARIANTS) then
     Variant := 0;
   if (Frame < 0) or (Frame >= ITEM_FRAMES) then

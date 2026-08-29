@@ -390,6 +390,13 @@ def cases_handler_probe_live():
             continue
         for st in (0, 1, 2, 3):
             gs = 60         # GS_PLAY, which is when entities actually run
+            # Types whose sprite table is shorter than the sweep's range, so
+            # an out-of-range state or variant makes the original run off the
+            # end of it. DIV-011: we clamp, it does not. Tagged so the case
+            # asserts the difference instead of reporting it.
+            div = ''
+            if (typ, st) in ((2, 3), (7, 2), (14, 2), (38, 2)):
+                div = ' f.div=11'
             ent = entity_mem(**{
                 'i%d' % 0x00: 3,          # slot
                 'i%d' % 0x02: 1,          # alive
@@ -411,12 +418,12 @@ def cases_handler_probe_live():
             })
             out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=%d %s %s '
                        'mem=0x%X:%s %s mem=0x%X:%s mem=0x%X:%s '
-                       'f.probe=%d f.gamestate=%d f.seed=%d'
+                       'f.probe=%d f.gamestate=%d f.seed=%d%s'
                        % (typ, st, addr, ENTITY_AT, gs, ent, get,
                           RANDOM_SEED_ADDR, le([12345]), layer_mem(),
                           GAMESTATE_PTR, le([GAMESTATE_AT]),
                           GAMESTATE_AT, le([gs]),
-                          typ, gs, 12345))
+                          typ, gs, 12345, div))
     return out
 
 

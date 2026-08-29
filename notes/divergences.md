@@ -160,3 +160,32 @@ rather than a line, but it must then say what stands in for it.
   happen to follow it. The three entries are the table; the rest is the next
   one. What is reproduced instead is the FACT of the overrun, in the emudiff
   case set, where it is exercised and printed on every run.
+
+## DIV-011 - handlers clamp table indices the original does not check
+- category: D
+- sites: src/EntityHandlers.pas
+- original: types 2 (0x00459A0C), 7 (0x0045A08C), 14 (0x0045A3E0), 38 (0x0045B0CC)
+- Each indexes a sprite table by EF_VARIANT or EF_STATE without a bounds test.
+  Out of range the original reads on into whatever DATA follows, which is the
+  next type's table. We clamp to the first row. DIV-010 is the same thing for
+  type 25 and was found first; this is the class.
+- behaviour: AFFECTING outside each table's declared range, identical inside.
+- why not reproduce it: exactly as DIV-010. The values are deterministic static
+  DATA and could be copied, but writing a neighbour's rows into a table asserts
+  a length that tools/table_extents.py contradicts - and all four of these
+  tables are FLUSH against the next one, so their declared extents are
+  corroborated from outside and the overrun really is an overrun.
+- HOW THIS DIFFERS FROM DIV-010, and it is the weaker entry: type 25's clamp is
+  provably unreachable, because all 160 of its placements in the shipped stages
+  carry ParamA 0, 1 or 2. These four types are SPAWNED AT RUNTIME and place no
+  records, so `tools/entity_usage.py` cannot bound them and no equivalent proof
+  exists. What sets their variant is whichever handler spawns them, and that has
+  not been traced. So this records a real difference whose reachability is
+  unknown, rather than one shown to be unreachable.
+- there is a third option not taken: declare the sprite DATA region as one flat
+  array and make each table a view into it at an offset. That would reproduce
+  the overrun exactly, without inventing anything, because it models the memory
+  layout rather than guessing at it. It is not done because it would dissolve
+  the table boundaries this project spent a long time establishing - but it is
+  the faithful answer if these clamps ever turn out to be reachable.
+
