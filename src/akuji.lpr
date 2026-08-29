@@ -2634,7 +2634,8 @@ type
     FloorY, WallX, Nonce: Integer;
     Sounds: string;
     Spawns: Integer;
-    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean;
+                     DeltaY: Integer = 0): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
@@ -2653,7 +2654,8 @@ begin
   E.Raw[EF_ALIVE] := 0;
 end;
 
-function TFlatWorld.TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+function TFlatWorld.TileAtX(const E: TEntity; Delta: Integer;
+                               Scrolling: Boolean; DeltaY: Integer): Integer;
 begin
   if EntityPixelX(E) + Delta div 32 >= WallX then
     Result := SolidThreshold
@@ -3104,7 +3106,8 @@ type
       cross-entity effect silently did nothing while the test still saw a
       pool. It does NOT override SpawnDebris or RandomBelow either: a double
       that overrides the thing under test only tests the double. }
-    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
+    function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean;
+                     DeltaY: Integer = 0): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; override;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; override;
@@ -3144,7 +3147,8 @@ begin PX[Handle] := X; PY[Handle] := Y; end;
 procedure TStubSprites.SetDepth(Handle, Depth: Integer);
 begin PZ[Handle] := Depth; end;
 
-function TCountingWorld.TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
+function TCountingWorld.TileAtX(const E: TEntity; Delta: Integer;
+                                   Scrolling: Boolean; DeltaY: Integer): Integer;
 begin Result := 0; end;
 function TCountingWorld.TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer;
 begin Result := 0; end;
@@ -4280,8 +4284,14 @@ begin
     Pin('type 56 skew', T56_SKEW_ADDR, 3, @T56_SKEW[0], 3);
     Pin('type 56 count', T56_COUNT_ADDR, 3, @T56_COUNT[0], 3);
     Pin('type 56 speed', T56_SPEED_ADDR, 3, @T56_SPEED[0], 3);
+    { three ints - frame 2 is the dormant sprite, 0 and 1 the awake pair }
+    Pin('type 58 sprites', T58_TABLE_ADDR, 3, @T58_SPRITES[0], 3);
     Pin('type 59 sprites', T59_TABLE_ADDR, 6, @T59_SPRITES[0], 6);
     Pin('type 59 speed', T59_SPEED_ADDR, 3, @T59_SPEED[0], 3);
+    Pin('type 60 sprites', T60_TABLE_ADDR, 8, @T60_SPRITES[0][0], 8);
+    Pin('type 60 speed', T60_SPEED_ADDR, 3, @T60_SPEED[0], 3);
+    Pin('type 60 rage', T60_RAGE_ADDR, 3, @T60_RAGE[0], 3);
+    Pin('type 60 turn', T60_TURN_ADDR, 3, @T60_TURN[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));

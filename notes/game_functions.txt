@@ -107,9 +107,9 @@
 0045cc98  EntityUpdate_Type55_Fireball
 0045ce78  EntityUpdate_Type56
 0045d00c  FUN_0045d00c
-0045d598  FUN_0045d598
+0045d598  EntityUpdate_Type58
 0045d670  EntityUpdate_Type59
-0045d7d8  FUN_0045d7d8
+0045d7d8  EntityUpdate_Type60_Walker
 0045da28  FUN_0045da28
 0045dc84  FUN_0045dc84
 0045ddf4  EntityUpdate_Type63

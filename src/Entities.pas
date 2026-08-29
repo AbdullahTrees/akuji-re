@@ -835,8 +835,14 @@ type
       described. They are real now - Entity_TileCollideX/Y and
       Entity_TileEdgeDistX/Y - and stay virtual only so a test can supply a
       room without a tilemap. }
+    { DeltaY is the sixth argument of Entity_TileCollideX and it is not
+      always zero: a walker probes one tile DOWN with it to find the edge of
+      the platform it is on, which is how type 60 turns round at a ledge
+      rather than walking off. Defaulted so every existing caller is
+      unchanged. }
     function TileAtX(const E: TEntity; Delta: Integer;
-                     Scrolling: Boolean): Integer; virtual;
+                     Scrolling: Boolean;
+                     DeltaY: Integer = 0): Integer; virtual;
     function TileAtY(const E: TEntity; Delta: Integer;
                      Scrolling: Boolean): Integer; virtual;
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual;
@@ -1464,11 +1470,12 @@ begin
 end;
 
 function TEntityWorld.TileAtX(const E: TEntity; Delta: Integer;
-                             Scrolling: Boolean): Integer;
+                             Scrolling: Boolean;
+                             DeltaY: Integer): Integer;
 begin
   if Tiles = nil then
     Exit(TILE_NONE);
-  Result := EntityTileCollideX(E, Layer, Tiles, SolidThreshold, Delta, 0,
+  Result := EntityTileCollideX(E, Layer, Tiles, SolidThreshold, Delta, DeltaY,
                                Scrolling);
 end;
 

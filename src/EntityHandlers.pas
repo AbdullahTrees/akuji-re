@@ -76,7 +76,9 @@
       0x0045CAD8  type 54  a second boss: hovers, blinks out, hops a fixed
                            circuit and fires
       0x0045CC98  type 55  its fireball, and the trail the fireball leaves
+      0x0045D598  type 58  a dormant thing that wakes on contact
       0x0045D670  type 59  a sleeper that rises, aims once, and flies
+      0x0045D7D8  type 60  a walker that turns at ledges and enrages when hurt
 
   And the dispatcher they hang off:
 
@@ -1301,6 +1303,75 @@ const
   T55_SELF_TYPE = $37;      { 55 - the trail is another one of these }
   T55_SND_LOOP = $26;       { on the frame the animation wraps to 0 }
 
+  { --- Types 58 and 60 --------------------------------------------------
+    TYPE 58 sleeps until you touch it. Its whole first state is one line of
+    setup - drop 5 pixels, show frame 2 - and then it waits on
+    Entity_BoxesOverlap against the player at three times its box on both
+    axes. On contact it rises 3 pixels, plays a sound and starts moving.
+
+    What it does then is add DirVelX of a heading it advances one step a
+    frame, which over 64 frames sums to zero: it wobbles from side to side
+    around where it woke up rather than travelling. Types 42, 49 and 54 use
+    the same heading-as-oscillator trick on the Y axis; this is the first on
+    the X.
+
+    Its setup runs BEFORE Entity_UpdateDying rather than after, so a type 58
+    killed on the frame it spawns still takes its 5-pixel drop. Kept in that
+    order.
+
+    TYPE 60 walks a platform and enrages when hurt. Two facts are worth
+    stating because they are both easy to get backwards:
+
+      * its walk speed table is (1, 1, 1) and its turn interval is
+        (180, 180, 180). Both flat. The ONLY difficulty-keyed number it has
+        is the speed it charges at AFTER enraging, (3, 4, 5) - so difficulty
+        changes nothing about this enemy until you have hurt it.
+      * `if EF_HP < 11 then EF_HP := 3`. That is a write, not a clamp: an
+        enemy on 10 hp loses 7 and an enemy on 1 hp GAINS 2. It is what the
+        binary does.
+
+    The enrage spawns type 32, the invisible emitter, with exactly the four
+    parameters DEATH_CLASS_SMALL uses - so it borrows the small death burst
+    as its transformation puff rather than having one of its own.
+
+    The ledge check is the interesting part of its movement:
+
+        TileCollideX(self, VEL_X, DeltaY 0)      >= threshold   -> turn
+        TileCollideX(self, VEL_X, DeltaY 0x400)  <  threshold   -> turn
+
+    the first is a wall ahead, the second is NO floor one tile down. Same
+    function, same delta, a different vertical probe. }
+  T58_FRAMES = 2;           { 0 and 1 while awake; 2 is the dormant sprite }
+  T58_TICKS = 4;
+  T58_TABLE_ADDR = $0046C2F4;
+  T58_SPRITES: array[0..2] of Integer = (160, 161, 159);
+  T58_SLEEP_FRAME = 2;
+  T58_SETTLE = $A0;         { 5 px down when it spawns ... }
+  T58_RISE = -$60;          { ... and 3 px up when it wakes }
+  T58_TRIGGER_SCALE = 3;
+  T58_SND_WAKE = $27;
+
+  T60_FRAMES = 2;
+  T60_TABLE_ADDR = $0046C324;
+  T60_SPRITES: array[0..1, 0..3] of Integer =
+    ((167, 168, 169, 170),        { going left  }
+     (171, 172, 173, 174));       { going right }
+  T60_SPEED_ADDR = $0046C344;
+  T60_TURN_ADDR  = $0046C35C;
+  T60_RAGE_ADDR  = $0046C350;
+  T60_SPEED: array[0..2] of Integer = (1, 1, 1);        { flat }
+  T60_TURN:  array[0..2] of Integer = (180, 180, 180);  { flat }
+  T60_RAGE:  array[0..2] of Integer = (3, 4, 5);        { the only one keyed }
+  T60_SPEED_SHIFT = 4;
+  T60_SETTLE = $20;
+  T60_RAGE_BELOW = $B;      { hp under 11 ... }
+  T60_RAGE_HP = 3;          { ... is SET to 3, up or down }
+  T60_RAGE_VARIANT = 2;     { the second pair of frames in each row }
+  T60_PUFF_LIFT = $20;
+  T60_ANIM_BASE = $C;       { (state - 1) * -6 + 12, so 12 calm and 6 enraged }
+  T60_ANIM_STEP = -6;
+  T60_LEDGE_PROBE = $400;   { one tile down - no floor there means turn }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1573,6 +1644,15 @@ procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
 
 { 0x0045CC98. The boss's fireball in state 0 and its trail in state 1. }
 procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045D598. Sleeps until touched, then wobbles on the spot. }
+procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045D7D8. A walker that turns at walls AND at ledges, and enrages when
+  its health drops below 11. See the T60_ block. }
+procedure EntityUpdate_Type60(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
@@ -2690,6 +2770,136 @@ begin
         World.DestroyEntity(E, False);
     end;
   end;
+end;
+
+procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T58_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T58_SPRITES[Frame];
+
+  { BEFORE the dying check, not after - so one killed on its first frame
+    still takes the drop. }
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_FLAG1C] := T58_SLEEP_FRAME;
+    Inc(E.Raw[EF_POS_Y], T58_SETTLE);
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  if EntitiesOverlap(E, World.Pool.Entity(SLOT_SINGLE_FIRST)^,
+                     T58_TRIGGER_SCALE, T58_TRIGGER_SCALE)
+     and (E.Raw[EF_STATE] = 1) then
+  begin
+    World.PlaySound(T58_SND_WAKE);
+    E.Raw[EF_STATE] := 2;
+    E.Raw[EF_FLAG1C] := 0;
+    Inc(E.Raw[EF_POS_Y], T58_RISE);
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { A full turn sums to zero, so this wobbles rather than travels. }
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]));
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T58_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T58_FRAMES;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type60(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, PlayerX: Integer;
+begin
+  Frame := E.Raw[EF_VARIANT] + E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T60_SPRITES[0])) then
+    Frame := 0;
+  { By the SIGN, two ifs and no else. }
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T60_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T60_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  PlayerX := World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X);
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_Y], T60_SETTLE);
+    E.Raw[EF_VEL_X] := T60_SPEED[D] shl T60_SPEED_SHIFT;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T60_TURN[D] then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX)
+                         * (1 shl T60_SPEED_SHIFT) * T60_SPEED[D];
+      if E.Raw[EF_VEL_X] = 0 then
+        E.Raw[EF_VEL_X] := T60_SPEED[D] shl T60_SPEED_SHIFT;
+    end;
+  end;
+
+  if (E.Raw[EF_HP] < T60_RAGE_BELOW) and (E.Raw[EF_STATE] = 1) then
+  begin
+    E.Raw[EF_STATE] := 2;
+    { A write, not a clamp - 10 becomes 3 and 1 becomes 3. }
+    E.Raw[EF_HP] := T60_RAGE_HP;
+    E.Raw[EF_VARIANT] := T60_RAGE_VARIANT;
+    E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX)
+                       * (1 shl T60_SPEED_SHIFT) * T60_RAGE[D];
+    if E.Raw[EF_VEL_X] = 0 then
+      E.Raw[EF_VEL_X] := T60_RAGE[D] shl T60_SPEED_SHIFT;
+
+    { The small death's emitter, with its four parameters, used as a puff. }
+    Slot := World.Spawn(EKIND_MINOR, EMITTER_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS - T60_PUFF_LIFT);
+    World.SetSpawnField(Slot, EF_BLOCK_A + 1, 8);
+    World.SetSpawnField(Slot, EF_BLOCK_A + 2, 2);
+    World.SetSpawnField(Slot, EF_BLOCK_A + 3, 1);
+    World.SetSpawnField(Slot, EF_BLOCK_A + 4, 2);
+  end;
+
+  Dec(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] < 1 then
+  begin
+    { 12 frames while calm, 6 once enraged. }
+    E.Raw[EF_BLOCK_B] := (E.Raw[EF_STATE] - 1) * T60_ANIM_STEP + T60_ANIM_BASE;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T60_FRAMES;
+  end;
+
+  { A wall ahead, or no floor one tile down - either turns it round. }
+  if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+     or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T60_LEDGE_PROBE)
+         < World.SolidThreshold) then
+    E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
 end;
 
 procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
@@ -5242,12 +5452,14 @@ begin
       52: EntityUpdate_Type52(E^, AGameState, World);
       54: EntityUpdate_Type54(E^, AGameState, World);
       55: EntityUpdate_Type55(E^, AGameState, World);
+      58: EntityUpdate_Type58(E^, AGameState, World);
       59: EntityUpdate_Type59(E^, AGameState, World);
+      60: EntityUpdate_Type60(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 23 arms are in HANDLER_ADDR, untranslated }
+      { the other 21 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
