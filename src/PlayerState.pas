@@ -38,6 +38,7 @@ unit PlayerState;
 interface
 
 uses
+  KbgmPlayer,
   Classes, SysUtils, GameState;
 
 { ===========================================================================
@@ -463,7 +464,16 @@ type
   TStartHost = class
   public
     function Opening: Boolean; virtual;
-    procedure PlayMusic(Track: Integer; Restart: Boolean); virtual;
+    { The flag is LOOP, not restart - it is the third argument of the
+      original's play call, which the opening passes 1 for `open01` and 0 for
+      `open02`. Both callers here pass True because stage music loops.
+
+      FadeSeconds is how the PREVIOUS track is stopped, and the two branches
+      below genuinely differ: a new game goes through 0x00450F74 and fades over
+      two seconds, a continue goes through 0x00450F14 and stops dead. The
+      value is passed to KBGMFadeOut, which ramps the volume down over that
+      many seconds - see KbgmPlayer.pas for where the unit comes from. }
+    procedure PlayMusic(Track: Integer; Loop: Boolean; FadeSeconds: Integer); virtual;
   end;
 
 const
@@ -640,7 +650,7 @@ begin
   Result := False;
 end;
 
-procedure TStartHost.PlayMusic(Track: Integer; Restart: Boolean);
+procedure TStartHost.PlayMusic(Track: Integer; Loop: Boolean; FadeSeconds: Integer);
 begin
 end;
 
@@ -676,7 +686,7 @@ begin
   { The new game's music starts before the track number is even stored - the
     original hard-codes playlist entry 1 here and only then writes it down. }
   if Mode = smNewGame then
-    Host.PlayMusic(START_MUSIC_TRACK, True);
+    Host.PlayMusic(START_MUSIC_TRACK, True, KBGM_STOP_FADE_NEWGAME);
   P.MusicTrack := START_MUSIC_TRACK;
 
   if Mode = smContinue then
@@ -686,7 +696,7 @@ begin
       record on a short file; LoadSave refuses one instead, and says so. }
     if LoadSave(P, SaveFileName) then
       ASettings.CurrentStage := P.SavedStage;
-    Host.PlayMusic(P.MusicTrack, True);
+    Host.PlayMusic(P.MusicTrack, True, KBGM_STOP_HARD);
   end;
 
   { After the load, so difficulty is a session fact and not a saved one. }

@@ -40,12 +40,37 @@ type
     story section simply did not appear. Opening.pas was correct the whole time
     - the trace confirms its slide timings frame for frame - and had nothing
     calling it. }
+  { THE SAME OMISSION A THIRD TIME. TSessionAudio's two methods are no-op
+    defaults so that a session with no audio is a configuration rather than a
+    crash - and nothing ever overrode them, so event sub-op 9 (sound) and
+    sub-op 12 (music) both ran silently.
+
+    Sub-op 12 goes through 0x00450F74, the FADE wrapper: EventScript_Execute
+    calls it twice, at 0x00455AAF with CL=0 and 0x00455AFB with CL=1, so the
+    two arms differ in looping and both fade the previous track out over two
+    seconds. }
+  TFormAudio = class(TSessionAudio)
+  private
+    FForm: TFrm_main;
+  public
+    constructor Create(AForm: TFrm_main);
+    procedure PlayEffect(Id: Integer); override;
+    procedure PlayMusic(Track: Integer; Loop: Boolean); override;
+  end;
+
   TFormStartHost = class(TStartHost)
   private
     FForm: TFrm_main;
   public
     constructor Create(AForm: TFrm_main);
     function Opening: Boolean; override;
+    { AND PlayMusic, which was the same omission twice over. GameStartOrLoad
+      starts the stage music - playlist entry 1, midi\main01, looping on a new
+      game, or the saved MusicTrack on a continue - by calling this, and the
+      base class does nothing. So stage 1 ran in silence, for exactly the
+      reason the cutscene never appeared. }
+    procedure PlayMusic(Track: Integer; Loop: Boolean;
+                        FadeSeconds: Integer); override;
   end;
 
   TFrm_main = class(TForm)
@@ -124,8 +149,13 @@ type
       why TStartHost.Opening gates the whole of GameStartOrLoad. }
     function OpeningStep: Boolean;
     procedure OpeningPicture(Id: Integer);
-    procedure OpeningMusic(Track: Integer; Loop: Boolean);
-    procedure OpeningStopMusic;
+    procedure PlayMusicTrack(Track: Integer; Loop: Boolean;
+                             FadeSeconds: Integer);
+    { The callback shape the opening and the power-up panel want. Both go
+      through 0x00450F14, which stops dead - fade 0 - so this is not a
+      convenience default, it is the value those two call sites use. }
+    procedure PlayMusicCut(Track: Integer; Loop: Boolean);
+    procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
     procedure EndingMusic(Track: Integer; Loop: Boolean);
@@ -252,6 +282,9 @@ begin
     { The running game. It borrows the stage table and the map; the form keeps
       owning both, and the surfaces and sprite sheets with them. }
     FSession := TGameSession.Create(DataDir, FStages, FMap);
+    { Replace the no-op audio the session builds for itself. }
+    FSession.Audio.Free;
+    FSession.Audio := TFormAudio.Create(Self);
     { Game_StartOrLoad's presentation hooks. The base class does nothing,
       which is right until Opening_Update and the playlist are translated -
       an opening that never runs is a cutscene that finishes instantly, and
@@ -302,11 +335,11 @@ begin
   { PowerUp_Show's fanfare. The panel closes when this track ends, so without
     it the overlay was waiting on the looping stage music - see Dialogue.pas. }
   FDialogue.OnSound := TitleSound;
-  FDialogue.OnMusic := OpeningMusic;
-  FDialogue.OnStopMusic := OpeningStopMusic;
+  FDialogue.OnMusic := PlayMusicCut;
+  FDialogue.OnStopMusic := StopMusicTrack;
   FOpening.OnPicture := OpeningPicture;
-  FOpening.OnMusic := OpeningMusic;
-  FOpening.OnStopMusic := OpeningStopMusic;
+  FOpening.OnMusic := PlayMusicCut;
+  FOpening.OnStopMusic := StopMusicTrack;
   FOpening.OnFade := OpeningFade;
   FGameOver.OnRestart := GameOverRestart;
   FGameOver.OnFade := GameOverFade;
@@ -607,12 +640,18 @@ begin
     FOpeningBmp := FArchive.LoadBitmapByName(Format(OPENING_PICTURE_FMT, [Id]));
 end;
 
-procedure TFrm_main.OpeningMusic(Track: Integer; Loop: Boolean);
+procedure TFrm_main.PlayMusicTrack(Track: Integer; Loop: Boolean;
+                                   FadeSeconds: Integer);
 begin
-  KbgmPlayer1.Play(Track, Loop);
+  KbgmPlayer1.Play(Track, Loop, FadeSeconds);
 end;
 
-procedure TFrm_main.OpeningStopMusic;
+procedure TFrm_main.PlayMusicCut(Track: Integer; Loop: Boolean);
+begin
+  PlayMusicTrack(Track, Loop, KBGM_STOP_HARD);
+end;
+
+procedure TFrm_main.StopMusicTrack;
 begin
   KbgmPlayer1.Stop;
 end;
@@ -620,6 +659,23 @@ end;
 procedure TFrm_main.OpeningFade(FadeIn: Boolean);
 begin
   { DIVERGENCE DIV-005 - no fader is modelled. }
+end;
+
+constructor TFormAudio.Create(AForm: TFrm_main);
+begin
+  inherited Create;
+  FForm := AForm;
+end;
+
+procedure TFormAudio.PlayEffect(Id: Integer);
+begin
+  FForm.DDSD1.Play(Id);
+end;
+
+procedure TFormAudio.PlayMusic(Track: Integer; Loop: Boolean);
+begin
+  { The fade wrapper - see the note on the class. }
+  FForm.PlayMusicTrack(Track, Loop, KBGM_STOP_FADE_NEWGAME);
 end;
 
 constructor TFormStartHost.Create(AForm: TFrm_main);
@@ -631,6 +687,12 @@ end;
 function TFormStartHost.Opening: Boolean;
 begin
   Result := FForm.OpeningStep;
+end;
+
+procedure TFormStartHost.PlayMusic(Track: Integer; Loop: Boolean;
+                                   FadeSeconds: Integer);
+begin
+  FForm.PlayMusicTrack(Track, Loop, FadeSeconds);
 end;
 
 procedure TFrm_main.EndingPicture(Index: Integer);

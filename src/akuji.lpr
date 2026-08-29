@@ -1869,8 +1869,13 @@ type
   public
     Busy: Boolean;
     Tracks: string;
+    { How the PREVIOUS track was stopped on each call. The new game fades over
+      two seconds and a continue stops dead, and those go through two
+      different wrappers in the original - 0x00450F74 and 0x00450F14. }
+    Fades: string;
     function Opening: Boolean; override;
-    procedure PlayMusic(Track: Integer; Restart: Boolean); override;
+    procedure PlayMusic(Track: Integer; Loop: Boolean;
+                        FadeSeconds: Integer); override;
   end;
 
 function TStartStub.Opening: Boolean;
@@ -1878,9 +1883,11 @@ begin
   Result := Busy;
 end;
 
-procedure TStartStub.PlayMusic(Track: Integer; Restart: Boolean);
+procedure TStartStub.PlayMusic(Track: Integer; Loop: Boolean;
+                               FadeSeconds: Integer);
 begin
   Tracks := Tracks + Format('%d ', [Track]);
+  Fades := Fades + Format('%d ', [FadeSeconds]);
 end;
 
 { Stage_Begin @ 0x00462210.
@@ -2078,6 +2085,7 @@ begin
       new-game path specifically and not on the function. }
     H.Busy := True;
     H.Tracks := '';
+    H.Fades := '';
     FreshSettings(1);
     GS := GS_TITLE_MENU;
     Want(GameStartOrLoad(P, Cfg, smContinue, H, True, SaveName, GS),
@@ -2086,6 +2094,7 @@ begin
     { --- a new game -------------------------------------------------- }
     H.Busy := False;
     H.Tracks := '';
+    H.Fades := '';
     FreshSettings(1);
     GS := GS_TITLE_MENU;
     Want(GameStartOrLoad(P, Cfg, smNewGame, H, True, SaveName, GS),
@@ -2100,6 +2109,13 @@ begin
     Want(P.MusicTrack = 1,
          Format('a new game set music track %d, want 1', [P.MusicTrack]));
     Want(Trim(H.Tracks) = '1', 'the new game played ' + H.Tracks);
+    { The new game FADES the previous track out; a continue cuts it. Two
+      different wrappers in the original - 0x00450F74 and 0x00450F14 - and the
+      two-second value is KBGMFadeOut's own arithmetic, read out of the
+      Kbgm32.dll that ships beside the exe. }
+    Want(Trim(H.Fades) = IntToStr(KBGM_STOP_FADE_NEWGAME),
+         'the new game stopped the previous track with fade "' + Trim(H.Fades)
+         + '", want ' + IntToStr(KBGM_STOP_FADE_NEWGAME));
     Want(P.Lives = DEFAULT_LIVES, 'a new game does not start on three lives');
     Want(P.SpawnX = 96, Format('the spawn point is x=%d, want 96 pixels',
                                [P.SpawnX]));
@@ -2179,6 +2195,7 @@ begin
     else
     begin
       H.Tracks := '';
+      H.Fades := '';
       FreshSettings(0);
       GS := GS_TITLE_MENU;
       Want(GameStartOrLoad(P, Cfg, smContinue, H, True, TempSave, GS),
@@ -2191,6 +2208,9 @@ begin
                   [P.MusicTrack, SavedMusic]));
       Want(Trim(H.Tracks) = IntToStr(SavedMusic),
            'the continue played ' + H.Tracks);
+      Want(Trim(H.Fades) = IntToStr(KBGM_STOP_HARD),
+           'the continue stopped with fade "' + Trim(H.Fades) + '", want '
+           + IntToStr(KBGM_STOP_HARD));
       Want(P.Head[ABILITY_DASH] = 1,
            'the continue did not restore the abilities in the save');
       Want(P.Progress[0] = 1, 'the continue left flag 0 clear');
@@ -2244,6 +2264,7 @@ begin
       else
       begin
         H.Tracks := '';
+        H.Fades := '';
         FreshSettings(0);
         GS := GS_TITLE_MENU;
         GameStartOrLoad(P, Cfg, smContinue, H, True, TempSave, GS);
@@ -2266,6 +2287,7 @@ begin
 
     { --- a continue with no save at all ------------------------------ }
     H.Tracks := '';
+    H.Fades := '';
     FreshSettings(0);
     GS := GS_TITLE_MENU;
     Want(GameStartOrLoad(P, Cfg, smContinue, H, True,

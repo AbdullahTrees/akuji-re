@@ -36,6 +36,12 @@ uses
   Classes, SysUtils, SyncObjs, MidiFile, MidiOut;
 
 const
+  { KBGMFadeOut's own arithmetic: twenty volume steps, one every arg*50 ms. }
+  KBGM_FADE_MS_PER_SECOND = 1000;
+  { 0x00450CBC's two callers. }
+  KBGM_STOP_HARD = 0;
+  KBGM_STOP_FADE_NEWGAME = 2;
+
   { The default GM channel volume, used until the song sets its own CC7. }
   DEFAULT_CHANNEL_VOLUME = 100;
 
@@ -82,8 +88,24 @@ type
       Playing what is already playing is ignored rather than restarted -
       restarting the area theme every time the stage loader re-asserts it would
       be audible. }
+    { THE SECOND ARGUMENT IS A FADE LENGTH IN SECONDS, not a mode.
+
+      The game stops the current track through 0x00450CBC, which takes it in
+      EDX and branches: below 1 it calls KBGMStop and reinitialises, otherwise
+      it calls KBGMFadeOut and passes the value straight through. Two callers,
+      two values - a CONTINUE stops hard with 0, a NEW GAME fades with 2.
+
+      The unit comes out of Kbgm32.dll itself, which is shipped beside the exe.
+      KBGMFadeOut (ordinal 3, RVA 0x2095) sets up a volume ramp from 100 down
+      in steps of 5 - twenty steps - and computes its timer interval as
+      arg * 125 * 8 / 20, which is arg * 50 milliseconds. Twenty steps of
+      arg * 50 ms is arg * 1000 ms, so the argument is SECONDS and the new
+      game's 2 is a two-second fade. }
     procedure PlayName(const Name: string; Loop: Boolean = True);
-    procedure Play(Index: Integer; Loop: Boolean = True);
+    procedure Play(Index: Integer; Loop: Boolean = True;
+                   FadeSeconds: Integer = 0);
+    { 0x00450CBC. Zero stops dead, anything else fades over that many seconds. }
+    procedure StopOrFade(FadeSeconds: Integer);
     procedure Stop;
     procedure FadeOut(MilliSeconds: Integer);
     procedure FadeIn(Index: Integer; MilliSeconds: Integer);
@@ -530,6 +552,14 @@ begin
   FOpened := False;
 end;
 
+procedure TKbgmPlayer.StopOrFade(FadeSeconds: Integer);
+begin
+  if FadeSeconds < 1 then
+    Stop
+  else
+    FadeOut(FadeSeconds * KBGM_FADE_MS_PER_SECOND);
+end;
+
 procedure TKbgmPlayer.PlayName(const Name: string; Loop: Boolean);
 var
   Path: string;
@@ -538,8 +568,10 @@ begin
   if FThread = nil then
     Exit;
   Index := IndexOfName(Name);
-  if (Index >= 0) and (Index = FCurrent) and FThread.Running then
-    Exit;
+  { NO "already playing" GUARD. This used to return early when the requested
+    track was the one already running, which is a reasonable thing to do and
+    is not what the original does: both wrappers stop unconditionally and then
+    play, so asking for the current track RESTARTS it. }
   Path := ResolvePath(Name);
   if Path = '' then
     Exit;
@@ -547,10 +579,15 @@ begin
   FCurrent := FThread.CurrentIndex;
 end;
 
-procedure TKbgmPlayer.Play(Index: Integer; Loop: Boolean);
+procedure TKbgmPlayer.Play(Index: Integer; Loop: Boolean;
+                           FadeSeconds: Integer);
 begin
   if (Index < 0) or (Index >= FAutoLoadMidis.Count) then
     Exit;
+  { Stop first, then play - the shape of both 0x00450F14 (fade 0) and
+    0x00450F74 (fade 2). The default is 0 because that is what every caller
+    except the new game uses. }
+  StopOrFade(FadeSeconds);
   PlayName(FAutoLoadMidis[Index], Loop);
 end;
 

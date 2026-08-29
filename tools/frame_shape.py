@@ -113,6 +113,23 @@ def main():
     if 'TFormStartHost.Create(Self)' not in text:
         bad.append('GmMain is not passing a TFormStartHost - a bare TStartHost '
                    'returns False from Opening, so the cutscene never runs')
+    # The SAME omission, twice: TStartHost has two do-nothing virtuals and both
+    # were left unoverridden. Opening meant no cutscene; PlayMusic meant stage 1
+    # ran in silence, because GameStartOrLoad starts the stage music through it.
+    if 'procedure TFormStartHost.PlayMusic' not in text:
+        bad.append('TFormStartHost does not override PlayMusic - '
+                   'GameStartOrLoad starts the stage music through it and the '
+                   'base class does nothing, so the stage plays in silence')
+    # THE THIRD TIME. TSessionAudio's two methods are no-op defaults too, and
+    # nothing overrode them, so event sub-op 9 (sound) and sub-op 12 (music)
+    # both ran silently. The pattern is now the thing being guarded, not the
+    # individual bugs: a base class whose defaults do nothing is invisible
+    # until someone plays the game.
+    if 'TFormAudio = class(TSessionAudio)' not in text:
+        bad.append("there is no TFormAudio - the TSessionAudio defaults do "
+                   'nothing, so event sounds and event music are silent')
+    if 'FSession.Audio := TFormAudio.Create' not in text:
+        bad.append('TFormAudio exists but is not installed on the session')
     for cb in ('FDialogue.OnSound', 'FDialogue.OnMusic',
                'FDialogue.OnStopMusic'):
         if cb not in text:
