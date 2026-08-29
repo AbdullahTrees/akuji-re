@@ -73,6 +73,9 @@
       0x0045CA28  type 53  a charger, by facing
       0x0045CE78  type 56  a trap that bursts when you get near
       0x0045C678  type 52  a boss: circles, dives twice, then summons
+      0x0045CAD8  type 54  a second boss: hovers, blinks out, hops a fixed
+                           circuit and fires
+      0x0045CC98  type 55  its fireball, and the trail the fireball leaves
       0x0045D670  type 59  a sleeper that rises, aims once, and flies
 
   And the dispatcher they hang off:
@@ -1218,6 +1221,86 @@ const
   T52_SND_SPAWN  = $25;
   T52_SND_LAND   = 4;
 
+  { --- Types 54 and 55, the second boss and its fireball ----------------
+    TYPE 54 hovers on a two-frame flap, bobbing by DirVelY of a heading it
+    advances one step a frame - the heading-as-oscillator idiom types 42 and
+    49 use, here at full amplitude.
+
+    Its wait is (EF_HP div 2) * 60 + 60, so like type 52 it is paced off its
+    OWN current health and speeds up as you damage it. That makes two, and
+    they are the only two.
+
+    Its HP table is the SAME numbers as type 52's - (-30, -20, -10) - in a
+    different table at a different address. Two bosses tuned the same way,
+    written out twice.
+
+    The cycle is: wait, blink out (state 2, held until EF_DEATH_TIMER runs
+    down), fire a type-55 fireball, wait again, then HOP and blink back in.
+    The hop offsets are four pairs, multiplied by 0x20 - a pixel each:
+
+        +160, 0     -320, 0     +160, -96     0, +96
+
+    which sum to (0, 0), so the circuit returns it to where it started. The
+    index wraps at 4 and nothing else touches it, so it walks the same square
+    for ever.
+
+    TYPE 55 is the fireball in state 0 and the trail it leaves in state 1 -
+    one type, two tables, picked by the state.
+
+    In state 0 it homes: Entity_SteerToPlayer(1, 2), then MULTIPLIES both
+    velocity components by difficulty + 1 every frame. On easy that is times
+    one and does nothing; above easy it compounds between the frames on which
+    the steer reloads. Kept exactly as written.
+
+    Two counters run in parallel and count the same thing: EF_SHOTS gates the
+    homing off at 240 and EF_BLOCK_B[4] destroys it at 241. Every seventeenth
+    frame it drops a copy of ITSELF with EF_STATE pre-set to 1 - the trail -
+    at a random offset of up to eight pixels either way. The Y offset's random
+    is drawn BEFORE the X offset's, which is the order the argument evaluation
+    produced and the order the sequence has to be drawn in to match.
+
+    State 1 sets its own EF_DEPTH to 3 and tops up EF_DEATH_TIMER at 2 so it
+    blinks, then runs seven frames and destroys itself. }
+  T54_FRAMES = 2;  T54_TICKS = $10;
+  T54_TABLE_ADDR = $0046C204;
+  T54_SPRITES: array[0..T54_FRAMES - 1] of Integer = (500, 501);
+  T54_HP_ADDR = $0046C1F8;
+  T54_HP: array[0..2] of Integer = (-30, -20, -10);   { type 52's numbers }
+  T54_HOP_ADDR = $0046C20C;
+  T54_HOPS = 4;
+  T54_HOP: array[0..T54_HOPS - 1, 0..1] of Integer =
+    ((160, 0), (-320, 0), (160, -96), (0, 96));       { sums to (0, 0) }
+  T54_HOP_SCALE = $20;      { a pixel per unit }
+  T54_HP_PACE_DIV = 2;      { hp div 2 ... }
+  T54_HP_PACE_MUL = 60;     { ... times 60 ... }
+  T54_HP_PACE_ADD = 60;     { ... plus 60 }
+  T54_BLINK = $1E;          { both timers, entering and leaving the blink }
+  T54_HOLD = $3C;
+  T54_SHOT_TYPE = $37;      { 55 }
+  T54_SND_BLINK = $1C;
+
+  T55_FLY_FRAMES = 8;   T55_FLY_TICKS = 2;
+  T55_TRAIL_FRAMES = 7; T55_TRAIL_TICKS = 5;
+  T55_FLY_TABLE_ADDR = $0046C22C;
+  T55_FLY_SPRITES: array[0..T55_FLY_FRAMES - 1] of Integer =
+    (502, 503, 504, 505, 506, 507, 508, 509);
+  T55_TRAIL_TABLE_ADDR = $0046C24C;
+  T55_TRAIL_SPRITES: array[0..T55_TRAIL_FRAMES - 1] of Integer =
+    (510, 511, 512, 511, 510, 511, 512);
+  T55_TURN_TIMER = 1;
+  T55_TURN_RELOAD = 2;
+  T55_HOMING_UNTIL = $F0;   { EF_SHOTS - the homing stops here ... }
+  T55_LIFETIME = $F0;       { ... and EF_BLOCK_B[4] ends it one frame later }
+  T55_TRAIL_EVERY = $10;
+  T55_TRAIL_SPREAD = $10;   { RandomBelow(16) - 8, so eight pixels either way }
+  T55_TRAIL_CENTRE = 8;
+  T55_TRAIL_SCALE = $20;
+  T55_TRAIL_DEPTH = 3;
+  T55_TRAIL_BLINK = 2;
+  T55_TRAIL_TIMER = 2;
+  T55_SELF_TYPE = $37;      { 55 - the trail is another one of these }
+  T55_SND_LOOP = $26;       { on the frame the animation wraps to 0 }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1481,6 +1564,15 @@ procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
 
 { 0x0045C678. The boss: circle, dive, dive, summon. See the T52_ block. }
 procedure EntityUpdate_Type52(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045CAD8. The second boss: hover, blink out, fire, hop, blink in.
+  See the T54_ block. }
+procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045CC98. The boss's fireball in state 0 and its trail in state 1. }
+procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
@@ -2417,6 +2509,186 @@ begin
       E.Raw[EF_VEL_Y] := 0;
     end;
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
+procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Hop: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T54_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T54_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T54_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T54_FRAMES;
+  end;
+
+  { The heading is an oscillator, not a direction of travel. }
+  Inc(E.Raw[EF_POS_Y], DirVelY(E.Raw[EF_FACING]));
+  E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+
+  Inc(E.Raw[EF_CHILD_A]);
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_HP], T54_HP[D]);
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+    { Paced off its OWN health, the same way type 52 is. }
+    if (E.Raw[EF_HP] div T54_HP_PACE_DIV) * T54_HP_PACE_MUL + T54_HP_PACE_ADD
+       < E.Raw[EF_CHILD_A] then
+    begin
+      World.PlaySound(T54_SND_BLINK);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_DEATH_TIMER] := T54_BLINK;
+      E.Raw[EF_TIMER] := T54_BLINK;
+    end;
+
+  if (E.Raw[EF_STATE] = 2) and (E.Raw[EF_DEATH_TIMER] = 0) then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_CHILD_A] := 0;
+    World.Spawn(EKIND_MINOR, T54_SHOT_TYPE,
+                E.Raw[EF_POS_X] - POSITION_BIAS - World.Layer.DeltaX,
+                E.Raw[EF_POS_Y] - POSITION_BIAS - World.Layer.DeltaY);
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    E.Raw[EF_DEATH_TIMER] := 1;
+    E.Raw[EF_TIMER] := 2;
+    if E.Raw[EF_CHILD_A] > T54_HOLD then
+    begin
+      World.PlaySound(T54_SND_BLINK);
+      E.Raw[EF_STATE] := 4;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_DEATH_TIMER] := T54_BLINK;
+      E.Raw[EF_TIMER] := T54_BLINK;
+
+      Hop := E.Raw[EF_CHILD_B];
+      if (Hop < 0) or (Hop >= T54_HOPS) then
+        Hop := 0;
+      Inc(E.Raw[EF_POS_X], T54_HOP[Hop][0] * T54_HOP_SCALE);
+      Inc(E.Raw[EF_POS_Y], T54_HOP[Hop][1] * T54_HOP_SCALE);
+      Inc(E.Raw[EF_CHILD_B]);
+      if E.Raw[EF_CHILD_B] > T54_HOPS - 1 then
+        E.Raw[EF_CHILD_B] := 0;
+    end;
+  end;
+
+  if (E.Raw[EF_STATE] = 4) and (E.Raw[EF_DEATH_TIMER] = 0) then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_CHILD_A] := 0;
+  end;
+end;
+
+procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, JitterY, JitterX: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    if (Frame < 0) or (Frame >= T55_FLY_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T55_FLY_SPRITES[Frame];
+  end;
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    if (Frame < 0) or (Frame >= T55_TRAIL_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T55_TRAIL_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T55_FLY_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T55_FLY_FRAMES;
+      if E.Raw[EF_FLAG1C] = 0 then
+        World.PlaySound(T55_SND_LOOP);
+    end;
+
+    Inc(E.Raw[EF_SHOTS]);
+    if E.Raw[EF_SHOTS] < T55_HOMING_UNTIL then
+    begin
+      if World.Pool <> nil then
+        World.Pool.Steer(E.Raw[EF_SLOT], T55_TURN_TIMER, T55_TURN_RELOAD);
+      { Times one on easy, and compounding above it. As written. }
+      E.Raw[EF_VEL_X] := (D + 1) * E.Raw[EF_VEL_X];
+      E.Raw[EF_VEL_Y] := (D + 1) * E.Raw[EF_VEL_Y];
+    end;
+
+    { A second counter of the same thing, one frame longer. }
+    Inc(E.Raw[EF_BLOCK_B + 4]);
+    if E.Raw[EF_BLOCK_B + 4] > T55_LIFETIME then
+    begin
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_CHILD_B]);
+    if E.Raw[EF_CHILD_B] > T55_TRAIL_EVERY then
+    begin
+      E.Raw[EF_CHILD_B] := 0;
+      { Y's random is drawn first - that is the order the original draws
+        them, and the sequence only matches if it is kept. }
+      JitterY := World.RandomBelow(T55_TRAIL_SPREAD) - T55_TRAIL_CENTRE;
+      JitterX := World.RandomBelow(T55_TRAIL_SPREAD) - T55_TRAIL_CENTRE;
+      Slot := World.Spawn(EKIND_MINOR, T55_SELF_TYPE,
+                          JitterX * T55_TRAIL_SCALE
+                            + E.Raw[EF_POS_X] - POSITION_BIAS,
+                          JitterY * T55_TRAIL_SCALE
+                            + E.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(Slot, EF_STATE, 1);
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    E.Raw[EF_DEPTH] := T55_TRAIL_DEPTH;
+    E.Raw[EF_TIMER] := T55_TRAIL_TIMER;
+    if E.Raw[EF_DEATH_TIMER] = 0 then
+      E.Raw[EF_DEATH_TIMER] := T55_TRAIL_BLINK;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T55_TRAIL_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T55_TRAIL_FRAMES - 1 then
+        World.DestroyEntity(E, False);
+    end;
   end;
 end;
 
@@ -4968,12 +5240,14 @@ begin
       53: EntityUpdate_Type53(E^, AGameState, World);
       56: EntityUpdate_Type56(E^, AGameState, World);
       52: EntityUpdate_Type52(E^, AGameState, World);
+      54: EntityUpdate_Type54(E^, AGameState, World);
+      55: EntityUpdate_Type55(E^, AGameState, World);
       59: EntityUpdate_Type59(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 25 arms are in HANDLER_ADDR, untranslated }
+      { the other 23 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

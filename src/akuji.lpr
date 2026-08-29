@@ -4270,6 +4270,12 @@ begin
     Pin('type 52 timing', T52_TIMING_ADDR, 3, @T52_TIMING[0], 3);
     Pin('type 52 sprites', T52_TABLE_ADDR, 8, @T52_SPRITES[0][0], 8);
     Pin('type 53 sprites', T53_TABLE_ADDR, 10, @T53_SPRITES[0][0], 10);
+    Pin('type 54 sprites', T54_TABLE_ADDR, 2, @T54_SPRITES[0], 2);
+    Pin('type 54 hp', T54_HP_ADDR, 3, @T54_HP[0], 3);
+    Pin('type 54 hops', T54_HOP_ADDR, 8, @T54_HOP[0][0], 8);
+    Pin('type 55 fly sprites', T55_FLY_TABLE_ADDR, 8, @T55_FLY_SPRITES[0], 8);
+    Pin('type 55 trail sprites', T55_TRAIL_TABLE_ADDR, 7,
+        @T55_TRAIL_SPRITES[0], 7);
     Pin('type 56 sprites', T56_TABLE_ADDR, 3, @T56_SPRITES[0], 3);
     Pin('type 56 skew', T56_SKEW_ADDR, 3, @T56_SKEW[0], 3);
     Pin('type 56 count', T56_COUNT_ADDR, 3, @T56_COUNT[0], 3);

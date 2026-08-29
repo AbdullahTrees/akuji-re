@@ -103,8 +103,8 @@
 0045c608  EntityUpdate_Type51
 0045c678  EntityUpdate_Type52_Boss
 0045ca28  EntityUpdate_Type53
-0045cad8  FUN_0045cad8
-0045cc98  FUN_0045cc98
+0045cad8  EntityUpdate_Type54_Boss2
+0045cc98  EntityUpdate_Type55_Fireball
 0045ce78  EntityUpdate_Type56
 0045d00c  FUN_0045d00c
 0045d598  FUN_0045d598
