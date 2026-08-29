@@ -58,6 +58,7 @@ type
       lifetime detail, not a behaviour. }
     FPowerBmp: TBitmap;
     FGameOver: TGameOverScreen;
+    FPause: TPauseMenu;
     FEnding: TEndingScreen;
     { 0x00466888's three pieces of state. The stamp and the running count are
       locals of the original's own once-a-second sample. }
@@ -215,6 +216,8 @@ begin
 
   FTitleScreen := TTitleScreen.Create;
   FGameOver := TGameOverScreen.Create;
+  FPause := TPauseMenu.Create;
+  SetPauseSound(TitleSound);
   FEnding := TEndingScreen.Create;
   FEnding.OnPicture := EndingPicture;
   FEnding.OnMusic := EndingMusic;
@@ -715,11 +718,13 @@ begin
         DrawScene;
       end;
     GS_PAUSE:
-      { PauseMenu_Update @ 0x00461EE4 is not translated. What IS wrong to do
-        is nothing at all: the frame is cleared at the top of every AppIdle,
-        so a state that paints nothing leaves a black screen - which is what
-        pausing looked like. Redraw the frozen scene and step no logic. }
-      DrawScene;
+      begin
+        { The original BLACKS THE SCREEN OUT and draws the menu over it - it
+          does not show the frozen game behind. This used to redraw the scene,
+          which looked more considerate and is not what the game does. }
+        FPause.Update(FSession.Input, GameStateValue);
+        FPause.Draw(DDDD1.Canvas, FFont, SCREEN_W, SCREEN_H);
+      end;
     GS_ENDING:
       begin
         FEnding.Update(Settings, FSession.Player, GameStateValue);

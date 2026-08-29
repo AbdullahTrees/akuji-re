@@ -158,7 +158,153 @@ type
     property OnRestart: TRestartEvent read FOnRestart write FOnRestart;
   end;
 
+
+const
+  { --- PauseMenu_Update @ 0x00461EE4 --------------------------------------
+
+    Three choices, and it BLACKS THE SCREEN OUT first: the original fills the
+    whole 320x240 with colour 0 before drawing, so the paused game is not
+    visible behind the menu. The reconstruction had been redrawing the frozen
+    scene, which looked more considerate and is not what the game does.
+
+    Six lines, all centred - Game_DrawText's fourth argument is 1 for every
+    one of them:
+
+        y 0x50  CONTINUE            variant 2
+        y 0x60  RESET               variant 2
+        y 0x70  EXIT                variant 2
+        y (index * 2 + 10) * 8      variant 1, the cursor '<         >'
+        y 0x90  CTRL+R ... RESET    variant 1
+        y 0xA0     ESC ... EXIT     variant 1
+
+    The cursor's y is arithmetic on the index rather than a table, and it
+    lands exactly on 0x50 / 0x60 / 0x70.
+
+    Two ways out besides confirming: BUTTON 2 resumes, and it restores the
+    menu index that FormKeyDown stashed on the way in rather than leaving the
+    pause cursor where it was. The original also writes the input record's
+    own latches - ButtonLatch[0] on confirm and ButtonLatch[2] on cancel - to
+    swallow the press so the resumed game does not see it. That side effect
+    is reproduced; it is why Update takes the input by var.
+
+    The cursor moves only when Inp.Moving is FALSE. That is not "while
+    standing still": InputEndOfFrame runs AFTER the state handlers, so during
+    one Moving still holds the PREVIOUS frame's value, and testing it clear
+    is a D-pad edge - one step per press, no auto-repeat. }
+  PAUSE_ITEMS = 3;
+  PAUSE_ROW_Y: array[0..PAUSE_ITEMS - 1] of Integer = ($50, $60, $70);
+  PAUSE_CURSOR_MUL = 2;     { (index * 2 + 10) * 8 lands on the rows above }
+  PAUSE_CURSOR_ADD = 10;
+  PAUSE_CURSOR_SCALE = 8;
+  PAUSE_HINT1_Y = $90;
+  PAUSE_HINT2_Y = $A0;
+  PAUSE_CANCEL_BUTTON = 2;
+  PAUSE_SND_MOVE = 0;
+
+type
+  TPauseMenu = class
+  public
+    { 0x00461EE4, PauseMenu_Update. Returns True if the menu is still up.
+      Inp is var because the original writes its latches. The write-up is in
+      the const block above; the address is repeated here because that is
+      where tools/implemented.py looks. }
+    function Update(var Inp: TInputState; var AGameState: Integer): Boolean;
+    procedure Draw(C: TCanvas; F: TGameFont; ScreenW, ScreenH: Integer);
+  end;
+
+{ Where the pause menu's cursor sound goes. GmMain hooks it up. }
+procedure SetPauseSound(E: TSoundEvent);
+
 implementation
+
+{ --- TPauseMenu ---------------------------------------------------------- }
+
+{ The original calls MainForm.DDSD1.Play straight; this is the same hook the
+  title screen uses so the unit stays off the component layer. }
+var
+  PauseSound: TSoundEvent = nil;
+
+procedure SetPauseSound(E: TSoundEvent);
+begin
+  PauseSound := E;
+end;
+
+procedure PlayPauseSound(Index: Integer);
+begin
+  if Assigned(PauseSound) then
+    PauseSound(Index);
+end;
+
+function TPauseMenu.Update(var Inp: TInputState;
+                           var AGameState: Integer): Boolean;
+begin
+  Result := True;
+
+  if ScreenPhase = 0 then
+  begin
+    ScreenPhase := 1;
+    PauseMenuIndex := 0;
+  end;
+
+  if ConfirmPressed(Inp) then
+  begin
+    { Swallow the press so the resumed game does not also see it. }
+    Inp.ButtonLatch[0] := True;
+    case PauseMenuIndex of
+      PAUSE_CONTINUE: AGameState := SavedGameState;
+      PAUSE_RESTART:  AGameState := GS_TITLE_INIT;
+      PAUSE_QUIT:     AGameState := GS_QUIT;
+    end;
+    Result := False;
+    Exit;
+  end;
+
+  if Inp.Button[PAUSE_CANCEL_BUTTON]
+     and not Inp.ButtonLatch[PAUSE_CANCEL_BUTTON] then
+  begin
+    Inp.ButtonLatch[PAUSE_CANCEL_BUTTON] := True;
+    { The index FormKeyDown stashed, not the pause cursor. }
+    PauseMenuIndex := SavedMenuIndex;
+    AGameState := SavedGameState;
+    Result := False;
+    Exit;
+  end;
+
+  { Moving still holds LAST frame's value here, so this is a fresh press. }
+  if not Inp.Moving then
+  begin
+    if Inp.AxisY <> 0 then
+      PlayPauseSound(PAUSE_SND_MOVE);
+    Inc(PauseMenuIndex, Inp.AxisY);
+    if PauseMenuIndex < 0 then
+      PauseMenuIndex := PAUSE_ITEMS - 1;
+    if PauseMenuIndex > PAUSE_ITEMS - 1 then
+      PauseMenuIndex := 0;
+  end;
+end;
+
+procedure TPauseMenu.Draw(C: TCanvas; F: TGameFont; ScreenW, ScreenH: Integer);
+var
+  I, Y: Integer;
+begin
+  { Colour 0 over the whole screen - the paused game is NOT visible. }
+  C.Brush.Color := clBlack;
+  C.FillRect(0, 0, ScreenW, ScreenH);
+  if F = nil then Exit;
+
+  F.TextOutCentered(C, PAUSE_ROW_Y[0], 'CONTINUE', ScreenW, 2);
+  F.TextOutCentered(C, PAUSE_ROW_Y[1], 'RESET', ScreenW, 2);
+  F.TextOutCentered(C, PAUSE_ROW_Y[2], 'EXIT', ScreenW, 2);
+
+  I := PauseMenuIndex;
+  if (I < 0) or (I > PAUSE_ITEMS - 1) then I := 0;
+  Y := (I * PAUSE_CURSOR_MUL + PAUSE_CURSOR_ADD) * PAUSE_CURSOR_SCALE;
+  F.TextOutCentered(C, Y, '<         >', ScreenW, 1);
+
+  F.TextOutCentered(C, PAUSE_HINT1_Y, 'CTRL+R ... RESET', ScreenW, 1);
+  F.TextOutCentered(C, PAUSE_HINT2_Y, '   ESC ... EXIT ', ScreenW, 1);
+end;
+
 
 { --- TGameOverScreen ----------------------------------------------------- }
 
