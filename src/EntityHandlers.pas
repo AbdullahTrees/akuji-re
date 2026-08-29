@@ -88,6 +88,8 @@
                            climbs back to the ceiling
       0x0045E25C  type 65  a third boss - you have to HIT it to start it
       0x0045E4EC  type 66  an anchor and the satellite that orbits it
+      0x0045E714  type 67  lays the egg, then bolts
+      0x0045EA40  type 68  what hatches out of it
 
   And the dispatcher they hang off:
 
@@ -1689,6 +1691,77 @@ const
   T66_ANCHOR_DEPTH = 2;
   T66_SND_LAP = $2E;        { on every wrap of the orbit }
 
+  { --- Types 67 and 68, and the last of type 57 -------------------------
+    TYPE 67 walks type 60's walk, stops, LAYS AN EGG, and then runs away
+    from it. The egg is a type 57 with EF_VARIANT 3.
+
+    With this one every variant of type 57 has an owner:
+
+        variant 0   type 56's burst          shot
+        variant 1   type 63's one shot       skimmer
+        variant 2   type 65's fireball       homing
+        variant 3   type 67's egg            hatches
+
+    so the four-things-in-one-handler at 0x0045D00C is four things four
+    different enemies needed, not a grab bag.
+
+    Its retreat uses Compare(player.x, self.x) - the AWAY arithmetic that
+    looked like a slip in type 61. Here it is unmistakably deliberate: it has
+    just laid an egg, it shifts to <<6 rather than <<4 for the sprint, and
+    then ApproachZero brings it to a halt and it turns back towards you. Two
+    handlers using the same expression settles that type 61's is not a typo.
+
+    TYPE 68 is what hatches. It only ever animates in state 3, and while it
+    does it REWRITES BOTH ITS OWN HITBOX INSETS from a per-frame table:
+
+        70, 55, 55, 40, 40, 50, 90, 90
+
+    one entry per animation frame, written to EF_INSET_PCT_X and
+    EF_INSET_PCT_Y from the same value. So it opens out, holds, and closes
+    again as it rises. Types 50 and 52 also modify their own hitbox, but from
+    a state; this is the only one driving it frame by frame off a table, and
+    it is why Entity_UpdateAll gives a state-3 type 68 a SECOND
+    Entity_PlayerTouch - the window to catch it is the animation.
+
+    Nothing here sets state 4. Whatever catches it does. In state 4 it simply
+    falls, and when it lands it destroys itself WITH loot - the only
+    Entity_Destroy in any handler translated so far that passes True. }
+  T67_FRAMES = 4;  T67_TICKS = 4;
+  T67_TABLE_ADDR = $0046C440;
+  T67_SPRITES: array[0..4] of Integer = (438, 439, 440, 439, 441);
+  T67_LAY_FRAME = 4;        { the fifth entry, outside the walk loop }
+  T67_RANGE_ADDR    = $0046C46C;
+  T67_COOLDOWN_ADDR = $0046C454;
+  T67_RANGE:    array[0..2] of Integer = (6, 8, 10);   { harder sees further }
+  T67_COOLDOWN: array[0..2] of Integer = (120, 30, 10);
+  T67_WAKE_Y = 4;
+  T67_WALK_SHIFT = 4;
+  T67_BOLT_SHIFT = 6;       { the sprint is sixteen times the walk }
+  T67_FRICTION = 1;
+  T67_LEDGE_PROBE = $400;
+  T67_LAY_AT = 8;
+  T67_LAY_END = $10;
+  T67_EGG_TYPE = $39;       { 57 ... }
+  T67_EGG_VARIANT = 3;      { ... variant 3 }
+  T67_EGG_LIFT = $180;      { 12 px above it }
+  T67_EGG_VY = -$40;
+  T67_SND_LAY = $2B;
+
+  T68_FRAMES = 8;  T68_TICKS = 4;
+  T68_TABLE_ADDR = $0046C478;
+  T68_SPRITES: array[0..T68_FRAMES - 1] of Integer =
+    (492, 493, 494, 495, 496, 497, 498, 499);
+  T68_INSET_ADDR = $0046C498;
+  { One entry per frame, written to BOTH insets. The catchable window is the
+    animation itself - see the T67_/T68_ note above. }
+  T68_INSET: array[0..T68_FRAMES - 1] of Integer =
+    (70, 55, 55, 40, 40, 50, 90, 90);
+  T68_RISE = -$10;
+  T68_GRAVITY = 2;
+  T68_TERMINAL = $200;
+  T68_RISING_STATE = 3;
+  T68_CAUGHT_STATE = 4;     { nothing in this handler ever sets it }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1998,6 +2071,16 @@ procedure EntityUpdate_Type65(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type66(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
+{ 0x0045E714. Walks, lays a type-57 egg, then bolts away from it and
+  coasts to a halt. See the T67_ block. }
+procedure EntityUpdate_Type67(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045EA40. What hatches: a riser that resizes its own hitbox frame by
+  frame, and falls and drops loot once something has caught it. }
+procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
@@ -2269,10 +2352,16 @@ const
   HANDLER_NO_ARM_TARGET = $00460DE1;
 
   { Type 68 gets an extra Entity_PlayerTouch, outside the slot range that
-    normally gets one, whenever its EF_STATE is 3. What type 68 IS has not been
-    read yet; that it is singled out here has. An entity of type 68 sitting in a
-    minor slot in state 3 therefore gets touch-tested TWICE in one frame, and
-    that is the original's behaviour rather than a slip in the transcription. }
+    normally gets one, whenever its EF_STATE is 3. An entity of type 68 sitting
+    in a minor slot in state 3 therefore gets touch-tested TWICE in one frame,
+    and that is the original's behaviour rather than a slip in the
+    transcription.
+
+    What type 68 IS, is now read: state 3 is the rising bubble that hatches
+    out of type 67's egg, and it resizes its own hitbox every animation frame
+    from a table. Catching it puts it in state 4, where it falls and destroys
+    itself WITH loot. So the special case is a generosity - the window to
+    catch the prize is short and this doubles the chances of registering it. }
   TYPE_TOUCH_IN_STATE_3 = $44;   { 68 }
 
 type
@@ -3901,6 +3990,179 @@ begin
     end;
 
     Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
+procedure EntityUpdate_Type67(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, PlayerX: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T67_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T67_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+  PlayerX := Player^.Raw[EF_POS_X];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX);
+    if E.Raw[EF_VEL_X] = 0 then
+      E.Raw[EF_VEL_X] := 1;
+    E.Raw[EF_VEL_X] := E.Raw[EF_VEL_X] shl T67_WALK_SHIFT;
+  end;
+
+  { Only the two moving states tick the walk cycle. }
+  if (E.Raw[EF_STATE] = 1) or (E.Raw[EF_STATE] = 3) then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T67_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T67_FRAMES;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+       or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T67_LEDGE_PROBE)
+           < World.SolidThreshold) then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Dec(E.Raw[EF_CHILD_A]);
+
+    if (((PlayerX < E.Raw[EF_POS_X]) and (E.Raw[EF_VEL_X] < 0))
+        or ((E.Raw[EF_POS_X] < PlayerX) and (E.Raw[EF_VEL_X] > 0)))
+       and EntitiesOverlap(E, Player^, T67_RANGE[D], T67_WAKE_Y)
+       and (E.Raw[EF_CHILD_A] < 1) then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] = T67_LAY_AT then
+    begin
+      World.PlaySound(T67_SND_LAY);
+      Slot := World.Spawn(EKIND_MINOR, T67_EGG_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            - World.Layer.DeltaX,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS - T67_EGG_LIFT
+                            - World.Layer.DeltaY);
+      World.SetSpawnField(Slot, EF_VARIANT, T67_EGG_VARIANT);
+      World.SetSpawnField(Slot, EF_VEL_X, E.Raw[EF_VEL_X] * 2);
+      World.SetSpawnField(Slot, EF_VEL_Y, T67_EGG_VY);
+      World.SetSpawnField(Slot, EF_VULN_KIND, 0);
+      E.Raw[EF_FLAG1C] := T67_LAY_FRAME;
+    end;
+
+    if E.Raw[EF_CHILD_A] > T67_LAY_END then
+    begin
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+      { AWAY - Compare's arguments the other way round, and a bigger shift. }
+      E.Raw[EF_VEL_X] := Compare(PlayerX, E.Raw[EF_POS_X]);
+      if E.Raw[EF_VEL_X] = 0 then
+        E.Raw[EF_VEL_X] := 1;
+      E.Raw[EF_VEL_X] := E.Raw[EF_VEL_X] shl T67_BOLT_SHIFT;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    ApproachZero(E.Raw[EF_VEL_X], T67_FRICTION);
+    if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+       or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T67_LEDGE_PROBE)
+           < World.SolidThreshold) then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    if E.Raw[EF_VEL_X] = 0 then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_CHILD_A] := T67_COOLDOWN[D];
+      E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX);
+      if E.Raw[EF_VEL_X] = 0 then
+        E.Raw[EF_VEL_X] := 1;
+      E.Raw[EF_VEL_X] := E.Raw[EF_VEL_X] shl T67_WALK_SHIFT;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  { Only state 3 writes a sprite - a caught one keeps the frame it had. }
+  if E.Raw[EF_STATE] = T68_RISING_STATE then
+  begin
+    Frame := E.Raw[EF_FLAG1C];
+    if (Frame < 0) or (Frame >= T68_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T68_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = T68_RISING_STATE then
+  begin
+    Inc(E.Raw[EF_POS_Y], T68_RISE);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T68_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T68_FRAMES - 1 then
+      begin
+        World.DestroyEntity(E, False);
+        Exit;
+      end;
+    end;
+
+    { Both insets from the same entry, one per frame. }
+    Frame := E.Raw[EF_FLAG1C];
+    if (Frame < 0) or (Frame >= T68_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_INSET_PCT_X] := T68_INSET[Frame];
+    E.Raw[EF_INSET_PCT_Y] := T68_INSET[Frame];
+  end;
+
+  if E.Raw[EF_STATE] = T68_CAUGHT_STATE then
+  begin
+    Inc(E.Raw[EF_VEL_Y], T68_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T68_TERMINAL then
+      E.Raw[EF_VEL_Y] := T68_TERMINAL;
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+      Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+      { WITH loot - the only destroy in any handler here that passes True. }
+      World.DestroyEntity(E, True);
+      Exit;
+    end;
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
   end;
 end;
@@ -6595,11 +6857,13 @@ begin
       64: EntityUpdate_Type64(E^, AGameState, World);
       65: EntityUpdate_Type65(E^, AGameState, Inp, World);
       66: EntityUpdate_Type66(E^, AGameState, World);
+      67: EntityUpdate_Type67(E^, AGameState, World);
+      68: EntityUpdate_Type68(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 14 arms are in HANDLER_ADDR, untranslated }
+      { the other 12 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
