@@ -25,9 +25,16 @@ description-only.
 
 That number is coverage, NOT correctness. It means every function has code
 with its address above the declaration and tests pinning its constants. It
-does not mean the code computes what the original computes - see section 14
-for what actually establishes that, and note that the only direct
-original-versus-ours comparison covers four leaf functions.
+does not mean the code computes what the original computes - see section 14.
+
+**Correctness is now measured, not hoped for.** All 78 entity handlers run
+under `--emudiff` against akuji.exe's own machine code, four states each:
+
+    300 cases compared, 14 disagree, 4 declared divergences confirmed
+
+That is the number to watch. It started at 247 disagreements and every
+reduction is either a real defect fixed or a harness error found - both have
+happened, in roughly equal numbers, and section 14b says which.
 
 **All 78 entity-type handlers are translated**, and that is checked rather
 than claimed: `--selftest-entities` reads the jump table out of `akuji.exe`,
@@ -45,16 +52,28 @@ against independent Python implementations (section 13).
 and the placement machinery around it. Section 8b.
 
 **Before committing, run `tools/check.sh`.** One command: build, thirteen
-self-tests, five reference implementations, a records check and a negative
-control. It exits non-zero on any failure, so use it as
+self-tests, five reference implementations, the records check, the divergence
+ledger, table extents, the frame-loop shape, the Ghidra scripts' compile, and
+a negative control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
 
-**What is left is presentation, not logic.** The gaps that would show on
-screen: the dialogue box's decoration (the original outlines its text through
-`Game_DrawTextOutlined` at a 6-px char step; this draws a filled rectangle and
-plain font text), the multi-layer tile draw, sprite depth ordering, the
-life-icon row in the HUD, and the fade the game-over and ending screens wait
-on - which is why both step straight through their first phase.
+`--emudiff` is NOT in it — each run drives Ghidra headless for a couple of
+minutes. Run `python tools/emudiff.py handler_live` by hand after touching any
+entity handler, and `--poison-diff` after touching the case generator.
+
+**"What is left is presentation, not logic" was wrong, and is worth keeping
+as a caution.** It was written when nothing had ever compared the two
+programs. Since then, running the original found a mislocated frame loop, a
+cutscene that never ran, a softlock, and a logical-shift bug - all logic, none
+of it visible to any test that existed at the time. Do not assume the
+remaining gaps are cosmetic; assume they are unmeasured.
+
+The gaps that would genuinely show on screen: the dialogue box's decoration
+(the original outlines its text through `Game_DrawTextOutlined` at a 6-px char
+step; this draws a filled rectangle and plain font text), the multi-layer tile
+draw, sprite depth ordering, the life-icon row in the HUD, and the fade both
+end screens wait on - which is why they step straight through their first
+phase. Those are tracked as category B in `notes/divergences.md`.
 
 ## 2. The three layers — most important section
 
@@ -198,11 +217,49 @@ immediately. That busy loop is the game's frame tick. Per frame:
 2. poll `Joy` — 3 device paths, chosen by `Settings+0x34` (`system.ini [device] input`)
 3. poll 4 buttons via `p_KeyMap` into `p_InputState+0x1C`
 4. `FUN_00449e78(DDDD1)` — begin frame
-5. **state dispatch** (below)
-6. sprite/entity update — `FUN_0044d758`, `FUN_0044d1e0`, `FUN_0044d31c` x8 layers
-7. button edge-detection and repeat timers
-8. `FUN_00449d00(DDDD1)` — present
-9. frame limiter
+5. **state dispatch, first half**
+6. **`Entity_UpdateAll` — UNCONDITIONAL, every state, every frame**
+7. **state dispatch, second half**
+8. sprite/entity update — `FUN_0044d758`, `FUN_0044d1e0`, `FUN_0044d31c` x8 layers
+9. button edge-detection and repeat timers
+10. `FUN_00449d00(DDDD1)` — present
+11. frame limiter
+
+### THERE ARE TWO DISPATCHES, WITH THE ENTITY UPDATE BETWEEN THEM
+
+This was recorded for a long time as one dispatch with the entity update
+inside the gameplay arm, and that is wrong. From a 20,304-frame Frida capture
+(`notes/trace_findings.md`):
+
+    Entity_UpdateAll        20304 calls / 20304 frames    every state
+    Events_SpawnNearCamera  14560 = 12347 (state 60) + 2213 (state 140)
+    EventScript_Execute      2213 = every frame of state 140
+
+`Entity_UpdateAll` runs on the title screen, through the whole cutscene, and
+on all 105 frames of a pause. It is gated **internally** by its state
+argument, which is why every handler carries its own
+`if AGameState <> GS_PLAY then Exit` — those exits were translated faithfully
+without anyone noticing what they implied about the caller.
+
+Frame 1 is the proof there are two dispatches: it runs `Title_Init`, then
+`Entity_UpdateAll`, then `Title_MainMenu` — two different state arms in one
+frame, which a single switch cannot do. `Title_Init` sets the state to 20 and
+the second dispatch reads the new value.
+
+| state | before the entity update | after |
+|---|---|---|
+| 10 | `Title_Init` | — |
+| 20 | — | `Title_MainMenu` |
+| 30 | `Stage_Begin` | — |
+| 40 | — | `Game_StartOrLoad` -> `Opening_Update` |
+| 60 | `Events_SpawnNearCamera` | `HUD_Draw` |
+| 130 | — | `PauseMenu_Update` |
+| 140 | `SpawnNearCamera`, `EventScript_Execute` | `MessageBox_Update` |
+
+`tools/frame_shape.py` pins this arrangement and is in the gate. It is a
+SOURCE-shape test on purpose: all thirteen behavioural self-tests passed both
+before and after the fix, because they drive a session directly and never
+touch the frame loop's structure.
 
 ### State machine — `p_GameState` (`0x0046d06c`), steps of 10
 
@@ -211,11 +268,11 @@ immediately. That busy loop is the game's frame tick. Per frame:
 | 10 | `Stage_Init` (`0x46214c`) |
 | 20 | `Title_MainMenu` (`0x462330`) |
 | 30 | `FUN_00462210` — entered by event sub-op 0 after a stage load |
-| 40 | `Game_Init_PlayerState` (`0x462f40`) |
+| 40 | `Game_StartOrLoad` (`0x462f40`) — **and this is where the opening cutscene runs**, 4726 frames of it, called every frame until it ends |
 | 60 | `FUN_00454790`, `FUN_00461ba8` — **normal gameplay**; a finished event script returns here |
 | 100 | `GameOver_Update` (`0x461a44`), `FUN_00461ba8` — **game over** |
 | 130 | `FUN_00461ee4` — **pause**; saves prior state to `0x46cbbc` |
-| 140 | `FUN_00454790`, `EventScript_Execute` (`0x455210`), `FUN_00461ba8` — **event-script runner** |
+| 140 | **the event-script state** — `EventScript_Execute`, `MessageBox_Update`, `Overlay_Update` and `PowerUp_Show` run here and in no other state. `Entity_PlayerTouch` does NOT, so touch detection is off for the whole of a conversation |
 | 150 | `FUN_00463624` — entered by event sub-op 80 (`soulget`) |
 | 999 | **quit** — nils `FOnIdle`, calls `FUN_00442a40` |
 
@@ -232,10 +289,31 @@ LastFrameTime := timeGetTime();
 ~60 FPS via spin-wait, gated by a flag at `0x46ce60`. Combined with
 `Done := False` this **pegs a CPU core at 100%**. Use a real sleep in the rebuild.
 
-### Named globals
+### Named globals — THESE ADDRESSES ARE POINTER CELLS
 
 `p_GameState` `0x46d06c`, `p_InputState` `0x46cc58`, `p_KeyMap` `0x46cea8`,
 `p_Settings` `0x46d0e8`, `p_LastFrameTime` `0x46d1e0`.
+
+**The cell is not the variable.** Running the game showed `p_GameState`
+holding `0x0047EF98`, unchanged across 862 frames of title menu where the
+state had to be 20. The disassembly at `0x00459EE5` settles it:
+
+    mov edx, DWORD PTR ds:0x46d06c    ; load
+    mov edx, DWORD PTR [edx]          ; DEREFERENCE
+    sub edx, 0x3c                     ; compare with 60, GS_PLAY
+
+and `objdump` confirms the shape across the set — of seven cells traced, every
+one is loaded many times and stored to **never**. A variable the game sets is
+written somewhere; these are not. By contrast `RandSeed` at `0x0046E040`,
+which belongs to the RTL rather than the game, has 2 stores and is a real
+variable.
+
+Following the pointer gives exactly the documented meanings, so the MEANINGS
+are right and always were; the addresses name the wrong cell by one
+indirection. Harmless to our behaviour — ours are real globals and these are
+documentation — but anything that READS the original's memory (a trace, a
+snapshot, an `--emudiff` `mem=`) must place both cells or it reads a pointer
+and reports it as a value. What they point into has not been established.
 
 ## 7. Settings — `data\system.dat`, 56 bytes
 
@@ -689,6 +767,12 @@ repeating the mistake:
 | `table_bounds.py` | **where does this const array END?** Partitions a region by the pointer globals that address it, since Delphi lays typed constants out consecutively. `--ptr X --readers` also counts code references — one reader means no other caller can need more rows. Written after a table was recorded at 16 rows and turned out to be 2 |
 | `entity_usage.py` | **which types does the shipped data actually place, and with what arguments?** Prioritises the remaining handlers by how much of the game they buy, and cross-checks table lengths: an argument range of exactly 0..N-1 against an N-entry table agrees from both directions. `--paramb` groups by script, which is what identified the save point |
 | `x87_sim.py` | **what would the original's FPU have produced?** Exact rational simulation of an x87 sequence at 64-bit significands. FPC on x86-64 has no 80-bit type, so some integer arithmetic done through the FPU cannot be reproduced with floats at all and has to be modelled in integers; this is the reference that says the model is right, and regenerates the golden table the self-test asserts |
+| `table_extents.py` | **is this table the right LENGTH?** The 181 value-pins cannot tell you: the count they check with comes from the array being checked, so a short table pins short and passes. This bounds each by the address of the next. 171 of 180 are now flush, meaning their length is corroborated from outside themselves |
+| `divergences.py` | pairs every `DIVERGENCE DIV-nnn` marker against `notes/divergences.md` and fails on a mismatch. Makes "we did not invent logic" a property of the repo rather than of my memory |
+| `frame_shape.py` | the frame loop's ARRANGEMENT, and the form wiring no behavioural test can see. Both bugs it guards were correct units with nothing connecting them |
+| `make_trace.py` | generates the Frida script that traces the running original — tier 0b above |
+| `javac_check.sh` | compiles the Ghidra scripts against the install's jars in a second, instead of finding a typo two minutes into a headless run |
+| `bindiff.py` | diffs the 2003 and 2020 builds. No instruction byte differs, so every oddity in either is the author's |
 | `mutate.sh` | section 14 — the mutation harness |
 | `coverage.py` | how much of the game layer is MENTIONED anywhere in `src/` |
 | `implemented.py` | how much of it actually EXECUTES - the number that counts. `--all` lists the untouched, `--described` the ones that are still only prose |
@@ -764,6 +848,64 @@ order of strength:
    count. `Title_Init`'s `Font_Define` arguments match constants derived
    separately from the font sheet. The DFM's `AutoLoadMidis` matches the static
    name array entry for entry.
+
+### Tier 0b: running the GAME — `tools/make_trace.py`
+
+Stronger still, and the only tier that can answer questions about *sequence*:
+attach Frida to the original and watch it play.
+
+    python tools/make_trace.py --group frame --group state --group entity
+    cd "<gamedir>" && frida -f akuji.exe -l akuji_trace.js
+
+The script is GENERATED from `notes/game_functions.txt`, the address authority
+— sixty hand-copied addresses would be a second drifting copy of the database,
+and a trace with one wrong address is worse than none because it still looks
+like evidence. Groups keep the volume usable; `frame` emits a marker so two
+logs can be lined up.
+
+**Everything this project knew came from reading, and reading cannot see
+arrangement.** One 20,304-frame session produced: the two-dispatch frame loop
+(section 6), the meaning of state 140, that `Entity_PlayerTouch` runs only in
+state 60, that the `p_*` globals are pointer cells, that the opening's slide
+timings are exactly right, and — because the counts are exact rather than
+approximate — arithmetic that confirms itself:
+
+    Player_Update 14667;  20304 - 14667 = 5637 = title 910 + opening 4726 + 1
+
+Findings live in `notes/trace_findings.md`. Still unobserved: `ScreenPhase` 1,
+the phase `Ending.pas` records as a hole, because no session has reached the
+ending.
+
+### The divergence ledger — `notes/divergences.md`
+
+The governing rule is that the Pascal matches the binary and the binary's bugs
+are reproduced rather than fixed. That rule was **unenforceable** until this
+existed: three divergences carried a comment, the rest were prose buried in
+8,000-line units, and nothing failed if a fourth appeared. Reading for them
+turned up nine.
+
+Every knowing difference is one of four kinds, and the kind decides where a fix
+is allowed to go:
+
+| | | |
+|---|---|---|
+| **A** | mistranslation | fix in game code, against the disassembly. NEVER appears in the ledger — it gets fixed |
+| **B** | missing component | fix in the COMPONENT, never in game code. Must name an exit condition |
+| **C** | toolchain | permanent, must be behaviour-neutral |
+| **D** | deliberate refusal | permanent, behaviour-affecting, argued |
+
+**B is where the danger is**: the symptom shows up in game code while the cause
+is elsewhere, so the cheap fix is a line of invented logic that makes the
+symptom go away. That line is indistinguishable from a translation once the
+reasoning ages out of memory.
+
+`tools/divergences.py` pairs each `DIVERGENCE DIV-nnn` marker against its entry
+and fails on an unlabelled marker, a lost marker, a marker in an unlisted file,
+a B with no exit, or anything filed as A. A `f.div=<n>` case in `--emudiff`
+**inverts**: differing is expected and AGREEING fails, because that means the
+ledger describes something no longer true.
+
+It cannot find an UNdeclared divergence. Only differential execution can.
 
 ### `tools/check.sh` is the gate
 
@@ -841,17 +983,32 @@ Ghidra ships a p-code emulator and `analyzeHeadless` runs scripts with no GUI.
 The mistake cost real verification strength — check whether a blocker is the
 technique or one *instance* of it.
 
-**The honest boundary.** The emulator models the instruction set, not the
-process: no Windows, no imports, no VCL. A function that calls the RTL or
-touches a handle faults, and is reported as faulted rather than skipped. Leaf
-routines and arithmetic run fine, which is exactly where the risk is. BSS is not
-in the PE, so anything reached through a global has to be written first with a
-`mem=` entry.
+**It reaches the whole entity layer.** The record used to say this technique
+was confined to "leaf routines and arithmetic, which is where the risk is" —
+a guess that had never been tested, and on the strength of it the 8,832 lines
+of entity handlers were written off. All 78 run to completion here, on live
+entities in four states each, without a fault.
 
-Currently 530 cases across `Compare`, `Angle_Between` and
-`Entity_TileEdgeDistX/Y` — 0 disagree. Mutation-checked: dropping the `-1` from
-the right-edge arm makes 96 of 384 disagree, with the original's value printed
-beside the reconstruction's.
+`get=ADDR:LEN` is what made that possible. EAX is the whole answer for a leaf
+function; an entity handler returns nothing meaningful and its answer is the
+entity it MUTATED, so the emulator reads memory back and the Pascal side
+compares 260 bytes and names the differing field.
+
+**A FAULT IS NOT WHAT MOST BAD ACCESSES DO.** The `emu_sanity` set writes
+through a wild pointer and reads through one, and BOTH RETURN — only executing
+unmapped memory stops the emulator. So an unmapped read yields zero silently
+and a handler reaching an unplaced global takes a plausible branch with nothing
+to announce it. "0 faulted" means the handlers COMPLETE, not that they ran
+against sane state.
+
+`--poison-diff` turns that silence into a signal: fill the globals region with
+`0x00`, then `0xA5`, and diff. A case whose answer moves depended on memory
+nobody placed. Over the live sweep, **4 of 312 moved, all type 69** — so 308
+read only what their case placed and are trustworthy.
+
+Current: **300 cases, 14 disagree, 4 declared divergences confirmed**, plus
+530 across the original arithmetic sets. Mutation-checked: dropping the `-1`
+from the right-edge arm makes 96 of 384 disagree.
 
 For later, not needed now: akuji.exe is i386, ImageBase `0x00400000`, no ASLR,
 relocs intact, so a 32-bit host could map its sections at the preferred base and
@@ -942,6 +1099,45 @@ reached through its own pointer global with exactly one reader, so a table ends
 where the next pointer begins — and two of the four are flush with their use in
 both directions (type 24 is placed 16 times with `A` = 0..15, one of each; type
 25 uses 0..2 and has 3 entries).
+
+## 14b. What the differential sweep has found
+
+Kept as a scoreboard because the ratio is the point: **half of what the sweep
+reported was mine, not the code's**, and the tell was the same both times —
+several unrelated types failing identically.
+
+Real defects, found by running the original:
+
+* **the frame loop was in the wrong shape** — section 6. Three bugs in one:
+  the entity update inside the dispatch, `EventScript_Execute` after it
+  instead of before, and the session stopping entirely while a box was up.
+* **type 49 added `0x40000000` to its Y position.** `Step shr 2` where the
+  original has `div 4`. Delphi emits `if v<0 then v+=3; v sar 2` for a signed
+  `div 4`; transcribing that codegen literally puts `shr` in the Pascal, and
+  FPC's `shr` on an Integer is LOGICAL.
+* **the cutscene never ran and the dash orb softlocked** — both wiring, both
+  in `frame_shape.py` now.
+
+Harness errors that LOOKED like defects:
+
+* **five handlers "failed" on `EF_CHILD_A`.** `Entity_SteerToPlayer` takes a
+  slot number and works on `FSlots[Slot]`; the harness ran handlers on a
+  standalone record, so our correct `Steer` updated the wrong entity. The
+  original hands each handler a pointer INTO the pool, so there is no
+  distinction to get wrong.
+* **247 of 312 "failed" at first.** Our handlers take `AGameState` as a
+  parameter; the original READS it through the pointer at `0x0046D06C`. The
+  emulator left both cells unmapped, so the original ran at state 0 while the
+  Pascal was handed 60 — two different code paths presented as a comparison.
+
+And one misdiagnosis worth keeping, because the reasoning was the trap:
+`PixelOf` has the same `shr` shape as type 49 and is **not** broken.
+`SizeOf(Raw - POSITION_ROUND) = 8` — the untyped constant makes FPC widen the
+expression to Int64, so the shift happens in 64 bits and truncates back, which
+is indistinguishable from an arithmetic shift. Right answer, for a reason
+invisible at the call site. It is `div` now because being right by accident is
+not the same as being right, and a typed constant or a hoisted temporary would
+silently remove the accident.
 
 ### Commit each function the moment it is green
 
