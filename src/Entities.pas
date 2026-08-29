@@ -1293,10 +1293,9 @@ end;
 
 function OriginPixel(Raw: Integer): Integer;
 begin
-  if Raw < 0 then
-    Result := (Raw + 31) shr POSITION_SHIFT
-  else
-    Result := Raw shr POSITION_SHIFT;
+  { Same +31/sar pair and the same reasoning as PixelOf above - `shr` here was
+    also correct, also only because of the widening. }
+  Result := Raw div (1 shl POSITION_SHIFT);
 end;
 
 
@@ -2161,11 +2160,33 @@ end;
 
 function PixelOf(Raw: Integer): Integer;
 begin
-  { The original's round-toward-zero idiom, kept literally. }
-  if Raw - POSITION_BIAS < 0 then
-    Result := (Raw - POSITION_ROUND) shr POSITION_SHIFT
-  else
-    Result := (Raw - POSITION_BIAS) shr POSITION_SHIFT;
+  { `div`, where this said `shr`. NOT because the shift was wrong - it was
+    right - but because it was right BY ACCIDENT, and the accident is fragile.
+
+    I claimed this was broken and it was not; the correction is worth keeping
+    because the reasoning that produced it is the trap. The original is
+    `if v < 0 then v := v + 31; v := v sar 5`, which is what Delphi emits for
+    `div 32` on a signed value. Pascal's `shr` on an Integer is LOGICAL, so
+    transcribing that literally SHOULD have given nonsense for anything left of
+    or above the origin - and in type 49's bob, where the operand was a plain
+    Integer variable, it did exactly that.
+
+    Here it did not, and the reason is invisible at the call site:
+
+        SizeOf(Raw - POSITION_ROUND) = 8
+
+    POSITION_ROUND is an untyped constant, and `Integer - 65505` has a range
+    that no longer fits in an Integer, so FPC widens the whole expression to
+    Int64. The shift then happens in 64 bits and the assignment truncates back
+    to 32, and for every value in range that is indistinguishable from an
+    arithmetic shift. Correct output, for a reason having nothing to do with
+    the code as read.
+
+    Which is why it is now `div`: give POSITION_ROUND a typed Integer
+    declaration, or hoist the subtraction into a local, and the promotion
+    disappears along with the correctness. `div` says what the original source
+    said and does not depend on a range-inference rule to be right. }
+  Result := (Raw - POSITION_BIAS) div (1 shl POSITION_SHIFT);
 end;
 
 function EntityPixelX(const E: TEntity): Integer;

@@ -2287,6 +2287,72 @@ begin
     Log.Add('OK - a continue is a new game with a file read over the top');
 end;
 
+{ PixelOf and OriginPixel across NEGATIVE inputs, which is where they were
+  broken and where nothing tested them.
+
+  Both were a literal transcription of Delphi's codegen for `div 32` on a
+  signed value - `if v < 0 then v := v + 31; v := v sar 5` - written with `shr`
+  where the original has an arithmetic shift. On the face of it that is the
+  same defect --emudiff found in type 49's bob, and I recorded it as one.
+
+  IT WAS NOT. Both were giving correct answers, because POSITION_ROUND is an
+  untyped constant and `Integer - 65505` no longer fits in an Integer, so FPC
+  widens the expression to Int64; the shift happens in 64 bits and truncates
+  back, which for every value in range matches an arithmetic shift. Type 49
+  differed only in that its operand was a plain Integer variable, with nothing
+  to trigger the widening.
+
+  So this test does not guard a fix. It guards an ACCIDENT: the behaviour is
+  correct for a reason not visible at the call site, and a typed constant or a
+  hoisted temporary would silently remove it. The model below is the original's
+  own idiom computed independently, checked across the sign boundary, and it
+  holds for the `shr` form and the `div` form alike - which is precisely the
+  point, since it is the third form, the one someone refactors into later, that
+  it exists to catch. }
+function TestPixelConversion(Log: TStrings): Integer;
+var
+  Offset, Want, GotPx, GotOrigin: Integer;
+  Bad: Integer;
+
+  { What the original computes: add the correction when negative, then an
+    ARITHMETIC shift - which together are truncation toward zero. Written out
+    rather than as `div` so the test does not simply restate the code. }
+  function OriginalIdiom(V: Integer): Integer;
+  begin
+    if V < 0 then
+      Result := SarLongint(V + ((1 shl POSITION_SHIFT) - 1), POSITION_SHIFT)
+    else
+      Result := SarLongint(V, POSITION_SHIFT);
+  end;
+
+begin
+  Result := 0;
+  Bad := 0;
+  Offset := -4096;
+  while Offset <= 4096 do
+  begin
+    Want := OriginalIdiom(Offset);
+    GotPx := PixelOf(Offset + POSITION_BIAS);
+    GotOrigin := OriginPixel(Offset);
+    if (GotPx <> Want) or (GotOrigin <> Want) then
+    begin
+      if Bad < 6 then
+        Log.Add(Format('  offset %d: original %d, PixelOf %d, OriginPixel %d',
+                       [Offset, Want, GotPx, GotOrigin]));
+      Inc(Bad);
+    end;
+    Inc(Offset);
+  end;
+  if Bad > 0 then
+  begin
+    Log.Add(Format('FAILED: %d of 8193 pixel conversions disagree with the '
+      + 'original idiom', [Bad]));
+    Inc(Result, 1);
+  end
+  else
+    Log.Add('  pixel conversion matches across 8193 offsets, both signs');
+end;
+
 function SelfTestPlayer(Log: TStrings): Integer;
 var
   GameDir: string;
@@ -2615,6 +2681,7 @@ begin
 
   Inc(Result, TestGameStart(Log, GameDir));
   Inc(Result, TestStageBegin(Log));
+  Inc(Result, TestPixelConversion(Log));
 
   Log.Add('');
   if Result = 0 then
