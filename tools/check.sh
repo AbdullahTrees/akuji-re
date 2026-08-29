@@ -139,6 +139,17 @@ printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
 [ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
 
 note ""
+note "=== scalar constants appear in their own handler's code ==="
+# The 181 pins cover const ARRAYS; nothing covered the loose velocities and
+# gravities. Three were wrong the same way - a negative literal transcribed
+# as its low byte, so -$B0 for 0xFFFFFFB0, which is really -$50.
+python "$REPO/tools/const_immediates.py" > "$SCRATCH/consts.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "const_immediates" "$rc"     "$(grep -E 'scalar constants checked' "$SCRATCH/consts.log" | tail -1)"
+[ $rc -ne 0 ] && { fail=1; grep -B1 'fold IS present' "$SCRATCH/consts.log" | head -8; }
+
+note ""
 note "=== the frame loop still has the shape the real game has ==="
 # The defect this guards was a wrong PLACE, not a wrong value, and all
 # thirteen behavioural self-tests passed both before and after the fix - they

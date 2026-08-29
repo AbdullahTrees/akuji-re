@@ -865,8 +865,17 @@ const
   T42_PATROL_BASE = $78;      { HP * 10 + this }
   T42_PATROL_SOUND = $23;
   T42_LAND_SOUND = 4;
-  T42_RISE_VY = -$C0;
-  T42_RETREAT_VY = -$A0;
+  { -$40 and -$60, not -$C0 and -$A0. The handler writes these as the literals
+    0xFFFFFFC0 and 0xFFFFFFA0, which are -64 and -96; the low byte is the two's
+    complement, not the magnitude. Same slip as T44_LAUNCH_VY, and found the
+    same way it should have been found the first time -
+    tools/const_immediates.py, which searches the handler's own code for the
+    encoding of each constant and reports when the FOLD is present instead.
+
+    --emudiff could not have caught these: type 42 only reaches states 2 and 4
+    through transitions the probe's four starting states never make. }
+  T42_RISE_VY = -$40;
+  T42_RETREAT_VY = -$60;
   T42_GRAVITY = 4;
   T42_TERMINAL = $200;
   T42_SHOT_TYPE = $2C;        { 44 }
@@ -906,7 +915,14 @@ const
   T44_TABLE_ADDR = $0046C03C;
   T44_SPRITES: array[0..T44_FRAMES - 1] of Integer =
     (505, 506, 507, 508, 509, 510, 511, 512);
-  T44_LAUNCH_VY = -$B0;
+  { -$50, not -$B0. The disassembly writes the launch velocity as the literal
+    0xFFFFFFB0, and that is -80, i.e. -$50 - the low byte is the two's
+    complement, not the magnitude. Transcribed as -$B0 it was -176, and the
+    entity left the ground more than twice as fast as it should.
+
+    --emudiff caught it as a 96-unit error in one frame of EF_POS_Y: the
+    original moved -78 (launch -80, plus one tick of gravity), ours moved -174. }
+  T44_LAUNCH_VY = -$50;
   T44_GRAVITY = 2;
   T44_TERMINAL = $200;
 
