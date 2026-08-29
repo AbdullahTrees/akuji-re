@@ -4324,6 +4324,9 @@ begin
     Pin('type 67 range', T67_RANGE_ADDR, 3, @T67_RANGE[0], 3);
     Pin('type 68 sprites', T68_TABLE_ADDR, 8, @T68_SPRITES[0], 8);
     Pin('type 68 insets', T68_INSET_ADDR, 8, @T68_INSET[0], 8);
+    Pin('type 69 sprites', T69_TABLE_ADDR, 4, @T69_SPRITES[0], 4);
+    Pin('type 70 v0 sprites', T70_V0_TABLE_ADDR, 5, @T70_V0_SPRITES[0], 5);
+    Pin('type 70 v1 sprites', T70_V1_TABLE_ADDR, 5, @T70_V1_SPRITES[0], 5);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));

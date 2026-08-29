@@ -90,6 +90,8 @@
       0x0045E4EC  type 66  an anchor and the satellite that orbits it
       0x0045E714  type 67  lays the egg, then bolts
       0x0045EA40  type 68  what hatches out of it
+      0x0045EB1C  type 69  a pushable that has to go down a HOLE
+      0x0045EC4C  type 70  a hundred-hp thing that dies of any wound at all
 
   And the dispatcher they hang off:
 
@@ -1762,6 +1764,58 @@ const
   T68_RISING_STATE = 3;
   T68_CAUGHT_STATE = 4;     { nothing in this handler ever sets it }
 
+  { --- Types 69 and 70 --------------------------------------------------
+    TYPE 69 is a PUZZLE OBJECT, and the only handler so far that writes a
+    progress flag. It slides - EF_VEL_X decaying by 4 a frame, so something
+    else has to push it - and does nothing at all until the tile one below it
+    is NOT solid. Over a hole it:
+
+      * spawns a type 68 as an ACTOR, in state 4 with 1 hp, carrying ITS OWN
+        current sprite id. State 4 is the falling half of type 68, the half
+        that lands and destroys itself WITH loot. So pushing this into the
+        hole is what pays out.
+      * destroys itself
+      * sets Progress[first four characters of its event's ParamB]
+
+    That last write is the same parse Entity_Destroy does for an opcode-5
+    event, but here it is UNCONDITIONAL - no opcode test, and it happens
+    after the destroy rather than inside it. So a type 69 sets its flag
+    whatever its event's opcode says, which Entity_Destroy would not have
+    done.
+
+    TYPE 70 has exactly 100 hp and dies of any scratch. State 1 watches
+    `EF_HP <> 100` - not "below some threshold", not "at zero" - so the first
+    point of damage of any size moves it to state 2, where it shows one fixed
+    frame for 120 frames and then sets its own EF_HP to 0.
+
+    Its two variants differ in one line: variant 1 walks (type 60's wall and
+    ledge probes again) and variant 0 stands still. Everything else is
+    shared, including the 100.
+
+    Variant 1's sprite table is (0, 1, 2, 1, 1) where variant 0's is
+    (434, 435, 436, 435, 437). Those low numbers are what the binary holds;
+    recorded rather than second-guessed. }
+  T69_FRAMES = 4;
+  T69_TABLE_ADDR = $0046C4B8;
+  T69_SPRITES: array[0..T69_FRAMES - 1] of Integer = (430, 431, 432, 433);
+  T69_FRICTION = 4;
+  T69_FLOOR_PROBE = $400;   { one tile down; it acts when there is NO floor }
+  T69_PRIZE_TYPE = $44;     { 68, spawned straight into its falling state }
+  T69_PRIZE_STATE = 4;
+  T69_PRIZE_HP = 1;
+
+  T70_FRAMES = 4;  T70_TICKS = 8;
+  T70_WALKER = 1;           { variant 1 walks; variant 0 stands still }
+  T70_V0_TABLE_ADDR = $0046C4C8;
+  T70_V0_SPRITES: array[0..4] of Integer = (434, 435, 436, 435, 437);
+  T70_V1_TABLE_ADDR = $0046C4DC;
+  T70_V1_SPRITES: array[0..4] of Integer = (0, 1, 2, 1, 1);
+  T70_WOUND_FRAME = 4;
+  T70_FULL_HP = 100;        { any value but this one counts as wounded }
+  T70_WALK_SPEED = $20;
+  T70_LEDGE_PROBE = $400;
+  T70_DYING_FOR = $78;      { 120 frames of the wound frame, then hp := 0 }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2079,6 +2133,16 @@ procedure EntityUpdate_Type67(var E: TEntity; AGameState: Integer;
 { 0x0045EA40. What hatches: a riser that resizes its own hitbox frame by
   frame, and falls and drops loot once something has caught it. }
 procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045EB1C. A pushable puzzle object: slides, and when it finds a hole
+  under it pays out a type 68 and sets its event's progress flag. }
+procedure EntityUpdate_Type69(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045EC4C. Exactly 100 hp, and any wound at all is fatal. Variant 1
+  walks, variant 0 stands. See the T70_ block. }
+procedure EntityUpdate_Type70(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -4164,6 +4228,101 @@ begin
       Exit;
     end;
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
+procedure EntityUpdate_Type69(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Slot: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T69_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T69_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 0 then
+    E.Raw[EF_STATE] := 1;
+
+  { It never accelerates itself - something else has to push it. }
+  ApproachZero(E.Raw[EF_VEL_X], T69_FRICTION);
+  Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+  { The absence of a floor, not the presence of a wall. }
+  if World.TileAtY(E, T69_FLOOR_PROBE, False) < World.SolidThreshold then
+  begin
+    Slot := World.Spawn(EKIND_ACTOR, T69_PRIZE_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS);
+    World.SetSpawnField(Slot, EF_STATE, T69_PRIZE_STATE);
+    World.SetSpawnField(Slot, EF_HP, T69_PRIZE_HP);
+    { The prize wears this object's own sprite. }
+    World.SetSpawnField(Slot, EF_ANIM_ID, E.Raw[EF_ANIM_ID]);
+    World.DestroyEntity(E, False);
+    { After the destroy, and with no opcode test - see the T69_ block.
+      EF_EVENT_ID survives Entity_Destroy, which is why this order works. }
+    World.SetProgress(World.EventProgressIndex(E.Raw[EF_EVENT_ID]));
+  end;
+end;
+
+procedure EntityUpdate_Type70(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T70_V0_SPRITES)) then
+    Frame := 0;
+  if E.Raw[EF_VARIANT] = 0 then
+    E.Raw[EF_ANIM_ID] := T70_V0_SPRITES[Frame];
+  if E.Raw[EF_VARIANT] = T70_WALKER then
+    E.Raw[EF_ANIM_ID] := T70_V1_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_X] := T70_WALK_SPEED;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T70_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T70_FRAMES;
+    end;
+
+    { The one line the two variants differ by. }
+    if E.Raw[EF_VARIANT] = T70_WALKER then
+    begin
+      if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+         or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T70_LEDGE_PROBE)
+             < World.SolidThreshold) then
+        E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+      Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    end;
+
+    { Not a threshold and not zero - ANY value other than 100. }
+    if E.Raw[EF_HP] <> T70_FULL_HP then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_STATE] := 2;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_FLAG1C] := T70_WOUND_FRAME;
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T70_DYING_FOR then
+      E.Raw[EF_HP] := 0;
   end;
 end;
 
@@ -6859,11 +7018,13 @@ begin
       66: EntityUpdate_Type66(E^, AGameState, World);
       67: EntityUpdate_Type67(E^, AGameState, World);
       68: EntityUpdate_Type68(E^, AGameState, World);
+      69: EntityUpdate_Type69(E^, AGameState, World);
+      70: EntityUpdate_Type70(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 12 arms are in HANDLER_ADDR, untranslated }
+      { the other 10 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

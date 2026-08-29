@@ -118,7 +118,7 @@
 0045e4ec  EntityUpdate_Type66_AnchorAndSatellite
 0045e714  EntityUpdate_Type67_EggLayer
 0045ea40  EntityUpdate_Type68
-0045eb1c  FUN_0045eb1c
+0045eb1c  EntityUpdate_Type69_Pushable
 0045ec4c  EntityUpdate_Type70
 0045ed50  FUN_0045ed50
 0045ed88  EntityUpdate_Type71
