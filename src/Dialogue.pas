@@ -379,7 +379,30 @@ begin
   Slot := SLOT_NONE;
   if (FRunner.EventId >= 0) and (FRunner.EventId < FScript.Count) then
     Slot := FScript[FRunner.EventId].EntitySlot;
-  if (Slot = SLOT_NONE) or (not FPool.Alive[Slot]) then
+
+  { NO ALIVENESS TEST. This used to read
+        if (Slot = SLOT_NONE) or (not FPool.Alive[Slot]) then Exit;
+    and the second half was a softlock on every power-up in the game.
+
+    By the time sub-op 10 runs, the entity is ALREADY DEAD - the touch that
+    fired the event destroyed it earlier in the same frame. The trace of the
+    original shows both, in order, at frame 9056:
+
+        Entity_Destroy  4657908      <- the touch
+        EventScript_Execute
+        PowerUp_Show                 <- reads the same entity anyway
+        Entity_Destroy  4657908      <- and destroys it again
+
+    PowerUp_Show @ 0x00456698 indexes the pool straight off the event table
+    and reads +0x18 with no check of any kind. The fields survive a kill, so
+    the variant is still there to read. Our guard turned that into an early
+    return that raised no panel AND never advanced the script, which is a
+    state nothing can leave.
+
+    The SLOT_NONE half stays: it guards an out-of-range index, which in Pascal
+    is a crash rather than a behaviour, and the original cannot reach it
+    because the slot comes from an event that placed an entity. }
+  if Slot = SLOT_NONE then
     Exit;
 
   Variant := FPool.Field(Slot, EF_VARIANT);
