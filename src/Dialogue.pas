@@ -213,8 +213,14 @@ type
       event table. }
     procedure SubMode; override;
 
-    { One frame. Confirm is the edge, not the level. Returns True while the
-      box is up, which is the caller's cue to step no game logic. }
+    { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
+      not the level. Returns True while the box is up, which is the caller's
+      cue to step no game logic.
+
+      The address goes here rather than only in the unit header because this
+      IS that function - the whole unit was written from it, and it sat in
+      the backlog as "described, not implemented" purely because nothing
+      carried the address where the coverage tool looks. }
     function Update(Confirm, Up, Down: Boolean; var AGameState: Integer): Boolean;
 
     procedure Draw(Dest: TCanvas; Font: TGameFont; PlayerScreenY: Integer);
