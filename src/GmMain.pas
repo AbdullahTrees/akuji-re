@@ -541,6 +541,11 @@ const
   COUNTER_TARGETS: array[0..11] of Integer =
     (20, 50, 70, 130, 160, 400, 999, 30, 90, 270, 999, 0);
 
+{ HUD_Draw @ 0x00461BA8. The address is repeated here, immediately above the
+  declaration, because that is the only place tools/implemented.py looks - and
+  with the const block above sitting between this routine and its write-up, a
+  finished translation was being filed as unread prose. Fourth time that has
+  happened; see the note in implemented.py. }
 procedure TFrm_main.DrawHud;
 var
   Secs, I, Target: Integer;

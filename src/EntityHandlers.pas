@@ -1488,6 +1488,19 @@ const
     player, which accelerates it further right. Every other chaser in the
     game writes Compare(self.x, player.x). Reproduced as written.
 
+    THREE INDEPENDENT LINES SAY THIS IS RIGHT, and they are worth listing
+    because it looks so much like a transcription slip:
+
+      * the disassembly, read twice before it was written down
+      * type 67 at 0x0045E714 uses the identical expression to flee after
+        laying an egg, where fleeing is unmistakably the intent
+      * someone who has PLAYED the game remembers a monster that runs away
+
+    That last one is the only evidence here that comes from outside the
+    binary, which is exactly what a reading like this needs. Two binaries
+    also agree byte for byte on this function - see tools/bindiff.py - so it
+    is not a translator's patch either.
+
     It also zeroes its OWN EF_HP whenever its box overlaps the player's at
     1x1, at the very end of the handler and in BOTH states - so catching it
     is what kills it.

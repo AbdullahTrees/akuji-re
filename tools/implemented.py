@@ -31,6 +31,28 @@ in between. That is already the house style, so this mostly just reads it back:
 
 An address mentioned anywhere else is DESCRIBED: real knowledge, not yet code.
 
+THE NEAR MISS, AND WHY IT GETS ITS OWN LIST
+
+The rule is strict on purpose - it is what stopped prose being counted as code.
+But strictness cuts both ways, and it has now mis-filed a FINISHED translation
+four times:
+
+    Sounds_LoadAll      the loop was TAudioMixer.LoadAll all along
+    Overlay_Update      Dialogue.pas was written from it end to end
+    HUD_Draw            TFrm_main.DrawHud, complete down to the icon animation
+    entry               the .dpr block, which is not a declaration at all
+
+Each time the code existed and the address simply was not in the comment block
+immediately above the declaration - one comment too high, or with a const
+section in between. Filed as "read but never written", which is the opposite
+of the truth, and each took a read of the whole routine to notice.
+
+So the summary now also lists NEAR MISSES: addresses that appear in the same
+file as a routine but not where the rule can see them. That is not a loosening
+- nothing moves into the implemented count - it just stops the failure being
+silent. A near miss is either a misplaced address or a genuine description
+sitting next to unrelated code, and the two are told apart by reading.
+
 An abstract method is NOT an implementation, and neither is an override inside
 a test double. Both are filtered out, because both are exactly the shape of the
 thing this is meant to catch.
@@ -75,10 +97,17 @@ def load_functions(path):
     return out
 
 
+# How far past a comment block a declaration may sit and still make the block
+# a plausible near miss. Big enough to jump a const section, small enough that
+# an address in a table at the top of a unit does not reach the first routine.
+NEAR_LINES = 40
+
+
 def scan(src_dir):
     """address -> list of (file, routine) that implement it."""
     impl = {}
     mentioned = {}
+    near = {}
     for name in sorted(os.listdir(src_dir)):
         if not name.lower().endswith(('.pas', '.lpr')):
             continue
@@ -118,7 +147,41 @@ def scan(src_dir):
                                     impl.setdefault(a, []).append(
                                         (name, m.group(2)))
             i += 1
-    return impl, mentioned
+
+        # A near miss: the address sits in a COMMENT BLOCK that is followed
+        # by a routine declaration within NEAR_LINES - close enough that the
+        # block is plausibly about that routine - but not immediately above
+        # it, so the strict rule above did not pair them.
+        #
+        # The first version of this just asked "is the address anywhere in a
+        # file that declares routines", which flagged all six remaining
+        # addresses including the ones that are genuinely only prose. A
+        # signal that fires on everything is not a signal. Requiring a
+        # declaration NEARBY is what makes it mean something.
+        i = 0
+        while i < len(lines):
+            if '{' in lines[i] and not lines[i].lstrip().startswith('//'):
+                start = i
+                depth = 0
+                while i < len(lines):
+                    depth += lines[i].count('{') - lines[i].count('}')
+                    if depth <= 0:
+                        break
+                    i += 1
+                block = '\n'.join(lines[start:i + 1])
+                addrs = [int(m.group(1), 16) for m in ADDR.finditer(block)]
+                addrs = [a for a in addrs if GAME_LO <= a < GAME_HI]
+                if addrs:
+                    for j in range(i + 1, min(i + 1 + NEAR_LINES, len(lines))):
+                        m = DECL.match(lines[j])
+                        if m and not ABSTRACT.search(lines[j]):
+                            for a in addrs:
+                                if a not in impl:
+                                    near.setdefault(a, set()).add(
+                                        '%s:%s' % (name, m.group(2)))
+                            break
+            i += 1
+    return impl, mentioned, near
 
 
 def main():
@@ -133,7 +196,7 @@ def main():
 
     funcs = load_functions(os.path.join(args.repo, 'notes',
                                         'game_functions.txt'))
-    impl, mentioned = scan(os.path.join(args.repo, 'src'))
+    impl, mentioned, near = scan(os.path.join(args.repo, 'src'))
 
     implemented = sorted(a for a in funcs if a in impl)
     described = sorted(a for a in funcs if a not in impl and a in mentioned)
@@ -143,9 +206,20 @@ def main():
         print('DESCRIBED BUT NOT IMPLEMENTED - read, written up, no code: %d'
               % len(described))
         for a in described:
-            print('   0x%06X  %-34s %s'
-                  % (a, funcs[a], ', '.join(sorted(mentioned[a]))))
+            flag = '  <- NEAR MISS' if a in near else ''
+            print('   0x%06X  %-34s %s%s'
+                  % (a, funcs[a], ', '.join(sorted(mentioned[a])),
+                     flag + (' ' + ', '.join(sorted(near[a])) if a in near
+                             else '')))
         print()
+        hits = [a for a in described if a in near]
+        if hits:
+            print('%d of those are NEAR MISSES: the address is in a file that '
+                  'declares' % len(hits))
+            print('routines, so the code may already exist with the address in '
+                  'the wrong place.')
+            print('That has been the answer four times. Read before writing.')
+            print()
 
     if args.all:
         print('IMPLEMENTED: %d' % len(implemented))
