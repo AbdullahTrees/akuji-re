@@ -32,13 +32,33 @@ for 8,800 lines of handlers.
 
 WHAT IT CANNOT DO. The emulator models the instruction set, not the process -
 no Windows, no imports, no VCL - so a function that calls the RTL faults. That
-is reported, never skipped silently. It is also why the case sets below are
-leaf routines and arithmetic: that is both what the emulator can run and where
-the reconstruction's risk actually is.
+is reported, never skipped silently.
+
+HOW FAR THAT ACTUALLY REACHES was assumed rather than measured, and the
+assumption was wrong. The header used to say the case sets were leaf routines
+"because that is what the emulator can run", which quietly wrote off the entity
+layer - 8,832 lines, the largest and least-verified body of code in the
+project. The `handler_probe` and `handler_live` sets went and asked:
+
+    all 78 entity handlers, zeroed entity          78 returned, 0 faulted
+    all 78 in four states each, entity ALIVE      312 returned, 0 faulted
+
+The live sweep is the one that counts. A zeroed entity is dead and has no
+sprite, so most handlers take an early exit and "nothing faulted" would be a
+statement about early exits; the live sweep drives them through real paths with
+a sprite handle, HP, timers and velocity. Not one faulted. The entity layer is
+reachable by differential execution in full, which is the single biggest thing
+this technique can be pointed at.
+
+What it does NOT yet say is that they AGREE - reaching a handler and having a
+Pascal counterpart wired up to compare it against are different jobs, and most
+handlers take a TEntityWorld, which is our abstraction over globals the original
+reads directly. Each of those has to be mapped before its case can compare.
 """
 
 import argparse
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -265,7 +285,100 @@ def cases_handler_pure():
     return out
 
 
+def handler_addrs():
+    """HANDLER_ADDR out of EntityHandlers.pas: the jump table, by type."""
+    src = open(os.path.join(REPO, 'src', 'EntityHandlers.pas'),
+               encoding='utf-8').read()
+    i = src.index('HANDLER_ADDR: array')
+    body = src[src.index('(', i) + 1:src.index(');', i)]
+    # Strip the { 0..3 } row comments FIRST. Splitting on ',' and then taking
+    # the part before '{' silently ate the entry after every comment - 61
+    # handlers instead of 81 - which is the kind of quiet undercount that looks
+    # like a finding rather than a bug.
+    body = re.sub(r'[{][^}]*[}]', ' ', body)
+    out = []
+    for tok in body.replace(chr(10), ' ').split(','):
+        tok = tok.strip()
+        if tok.startswith('$'):
+            out.append(int(tok[1:], 16))
+    return out
+
+
+def cases_handler_probe():
+    """One call into EVERY handler, to find out which the emulator can run.
+
+    This answers a sizing question rather than a correctness one, and it is
+    worth its own set because the answer decides how much of the game this
+    technique can ever reach. The emulator models the instruction set, not the
+    process - a handler that calls the RTL, or reaches the sprite engine and
+    from there DirectDraw, will fault. Which ones those are was unknown, and
+    guessing at it is exactly the habit this project is trying to break.
+
+    Every case gets a zeroed entity and a zeroed seed, so a handler that reads
+    a global sees zero rather than garbage. That is not a realistic state, and
+    it is not meant to be: the question here is only "does it come back".
+    """
+    out = ['# one call per handler, zeroed entity - reconnaissance, not a diff']
+    get = 'get=0x%X:%d' % (ENTITY_AT, ENTITY_INTS * 4)
+    for typ, addr in enumerate(handler_addrs()):
+        if addr == 0:
+            continue
+        out.append('CASE probe_t%d 0x%08X eax=0x%X edx=60 %s %s '
+                   'mem=0x%X:%s f.probe=%d'
+                   % (typ, addr, ENTITY_AT, entity_mem(), get,
+                      RANDOM_SEED_ADDR, le([1]), typ))
+    return out
+
+
+def cases_handler_probe_live():
+    """The probe again, but with an entity that is ALIVE and mid-behaviour.
+
+    The zeroed probe says every handler returns. That is weaker than it sounds:
+    a zeroed entity is dead, has no sprite, and its state and timers are 0, so
+    most handlers take an early exit and never reach the code that could fault.
+    "Nothing faulted" would then be a statement about the early exits.
+
+    So this drives them down real paths - alive, a sprite handle, non-zero
+    state, HP, timers and velocity, several distinct states per handler - and
+    asks the same question of code that is actually doing something. The point
+    is to make the reach claim survive its own caveat rather than to compare
+    anything.
+    """
+    out = ['# every handler with a LIVE entity in several states']
+    get = 'get=0x%X:%d' % (ENTITY_AT, ENTITY_INTS * 4)
+    for typ, addr in enumerate(handler_addrs()):
+        if addr == 0:
+            continue
+        for st in (0, 1, 2, 3):
+            ent = entity_mem(**{
+                'i%d' % 0x00: 3,          # slot
+                'i%d' % 0x02: 1,          # alive
+                'i%d' % 0x03: typ,        # type
+                'i%d' % 0x04: 7,          # a sprite handle
+                # NOT st. Variant and state are different fields, and using
+                # one number for both pushed type 25 past its three-entry
+                # table, so a state sweep reported DIV-010 as a fresh failure.
+                'i%d' % 0x06: st % 3,   # variant
+                'i%d' % 0x08: st,         # state
+                'i%d' % 0x1C: 5,          # timer
+                'i%d' % 0x1D: st,         # death timer
+                'i%d' % 0x1E: 0x10000 + (40 << 5),   # pos x
+                'i%d' % 0x1F: 0x10000 + (30 << 5),   # pos y
+                'i%d' % 0x20: 8,          # vel x
+                'i%d' % 0x21: -4,         # vel y
+                'i%d' % 0x22: 1,          # facing
+                'i%d' % 0x24: 3,          # hp
+            })
+            out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=60 %s %s '
+                       'mem=0x%X:%s %s f.probe=%d'
+                       % (typ, st, addr, ENTITY_AT, ent, get,
+                          RANDOM_SEED_ADDR, le([12345]), layer_mem(), typ))
+    return out
+
+
 SETS = {
+    'handler_probe': cases_handler_probe,
+    'handler_live': cases_handler_probe_live,
     'handler_pure': cases_handler_pure,
     'random': cases_random,
     'compare': cases_compare,

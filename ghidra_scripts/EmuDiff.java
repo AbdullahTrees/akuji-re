@@ -27,6 +27,11 @@
  * that is the honest boundary of this technique rather than a bug in it.
  * Faults are reported, never silently skipped.
  *
+ * That boundary sits much further out than it was assumed to. All 78 of the
+ * game's entity handlers run to completion here, on live entities in several
+ * states, without a single fault - so the technique is not confined to
+ * arithmetic helpers, which is what the project record used to say.
+ *
  * BSS IS NOT IN THE FILE. Globals like p_LayerInfo point into BSS, which a PE
  * does not store, so anything read from there has to be written first with a
  * mem= entry. That is not a workaround - it is the setup the test wants

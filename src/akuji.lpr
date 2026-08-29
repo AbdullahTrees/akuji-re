@@ -7933,8 +7933,20 @@ end;
   WHAT IT CANNOT REACH. The emulator models the instruction set, not the
   process: no Windows, no imports, no VCL. A function that calls the RTL or
   touches a handle faults, and that is an honest boundary rather than a bug.
-  Leaf routines and arithmetic run fine, which is where the risk actually is.
+
+  It reaches further than this note used to claim. "Leaf routines and
+  arithmetic" was a guess that went unchecked for a long time and wrote off the
+  entity layer on the strength of it. All 78 entity handlers run to completion
+  in the emulator, including 312 cases on a LIVE entity in four states - see
+  tools/emudiff.py's handler_probe and handler_live. Being reachable is not the
+  same as being compared: most handlers take a TEntityWorld, our abstraction
+  over globals the original reads directly, and each needs mapping first.
   --------------------------------------------------------------------------- }
+
+{ Where tools/emudiff.py places the entity a handler is run on. Scratch, well
+  clear of the image, and both halves have to agree on it. }
+const
+  EMU_ENTITY_AT = $60000000;
 
 { Delphi returns in EAX; the emulator reports it as an unsigned 32-bit value. }
 function AsSigned(V: Int64): Integer;
@@ -8033,6 +8045,42 @@ var
     L.OriginY := Key('f.oy', 0);
     L.TileW   := Key('f.tile', 32);
     L.TileH   := Key('f.tile', 32);
+  end;
+
+  { The entity the emulator was GIVEN, decoded from the case's own mem= entry.
+
+    This replaces rebuilding it out of a handful of f.* fields. That worked
+    while the cases were arithmetic on two or three fields and broke the moment
+    a handler was run on a fully populated entity: the Pascal started from
+    FillChar and the emulator from 260 specified bytes, so every field the
+    f.* list did not mention came back as a difference. Reading the same mem=
+    both sides read removes a whole class of harness-shaped failures, and it
+    means a new case set needs no new f.* mapping at all. }
+  function LoadEntityFromMem(At: LongWord; var Ent: TEntity): Boolean;
+  var
+    N, Idx, B: Integer;
+    Want, Hex: string;
+    V: LongWord;
+  begin
+    Result := False;
+    FillChar(Ent, SizeOf(Ent), 0);
+    Want := 'mem=0x' + LowerCase(IntToHex(At, 1)) + ':';
+    for N := 0 to F.Count - 1 do
+      if LowerCase(Copy(F[N], 1, Length(Want))) = LowerCase(Want) then
+      begin
+        Hex := Copy(F[N], Length(Want) + 1, MaxInt);
+        for Idx := 0 to High(Ent.Raw) do
+        begin
+          if (Idx + 1) * 8 > Length(Hex) then
+            Break;
+          V := 0;
+          for B := 0 to 3 do
+            V := V or (LongWord(StrToInt('$' + Copy(Hex, Idx * 8 + B * 2 + 1, 2)))
+                       shl (B * 8));
+          Ent.Raw[Idx] := Integer(V);
+        end;
+        Exit(True);
+      end;
   end;
 
   { The entity as the emulator would have read it back: little-endian int32s,
@@ -8175,8 +8223,7 @@ begin
           whole record is handed back for comparison. }
         $0045A944:
           begin
-            FillChar(E, SizeOf(E), 0);
-            E.Raw[EF_VARIANT] := Key('f.variant', 0);
+            LoadEntityFromMem(EMU_ENTITY_AT, E);
             EntityUpdate_Type16_Sign(E);
             GotMem := HexOfEntity(E);
             HasMem := True;
@@ -8184,8 +8231,7 @@ begin
           end;
         $0045A4F0:
           begin
-            FillChar(E, SizeOf(E), 0);
-            E.Raw[EF_VARIANT] := Key('f.variant', 0);
+            LoadEntityFromMem(EMU_ENTITY_AT, E);
             EntityUpdate_Type25(E);
             GotMem := HexOfEntity(E);
             HasMem := True;
