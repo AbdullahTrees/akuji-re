@@ -85,12 +85,18 @@ type
   { Fired where the original calls DDSD1.Play. Kept as a callback so this unit
     stays independent of the component layer; GmMain hooks it up. }
   TSoundEvent = procedure(Index: Integer) of object;
+  TNotifyProc = procedure of object;
+  { 0x00462BE9 builds 'omake%.02d.bmp' and hands it to Ending_ShowPicture. }
+  TGalleryEvent = procedure(Slot: Integer) of object;
 
   TTitleScreen = class
   private
     FSubMode: Integer;
     FIndex: Integer;          // p_MenuIndex 0x0046CF88, shared with the pause menu
     FOnSound: TSoundEvent;
+    FOnResetState: TNotifyProc;
+    FOnResetOpening: TNotifyProc;
+    FOnGallery: TGalleryEvent;
     procedure PlaySound(Index: Integer);
     procedure MenuConfirm;
     procedure OptionsConfirm;
@@ -99,14 +105,22 @@ type
   public
     constructor Create;
     procedure Reset;
-    { Returns True when the caller should leave the title screen; the new
-      GameStateValue has already been set. }
+    { 0x00462330, Title_MainMenu. Three sub-modes in one function: the menu,
+      the options screen, and the gallery viewer. Returns True when the caller
+      should leave the title screen; the new GameStateValue has already been
+      set. }
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
     procedure Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
 
     property SubMode: Integer read FSubMode;
     property Index: Integer read FIndex;
     property OnSound: TSoundEvent read FOnSound write FOnSound;
+    { GameState_Reset(mode 0), and the opening's two counters. Callbacks
+      because neither belongs to this unit. }
+    property OnResetState: TNotifyProc read FOnResetState write FOnResetState;
+    property OnResetOpening: TNotifyProc read FOnResetOpening
+                                         write FOnResetOpening;
+    property OnGallery: TGalleryEvent read FOnGallery write FOnGallery;
   end;
 
   { --- GameOver_Update @ 0x00461A44 --------------------------------------
@@ -369,32 +383,66 @@ begin
   case FIndex of
     0, 1:
       begin
-        { Original: GameState_Reset, p_GameState := 0x28, sub-mode records
-          which of NEW GAME / CONTINUE was chosen. }
+        { The original does SEVEN things here, and this used to do two.
+          GameState_Reset(mode 0) comes first, then the state, then the
+          sub-mode records which of NEW GAME / CONTINUE was chosen, then the
+          cursor, and then the OPENING's slide and timer are both zeroed -
+          which is what makes the cutscene start from its first slide rather
+          than wherever a previous run left it. }
+        PlaySound(SND_OK);
+        if Assigned(FOnResetState) then
+          FOnResetState;
         GameStateValue := GS_PLAYER_INIT;
+        ScreenPhase := 0;
         FSubMode := FIndex;
         FIndex := 0;
+        if Assigned(FOnResetOpening) then
+          FOnResetOpening;
       end;
     2:
       begin
+        PlaySound(SND_OK);
         FIndex := 0;
         FSubMode := TSM_OPTIONS;
       end;
     3:
+      { No sound. EXIT is the one choice the original does not acknowledge. }
       GameStateValue := GS_QUIT;
   end;
 end;
 
 procedure TTitleScreen.OptionsConfirm;
+var
+  Sel: Integer;
 begin
-  { Row 8 shows an omake image if that slot is unlocked; row 9 leaves. The
-    original returns to the menu with the cursor on OPTION (index 2). }
+  { Row 8 shows a gallery image if that slot is unlocked, and REFUSES with
+    SND_NG if it is not - which is the only place in the menus that says no.
+    The unlock bytes are system.dat +0x2C..+0x32, and Ending.pas is what
+    fills them in. }
+  if FIndex = Ord(orOmake) then
+  begin
+    Sel := Settings.GallerySel;
+    if (Sel >= 0) and (Sel <= High(Settings.Unknown2C))
+       and (Settings.Unknown2C[Sel] = 1) then
+    begin
+      if Assigned(FOnGallery) then
+        FOnGallery(Sel);
+      PlaySound(SND_OK);
+      FSubMode := TSM_OMAKE;
+    end
+    else
+      PlaySound(SND_NG);
+    Exit;
+  end;
+
+  { Row 9 leaves, and the original returns to the menu with the cursor on
+    OPTION - index 2, not 0. }
   if FIndex = OPT_ROW_EXIT then
   begin
+    PlaySound(SND_OK);
     FSubMode := TSM_MENU;
     FIndex := 2;
   end;
-  { TODO row 8: omake viewer, needs p_Settings+0x2C unlock flags }
 end;
 
 procedure TTitleScreen.DrawValues(C: TCanvas; F: TGameFont);
@@ -466,8 +514,9 @@ begin
         end;
         if Confirm then
         begin
-          { 0x004624D7 and 0x0046253A - both branches of the confirm. }
-          PlaySound(SND_OK);
+          { The sound belongs to the BRANCH, not to the confirm. EXIT is
+            silent in the original - only NEW GAME, CONTINUE and OPTION play
+            SND_OK - and playing it here made all four alike. }
           MenuConfirm;
           Result := GameStateValue <> GS_TITLE_MENU;
         end;
@@ -491,10 +540,10 @@ begin
           if FIndex > Limit then FIndex := 0;
         end;
         if Confirm then
-        begin
-          PlaySound(SND_OK);
+          { Same again: rows 0..7 are silent on confirm, row 8 plays SND_OK
+            or SND_NG depending on whether that gallery slot is unlocked, and
+            row 9 plays SND_OK. }
           OptionsConfirm;
-        end;
       end;
 
     TSM_OMAKE:

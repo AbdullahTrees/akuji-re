@@ -59,6 +59,7 @@ type
     FPowerBmp: TBitmap;
     FGameOver: TGameOverScreen;
     FPause: TPauseMenu;
+    FOpening: TOpeningScreen;
     FEnding: TEndingScreen;
     { 0x00466888's three pieces of state. The stamp and the running count are
       locals of the original's own once-a-second sample. }
@@ -94,6 +95,9 @@ type
     procedure EndingPicture(Index: Integer);
     procedure EndingMusic(Track: Integer; Loop: Boolean);
     procedure EndingStopMusic;
+    procedure TitleResetState;
+    procedure TitleResetOpening;
+    procedure TitleGallery(Slot: Integer);
     procedure GameOverRestart;
     procedure GameOverFade(FadeIn: Boolean);
     procedure GameOverMusic(Track: Integer);
@@ -217,6 +221,7 @@ begin
   FTitleScreen := TTitleScreen.Create;
   FGameOver := TGameOverScreen.Create;
   FPause := TPauseMenu.Create;
+  FOpening := TOpeningScreen.Create;
   SetPauseSound(TitleSound);
   FEnding := TEndingScreen.Create;
   FEnding.OnPicture := EndingPicture;
@@ -228,6 +233,9 @@ begin
   { The original calls MainForm.DDSD1.Play straight from the title function;
     routing it through a callback keeps Title.pas off the component layer. }
   FTitleScreen.OnSound := TitleSound;
+  FTitleScreen.OnResetState := TitleResetState;
+  FTitleScreen.OnResetOpening := TitleResetOpening;
+  FTitleScreen.OnGallery := TitleGallery;
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
   GameStateValue := GS_TITLE_INIT;
@@ -482,6 +490,26 @@ end;
 procedure TFrm_main.EndingStopMusic;
 begin
   KbgmPlayer1.Stop;
+end;
+
+{ What Title_MainMenu reaches out for on NEW GAME / CONTINUE, and for the
+  gallery. Callbacks so Title.pas stays off the session and the archive. }
+procedure TFrm_main.TitleResetState;
+begin
+  FSession.ResetState(0);
+end;
+
+procedure TFrm_main.TitleResetOpening;
+begin
+  FOpening.Reset;
+end;
+
+{ 0x00462BE9: 'omake%.02d.bmp' through the same loader the ending uses. }
+procedure TFrm_main.TitleGallery(Slot: Integer);
+begin
+  FreeAndNil(FEndingBmp);
+  if FArchive <> nil then
+    FEndingBmp := FArchive.LoadBitmapByName(Format('omake%.2d.bmp', [Slot]));
 end;
 
 { The three things GameOver_Update needs from the form. Callbacks rather
