@@ -97,6 +97,22 @@ RANDOM_SEED_ADDR = 0x0046E040   # Delphi's RandSeed, in BSS
 GLOBALS_LO = 0x00468000
 GLOBALS_HI = 0x004A0000
 
+# THE GAME STATE IS A GLOBAL IN THE ORIGINAL, AND A PARAMETER IN OURS.
+#
+# Our handlers take AGameState because that is the honest way to express a
+# dependency in Pascal. The original reads it, every time, through a pointer:
+#
+#     mov edx, ds:0x46d06c    ; the POINTER, not the value
+#     mov edx, [edx]          ; the value
+#     sub edx, 0x3c           ; against 60, GS_PLAY
+#
+# So a case has to place both cells or the emulator reads an unmapped 0 while
+# the Pascal is handed 60, and the two run different code while looking like
+# they are being compared. That accounted for most of the first sweep's 247
+# disagreements.
+GAMESTATE_PTR = 0x0046D06C      # the pointer cell
+GAMESTATE_AT = 0x60002000       # scratch: where we point it
+
 
 def ints(vals):
     return ''.join('%08x' % (v & 0xFFFFFFFF) for v in vals)
@@ -373,6 +389,7 @@ def cases_handler_probe_live():
         if addr == 0:
             continue
         for st in (0, 1, 2, 3):
+            gs = 60         # GS_PLAY, which is when entities actually run
             ent = entity_mem(**{
                 'i%d' % 0x00: 3,          # slot
                 'i%d' % 0x02: 1,          # alive
@@ -392,10 +409,14 @@ def cases_handler_probe_live():
                 'i%d' % 0x22: 1,          # facing
                 'i%d' % 0x24: 3,          # hp
             })
-            out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=60 %s %s '
-                       'mem=0x%X:%s %s f.probe=%d'
-                       % (typ, st, addr, ENTITY_AT, ent, get,
-                          RANDOM_SEED_ADDR, le([12345]), layer_mem(), typ))
+            out.append('CASE live_t%d_s%d 0x%08X eax=0x%X edx=%d %s %s '
+                       'mem=0x%X:%s %s mem=0x%X:%s mem=0x%X:%s '
+                       'f.probe=%d f.gamestate=%d f.seed=%d'
+                       % (typ, st, addr, ENTITY_AT, gs, ent, get,
+                          RANDOM_SEED_ADDR, le([12345]), layer_mem(),
+                          GAMESTATE_PTR, le([GAMESTATE_AT]),
+                          GAMESTATE_AT, le([gs]),
+                          typ, gs, 12345))
     return out
 
 

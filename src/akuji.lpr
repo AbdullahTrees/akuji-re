@@ -7947,6 +7947,10 @@ end;
   clear of the image, and both halves have to agree on it. }
 const
   EMU_ENTITY_AT = $60000000;
+  { How many disagreements to print before summarising. High
+    enough to see a whole sweep's worth: truncating at 15 hid
+    two thirds of the first entity-layer run. }
+  EMUDIFF_REPORT_CAP = 80;
 
 { Delphi returns in EAX; the emulator reports it as an unsigned 32-bit value. }
 function AsSigned(V: Int64): Integer;
@@ -7968,7 +7972,12 @@ var
   BoxA, BoxB: TBox;
   IsBool, HasMem: Boolean;
   WantMem, GotMem: string;
-  Divergent, DivConfirmed, DivStale: Integer;
+  Divergent, DivConfirmed, DivStale, HandlerType: Integer;
+  HW: TCountingWorld;
+  HPool: TEntityPool;
+  HP: TPlayerState;
+  HL: TLayerInfo;
+  HInp: TInputState;
 
   function Num(const S: string): Integer;
   begin
@@ -8115,6 +8124,24 @@ var
       end;
   end;
 
+  { The entity type whose handler lives at this address, or -1.
+
+    ONE ARM FOR ALL 78. The alternative was 78 hand-written case arms here,
+    each rebuilding the same entity and calling one handler - which is a second
+    copy of the dispatcher, in the test, free to drift from the real one. This
+    reads the same HANDLER_ADDR table --selftest-entities already checks
+    against the binary's jump table, and dispatches through the same
+    EntityRunHandler the frame loop uses. }
+  function HandlerTypeForAddr(A: Integer): Integer;
+  var
+    N: Integer;
+  begin
+    Result := -1;
+    for N := 0 to High(HANDLER_ADDR) do
+      if (HANDLER_ADDR[N] <> 0) and (Cardinal(A) = HANDLER_ADDR[N]) then
+        Exit(N);
+  end;
+
   { Which int index first differs, so a failure points at a field instead of
     at 520 hex digits. -1 when they agree. }
   function FirstDifferingInt(const A, B: string): Integer;
@@ -8179,6 +8206,7 @@ begin
       Name := F[1];
       Addr := Num(F[2]);
       ReadStack;
+      HandlerType := HandlerTypeForAddr(Addr);
       Want := AsSigned(StrToInt64(F[Arrow + 1]));
       IsBool := False;
       WantMem := WantedMem(Arrow + 1);
@@ -8186,6 +8214,42 @@ begin
       HasMem := False;
       Divergent := Key('f.div', 0);
 
+      { An entity handler, dispatched generically. The emulator jumped straight
+        to the address, so EF_TYPE has to agree with the type whose handler
+        that is - otherwise EntityRunHandler would switch somewhere else and
+        the two would be running different code while appearing to compare. }
+      if HandlerType >= 0 then
+      begin
+        LoadEntityFromMem(EMU_ENTITY_AT, E);
+        if E.Raw[EF_TYPE] <> HandlerType then
+        begin
+          Log.Add(Format('  %-26s case is at type %d''s handler but the entity '
+            + 'says type %d - it would dispatch elsewhere',
+            [Name, HandlerType, E.Raw[EF_TYPE]]));
+          Inc(Bad);
+          Continue;
+        end;
+        HPool := TEntityPool.Create;
+        HW := TCountingWorld.Create;
+        try
+          HW.Pool := HPool;
+          FillChar(HP, SizeOf(HP), 0);
+          FillChar(HL, SizeOf(HL), 0);
+          FillChar(HInp, SizeOf(HInp), 0);
+          RandomSeed := Cardinal(Key('f.seed', 0));
+          { The game state the ORIGINAL will read out of its global, not
+            the register - see the note in tools/emudiff.py. }
+          EntityRunHandler(E, HP, HL, HInp, HW, Key('f.gamestate', 0));
+          GotMem := HexOfEntity(E);
+          HasMem := True;
+          Got := 0;
+        finally
+          HW.Free;
+          HPool.Free;
+        end;
+        Inc(Ran);
+      end
+      else
       case Addr of
         $004513E0:
           Got := AngleBetween(Key('eax', 0), Key('edx', 0),
@@ -8269,7 +8333,8 @@ begin
       if IsBool then
         Want := Ord((Want and $FF) <> 0);
 
-      Inc(Ran);
+      if HandlerType < 0 then
+        Inc(Ran);
 
       { The memory channel, where there is one. EAX is not compared for a
         handler: it returns whatever its last expression left behind, which is
@@ -8307,7 +8372,7 @@ begin
         else if WantMem <> GotMem then
         begin
           J := FirstDifferingInt(WantMem, GotMem);
-          if Bad < 15 then
+          if Bad < EMUDIFF_REPORT_CAP then
             Log.Add(Format('  %-26s entity int %d: original %s, '
               + 'reconstruction %s', [Name, J,
               Copy(WantMem, J * 8 + 1, 8), Copy(GotMem, J * 8 + 1, 8)]));
@@ -8316,7 +8381,7 @@ begin
       end
       else if Got <> Want then
       begin
-        if Bad < 15 then
+        if Bad < EMUDIFF_REPORT_CAP then
           Log.Add(Format('  %-26s original %d, reconstruction %d',
             [Name, Want, Got]));
         Inc(Bad);
