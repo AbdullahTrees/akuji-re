@@ -2140,31 +2140,47 @@ begin
     Want(P.Progress[1185] = 0,
          'settings +0x1D reached Progress[1185], which belongs to +0x1C');
 
-    { --- a continue, against the shipped save ------------------------ }
-    if not LoadSave(P, SaveName) then
-      Log.Add('  (no shipped save.dat - the continue path is not exercised)')
+    { --- a continue, against a save this test BUILDS --------------------
+
+      This used to read the game's own data\save.dat and assert against
+      whatever was in it - the difficulty in particular, because the two
+      branches below only differ when the save disagrees with the settings.
+
+      That is not a fixture, it is whatever the last person to play left
+      behind. It broke exactly that way: the shipped save was difficulty 2,
+      someone played to a save point, and the file became a difficulty-0
+      run - at which point the test could no longer tell its two branches
+      apart. It said so and failed rather than passing vacuously, which is
+      the only reason this was noticed at all.
+
+      So it builds its own now, and the real save.dat is read for one
+      informational line and nothing else. }
+    if LoadSave(P, SaveName) then
+      Log.Add(Format('data\save.dat is stage %d, music %d, difficulty %d '
+        + '(read for information only)',
+        [P.SavedStage, P.MusicTrack, P.Difficulty]))
+    else
+      Log.Add('  (no data\save.dat - it is not needed)');
+
+    SavedStage := 42;
+    SavedMusic := 7;
+    SavedDiff  := 2;
+    TempSave := GetTempDir(False) + 'akuji_selftest_continue.dat';
+    FillChar(P, SizeOf(P), 0);
+    P.SavedStage := SavedStage;
+    P.MusicTrack := SavedMusic;
+    P.Difficulty := SavedDiff;
+    P.Lives := DEFAULT_LIVES;
+    P.Head[ABILITY_DASH] := 1;
+    if not SaveTo(P, TempSave) then
+      Log.Add('  (could not write ' + TempSave + ' - the continue path is '
+        + 'not exercised)')
     else
     begin
-      SavedStage := P.SavedStage;
-      SavedMusic := P.MusicTrack;
-      SavedDiff  := P.Difficulty;
-      Log.Add(Format('save.dat: stage %d, music %d, difficulty %d',
-        [SavedStage, SavedMusic, SavedDiff]));
-
-      { The settings must disagree with the save, or the two branches of the
-        anomaly below would give the same answer and neither assertion would
-        mean anything. The shipped save is difficulty 2, so ask for 0. }
-      if SavedDiff = 0 then
-      begin
-        Log.Add('  the shipped save is difficulty 0; this test needs one that'
-          + ' is not, and can no longer tell the two writes apart');
-        Inc(Bad);
-      end;
-
       H.Tracks := '';
       FreshSettings(0);
       GS := GS_TITLE_MENU;
-      Want(GameStartOrLoad(P, Cfg, smContinue, H, True, SaveName, GS),
+      Want(GameStartOrLoad(P, Cfg, smContinue, H, True, TempSave, GS),
            'a continue with a readable save returned False');
       Want(Cfg.CurrentStage = SavedStage,
            Format('a continue went to stage %d, want the saved %d',
@@ -2179,7 +2195,7 @@ begin
       Want(P.Progress[0] = 1, 'the continue left flag 0 clear');
 
       { WITH the archive - which is what the shipped game does - the loaded
-        difficulty stands, even though the settings say 2. }
+        difficulty stands, even though the settings say 0. }
       Want(P.Difficulty = SavedDiff,
            Format('with the archive a continue kept difficulty %d, want the'
              + ' saved %d and not the settings 0', [P.Difficulty, SavedDiff]));
@@ -2189,7 +2205,7 @@ begin
         so that it stays reproduced rather than quietly dropped. }
       FreshSettings(0);
       GS := GS_TITLE_MENU;
-      GameStartOrLoad(P, Cfg, smContinue, H, False, SaveName, GS);
+      GameStartOrLoad(P, Cfg, smContinue, H, False, TempSave, GS);
       Want(P.Difficulty = 0,
            Format('without the archive a continue kept difficulty %d, want 0'
              + ' from the settings', [P.Difficulty]));
@@ -2198,6 +2214,7 @@ begin
         session flags were republished and not merely left. }
       Want((P.Progress[10] = 1) and (P.Progress[6] = 0),
            'the second difficulty write did not republish the session flags');
+      DeleteFile(TempSave);
     end;
 
     { --- a continue against a save that DISAGREES with the defaults --- }
