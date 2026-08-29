@@ -288,6 +288,14 @@ const
     flush-landing write would destroy the bounce. }
   EF_PARKED_VEL  = $2C;
 
+  { +0xC0. NOT identified. Entity_Spawn neither fills it from the type table
+    nor zeroes it - the bulk clear covers $08..$1B and the table copy covers
+    $32..$35 and $37..$40 - so whatever a slot's previous occupant left here
+    is still here. Type 72 variant 0 writes 1 to it on its first frame,
+    alongside EF_CLASS and EF_VULN_KIND, and no reader has been found yet.
+    Named so the write is visible rather than a bare index. }
+  EF_FIELD_C0    = $30;
+
   EF_EVENT_ID    = $2E;   { +0xB8. The event record this entity came from, or
                             -1 when it came from nowhere. Entity_SolidCollideX
                             and ...Y index p_EventTable by it (stride 0x24) to

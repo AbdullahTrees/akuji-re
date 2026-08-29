@@ -92,6 +92,8 @@
       0x0045EA40  type 68  what hatches out of it
       0x0045EB1C  type 69  a pushable that has to go down a HOLE
       0x0045EC4C  type 70  a hundred-hp thing that dies of any wound at all
+      0x0045ED88  type 71  a walker that is only vulnerable while it rests
+      0x0045EFC8  type 72  a faller, a flyer, and the flyer's trail
 
   And the dispatcher they hang off:
 
@@ -1816,6 +1818,91 @@ const
   T70_LEDGE_PROBE = $400;
   T70_DYING_FOR = $78;      { 120 frames of the wound frame, then hp := 0 }
 
+  { --- Types 71 and 72 --------------------------------------------------
+    TYPE 71 walks, then stops and curls up, and its EF_VULN_KIND follows the
+    state exactly: 7 while walking and 1 while resting. Types 50, 62 and 68
+    all rewrite their own vulnerability; this is the plainest of the four -
+    two states, two kinds, one line each.
+
+    Its rest table is (2, 1, 0), and the test is `rest < EF_CHILD_A` where
+    EF_CHILD_A counts COMPLETED loops of the four-frame curl. So on hard it
+    leaves after one loop and on easy after three: the harder the game, the
+    shorter the window in which it can be hurt.
+
+    Its walk timer only advances while it is ON SCREEN - the increment sits
+    behind `not Entity_IsOffScreen(2)` - so a type 71 that has wandered off
+    the edge walks for ever and never presents its vulnerable phase.
+
+    Its two sprite rows share four of their six entries: only the two walking
+    frames differ by direction, and the whole curl looks the same either way.
+
+    On EASY it subtracts 2 from its own HP, as type 50 does.
+
+    TYPE 72 is three things by EF_VARIANT again, and the middle one indexes
+    its sprite by DIRECTION rather than by a frame counter: sixteen sprites
+    for the sixty-four headings, EF_FACING shr 2, with the round-toward-zero
+    correction the original spells out.
+
+      0  a faller. Sets its own EF_CLASS to 6, its own EF_VULN_KIND to 1, and
+         EF_FIELD_C0 to 1 - see Entities.pas on that last one, which nothing
+         is known to read.
+      1  a flyer that lives 360 frames and drops a trail every few. It moves
+         by DirVel(EF_FACING) * speed and NEVER writes EF_VEL_X or EF_VEL_Y -
+         but it hands the trail its EF_VEL_X and EF_VEL_Y anyway. Those are
+         whatever the flyer was spawned with, not the direction it is
+         actually travelling, so the trail does not follow it. Written as
+         found.
+      2  the trail. It zeroes its own EF_TOUCH_KIND, which is what makes it
+         scenery rather than a second hazard, and blinks by topping up
+         EF_DEATH_TIMER at 2 the way types 11, 28 and 51 do. }
+  T71_ROW = 6;
+  T71_WALK_FRAMES = 2;  T71_WALK_TICKS = 8;
+  T71_CURL_FIRST = 2;   T71_CURL_LAST = 5;  T71_CURL_TICKS = 8;
+  T71_TABLE_ADDR = $0046C4F0;
+  T71_SPRITES: array[0..1, 0..T71_ROW - 1] of Integer =
+    ((443, 444, 445, 446, 447, 446),      { going left  }
+     (448, 449, 445, 446, 447, 446));     { going right - four are shared }
+  T71_WALK_ADDR = $0046C520;
+  T71_REST_ADDR = $0046C52C;
+  T71_WALK: array[0..2] of Integer = (180, 180, 180);   { flat }
+  T71_REST: array[0..2] of Integer = (2, 1, 0);         { loops, not frames }
+  T71_SPEED_SHIFT = 5;
+  T71_EASY_HP_PENALTY = -2;
+  T71_LEDGE_PROBE = $400;
+  T71_OFFSCREEN_MARGIN = 2;
+  T71_VULN_WALKING = 7;
+  T71_VULN_RESTING = 1;
+  T71_STUN = 10;
+  T71_SND_CURL = $1C;
+
+  T72_V0_FRAMES = 8;  T72_V0_TICKS = 2;
+  T72_V0_TABLE_ADDR = $0046C538;
+  T72_V0_SPRITES: array[0..T72_V0_FRAMES - 1] of Integer =
+    (472, 473, 474, 475, 476, 477, 478, 479);
+  T72_V1_DIRS = 16;         { sixteen sprites for sixty-four headings }
+  T72_V1_TABLE_ADDR = $0046C594;
+  T72_V1_SPRITES: array[0..T72_V1_DIRS - 1] of Integer =
+    (450, 451, 452, 453, 454, 455, 456, 457,
+     458, 459, 460, 461, 462, 463, 464, 465);
+  T72_V2_FRAMES = 4;  T72_V2_TICKS = 4;
+  T72_V2_TABLE_ADDR = $0046C5EC;
+  T72_V2_SPRITES: array[0..T72_V2_FRAMES - 1] of Integer = (469, 468, 467, 466);
+  T72_SPEED_ADDR = $0046C5D4;
+  T72_TRAIL_ADDR = $0046C5E0;
+  T72_SPEED: array[0..2] of Integer = (2, 3, 4);
+  T72_TRAIL: array[0..2] of Integer = (6, 4, 2);   { harder trails thicker }
+  T72_DIR_SHIFT = 2;
+  T72_GRAVITY = 4;
+  T72_TERMINAL = $200;
+  T72_FALLER_CLASS = 6;
+  T72_FALLER_VULN = 1;
+  T72_FLYER_DEPTH = 3;
+  T72_FLYER_LIFE = $168;    { 360 frames }
+  T72_TRAIL_DEPTH = 4;
+  T72_TRAIL_BLINK = 2;
+  T72_SELF_TYPE = $48;      { 72 - the flyer trails copies of itself }
+  T72_TRAIL_VARIANT = 2;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2145,6 +2232,16 @@ procedure EntityUpdate_Type69(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type70(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
+{ 0x0045ED88. Walks invulnerable, curls up vulnerable, repeats. See the
+  T71_ block - and note the walk timer only runs while it is on screen. }
+procedure EntityUpdate_Type71(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045EFC8. A faller, a flyer that picks its sprite by heading, and the
+  trail the flyer drops. See the T72_ block. }
+procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
@@ -2421,11 +2518,20 @@ const
     and that is the original's behaviour rather than a slip in the
     transcription.
 
-    What type 68 IS, is now read: state 3 is the rising bubble that hatches
-    out of type 67's egg, and it resizes its own hitbox every animation frame
-    from a table. Catching it puts it in state 4, where it falls and destroys
-    itself WITH loot. So the special case is a generosity - the window to
-    catch the prize is short and this doubles the chances of registering it. }
+    WHAT IT IS FOR - corrected. This was first written up as a generosity, on
+    the guess that state 3 was a prize and the extra test helped you catch it.
+    The type table says otherwise. Type 68's column 3 is 0, so a type 68
+    spawned from the table has EF_TOUCH_KIND 0 and Entity_PlayerTouch returns
+    without doing anything at all. The only type 68 that touches the player is
+    the one type 57's egg hatches, and the EGG sets EF_TOUCH_KIND to 1 on it -
+    kind 1 is Player_TakeDamage(1).
+
+    So state 3 is a rising HAZARD, and the extra test doubles the chance of it
+    landing a hit on you, not of you catching it.
+
+    State 4 has nothing to do with being caught either: type 69 spawns a type
+    68 directly into it, leaving EF_TOUCH_KIND at the table's 0 so that one is
+    harmless. It falls and pays out. Two unrelated uses of one type. }
   TYPE_TOUCH_IN_STATE_3 = $44;   { 68 }
 
 type
@@ -4323,6 +4429,227 @@ begin
     Inc(E.Raw[EF_BLOCK_B]);
     if E.Raw[EF_BLOCK_B] > T70_DYING_FOR then
       E.Raw[EF_HP] := 0;
+  end;
+end;
+
+procedure EntityUpdate_Type71(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, PlayerX: Integer;
+
+  procedure AimAndGo;
+  begin
+    E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX);
+    if E.Raw[EF_VEL_X] = 0 then
+      E.Raw[EF_VEL_X] := 1;
+    E.Raw[EF_VEL_X] := E.Raw[EF_VEL_X] shl T71_SPEED_SHIFT;
+  end;
+
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T71_ROW) then
+    Frame := 0;
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T71_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T71_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  PlayerX := World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X);
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    AimAndGo;
+    if D = 0 then
+      Inc(E.Raw[EF_HP], T71_EASY_HP_PENALTY);
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    E.Raw[EF_VULN_KIND] := T71_VULN_WALKING;
+
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T71_WALK_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T71_WALK_FRAMES;
+    end;
+
+    if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+       or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T71_LEDGE_PROBE)
+           < World.SolidThreshold) then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    { Only while it can be seen - off screen it walks for ever. }
+    if not IsOffScreen(E, T71_OFFSCREEN_MARGIN) then
+      Inc(E.Raw[EF_CHILD_A]);
+
+    if T71_WALK[D] < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := T71_CURL_FIRST;
+      World.PlaySound(T71_SND_CURL);
+      E.Raw[EF_DEATH_TIMER] := T71_STUN;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    E.Raw[EF_VULN_KIND] := T71_VULN_RESTING;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T71_CURL_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T71_CURL_LAST then
+      begin
+        E.Raw[EF_FLAG1C] := T71_CURL_FIRST;
+        { Counting completed LOOPS, which is what the rest table measures. }
+        Inc(E.Raw[EF_CHILD_A]);
+      end;
+    end;
+
+    if T71_REST[D] < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := 0;
+      AimAndGo;
+      World.PlaySound(T71_SND_CURL);
+      E.Raw[EF_DEATH_TIMER] := T71_STUN;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, Dir: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    if (Frame < 0) or (Frame >= T72_V0_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T72_V0_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    { By HEADING, not by a frame counter - and shifted with the original's
+      round-toward-zero correction. }
+    Dir := E.Raw[EF_FACING];
+    if Dir < 0 then
+      Inc(Dir, (1 shl T72_DIR_SHIFT) - 1);
+    Dir := Dir shr T72_DIR_SHIFT;
+    if (Dir < 0) or (Dir >= T72_V1_DIRS) then
+      Dir := 0;
+    E.Raw[EF_ANIM_ID] := T72_V1_SPRITES[Dir];
+  end;
+  if E.Raw[EF_VARIANT] = 2 then
+  begin
+    if (Frame < 0) or (Frame >= T72_V2_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T72_V2_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T72_V0_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T72_V0_FRAMES;
+    end;
+
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_FIELD_C0] := 1;
+      E.Raw[EF_CLASS] := T72_FALLER_CLASS;
+      E.Raw[EF_VULN_KIND] := T72_FALLER_VULN;
+    end;
+
+    if E.Raw[EF_STATE] = 1 then
+    begin
+      Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+      Inc(E.Raw[EF_VEL_Y], T72_GRAVITY);
+      if E.Raw[EF_VEL_Y] > T72_TERMINAL then
+        E.Raw[EF_VEL_Y] := T72_TERMINAL;
+      Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    E.Raw[EF_DEPTH] := T72_FLYER_DEPTH;
+    { It moves by its heading and never writes EF_VEL_X or EF_VEL_Y. }
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]) * T72_SPEED[D]);
+    Inc(E.Raw[EF_POS_Y], DirVelY(E.Raw[EF_FACING]) * T72_SPEED[D]);
+
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T72_FLYER_LIFE then
+    begin
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+
+    Inc(E.Raw[EF_CHILD_B]);
+    if T72_TRAIL[D] < E.Raw[EF_CHILD_B] then
+    begin
+      E.Raw[EF_CHILD_B] := 0;
+      Slot := World.Spawn(EKIND_MINOR, T72_SELF_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            - World.Layer.DeltaX,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS
+                            - World.Layer.DeltaY);
+      World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+      World.SetSpawnField(Slot, EF_VARIANT, T72_TRAIL_VARIANT);
+      { The flyer's OWN velocity fields, which it never updates - so this is
+        whatever it was spawned with, not where it is going. }
+      World.SetSpawnField(Slot, EF_VEL_X, E.Raw[EF_VEL_X]);
+      World.SetSpawnField(Slot, EF_VEL_Y, E.Raw[EF_VEL_Y]);
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 2 then
+  begin
+    E.Raw[EF_DEPTH] := T72_TRAIL_DEPTH;
+    { Scenery, not a second hazard. }
+    E.Raw[EF_TOUCH_KIND] := 0;
+    if E.Raw[EF_DEATH_TIMER] = 0 then
+      E.Raw[EF_DEATH_TIMER] := T72_TRAIL_BLINK;
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T72_V2_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T72_V2_FRAMES - 1 then
+        World.DestroyEntity(E, False);
+    end;
   end;
 end;
 
@@ -7020,11 +7347,13 @@ begin
       68: EntityUpdate_Type68(E^, AGameState, World);
       69: EntityUpdate_Type69(E^, AGameState, World);
       70: EntityUpdate_Type70(E^, AGameState, World);
+      71: EntityUpdate_Type71(E^, AGameState, World);
+      72: EntityUpdate_Type72(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 10 arms are in HANDLER_ADDR, untranslated }
+      { the other 8 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

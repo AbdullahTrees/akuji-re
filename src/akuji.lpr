@@ -4327,6 +4327,14 @@ begin
     Pin('type 69 sprites', T69_TABLE_ADDR, 4, @T69_SPRITES[0], 4);
     Pin('type 70 v0 sprites', T70_V0_TABLE_ADDR, 5, @T70_V0_SPRITES[0], 5);
     Pin('type 70 v1 sprites', T70_V1_TABLE_ADDR, 5, @T70_V1_SPRITES[0], 5);
+    Pin('type 71 sprites', T71_TABLE_ADDR, 12, @T71_SPRITES[0][0], 12);
+    Pin('type 71 walk', T71_WALK_ADDR, 3, @T71_WALK[0], 3);
+    Pin('type 71 rest', T71_REST_ADDR, 3, @T71_REST[0], 3);
+    Pin('type 72 faller sprites', T72_V0_TABLE_ADDR, 8, @T72_V0_SPRITES[0], 8);
+    Pin('type 72 flyer sprites', T72_V1_TABLE_ADDR, 16, @T72_V1_SPRITES[0], 16);
+    Pin('type 72 speed', T72_SPEED_ADDR, 3, @T72_SPEED[0], 3);
+    Pin('type 72 trail rate', T72_TRAIL_ADDR, 3, @T72_TRAIL[0], 3);
+    Pin('type 72 trail sprites', T72_V2_TABLE_ADDR, 4, @T72_V2_SPRITES[0], 4);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
