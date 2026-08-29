@@ -969,7 +969,7 @@ begin
         FSession.SetFrames(FSprites);
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
         FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
-                       FSession.Pool);
+                       FSession.Pool, FSession.World);
       end;
     GS_PLAY,
     GS_STATE_140:

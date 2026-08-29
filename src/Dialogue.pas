@@ -222,6 +222,9 @@ type
     FMode: TOverlayMode;
     FPanelText: string;
     FPool: TEntityPool;
+    { PowerUp_Show ends with Entity_Destroy, which needs the world's event
+      bookkeeping and its sprite sink - a bare pool cannot hide a sprite. }
+    FWorld: TEntityWorld;
     FActive: Boolean;
     FLines: array[0..BOX_LINES - 1] of string;
     FRest: string;            { pages still to come, after a \k }
@@ -238,7 +241,8 @@ type
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
-                   APlayer: PPlayerState; APool: TEntityPool);
+                   APlayer: PPlayerState; APool: TEntityPool;
+                   AWorld: TEntityWorld = nil);
 
     { TEventHost. Sub-op 3 lands here. }
     procedure ShowLine(Index: Integer); override;
@@ -363,12 +367,14 @@ begin
 end;
 
 procedure TDialogueBox.Bind(AScript: TEventScript; ARunner: TEventRunner;
-                            APlayer: PPlayerState; APool: TEntityPool);
+                            APlayer: PPlayerState; APool: TEntityPool;
+                            AWorld: TEntityWorld);
 begin
   FScript := AScript;
   FRunner := ARunner;
   FPlayer := APlayer;
   FPool := APool;
+  FWorld := AWorld;
 end;
 
 procedure TDialogueBox.SubMode;
@@ -431,8 +437,14 @@ begin
   PowerUpGrant(FPlayer^, Variant);
   FPanelText := POWERUP_PREFIX + PowerUpName(Variant) + POWERUP_SUFFIX;
 
-  { PowerUp_Show destroys the entity it granted from. }
-  FPool.Kill(Slot);
+  { PowerUp_Show ends with Entity_Destroy @ 0x00461400, NOT a bare kill.
+    FPool.Kill only clears EF_ALIVE; the destroy also hides the sprite and
+    zeroes the depth, which is what actually makes the orb stop being drawn.
+    Killing it left the ball sitting there after the panel closed. }
+  if FWorld <> nil then
+    FWorld.DestroyEntity(FPool.Entity(Slot)^, False)
+  else
+    FPool.Kill(Slot);
   FScript.SetActive(FRunner.EventId, False);
 end;
 
