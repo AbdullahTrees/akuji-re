@@ -167,6 +167,17 @@ const
   StrToInt on a malformed one would raise where the original would not. }
 function AlternativeFlag(const Alt: string): Integer;
 
+{ The music sub-op's two flag columns and the literals they are compared
+  against, from 0x004559F1 and 0x00455A5E. }
+const
+  MUSIC_STORE_COLUMN = 15;
+  MUSIC_STORE_YES    = '1';
+  MUSIC_LOOP_COLUMN  = 13;
+  MUSIC_LOOP_ONCE    = '0';
+
+{ One character at a fixed column - see the implementation. }
+function StepChar(const Step: string; Position: Integer): Char;
+
 implementation
 
 { Every argument in a step sits at a fixed position - which is why every
@@ -183,6 +194,17 @@ begin
     Exit;
   if not TryStrToInt(Trim(Copy(Step, Start, Len)), Result) then
     Result := 0;
+end;
+
+{ One character at a FIXED COLUMN, which is how the original reads the two
+  music flags - Copy(Step, 13, 1) and Copy(Step, 15, 1), not a dash-separated
+  field. Positions are 1-based, as Copy's are. }
+function StepChar(const Step: string; Position: Integer): Char;
+begin
+  if (Position >= 1) and (Position <= Length(Step)) then
+    Result := Step[Position]
+  else
+    Result := #0;
 end;
 
 procedure TEventHost.ShowLine(Index: Integer); begin end;
@@ -448,9 +470,17 @@ begin
 
     SUBOP_PLAY_MUSIC:
       begin
-        { Two single-character flags decide whether the track index is also
-          stored as the stage's music and whether it loops. }
-        Host.PlayMusic(StepArg(Step, Op, 0), True);
+        { The two flags, at columns 15 and 13, compared against the one-
+          character literals at 0x00456000 and 0x0045600C - which are '1' and
+          '0'. This used to pass True unconditionally and ignore both, with a
+          comment describing what it was not doing.
+
+              column 15 = '1'   also store the track as the stage's music
+              column 13 = '0'   play it ONCE; anything else loops }
+        if StepChar(Step, MUSIC_STORE_COLUMN) = MUSIC_STORE_YES then
+          P.MusicTrack := StepArg(Step, Op, 0);
+        Host.PlayMusic(StepArg(Step, Op, 0),
+                       StepChar(Step, MUSIC_LOOP_COLUMN) <> MUSIC_LOOP_ONCE);
         AdvanceStep(P, AGameState);
       end;
 

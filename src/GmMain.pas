@@ -156,6 +156,8 @@ type
       through 0x00450F14, which stops dead - fade 0 - so this is not a
       convenience default, it is the value those two call sites use. }
     procedure PlayMusicCut(Track: Integer; Loop: Boolean);
+    { 0x00450F74 - stop with a two-second fade, then play. }
+    procedure PlayMusicFading(Track: Integer; Loop: Boolean);
     { 0x00450EDC / 0x00450EF0 - see KbgmPlayer.pas. }
     procedure RememberMusicTrack;
     procedure ResumeMusicTrack;
@@ -348,6 +350,8 @@ begin
   FDialogue.OnResumeMusic := ResumeMusicTrack;
   FDialogue.OnStartFade := DialogueStartFade;
   FDialogue.OnFadeBusy := DialogueFadeBusy;
+  { Sub-op 12 goes through the FADE wrapper; the power-up fanfare cuts. }
+  FDialogue.OnFadeMusic := PlayMusicFading;
   FOpening.OnPicture := OpeningPicture;
   FOpening.OnMusic := PlayMusicCut;
   FOpening.OnStopMusic := StopMusicTrack;
@@ -684,6 +688,11 @@ begin
   PlayMusicTrack(Track, Loop, KBGM_STOP_HARD);
 end;
 
+procedure TFrm_main.PlayMusicFading(Track: Integer; Loop: Boolean);
+begin
+  PlayMusicTrack(Track, Loop, KBGM_STOP_FADE_NEWGAME);
+end;
+
 procedure TFrm_main.RememberMusicTrack;
 begin
   KbgmPlayer1.RememberCurrent;
@@ -1005,6 +1014,8 @@ begin
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
         FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
                        FSession.Pool, FSession.World);
+        { Sub-op 14 writes a tile, and the original writes to p_TileMaps[0]. }
+        FDialogue.Map := FMap;
       end;
     GS_PLAY,
     GS_STATE_140:

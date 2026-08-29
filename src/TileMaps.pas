@@ -119,6 +119,12 @@ type
       original reads anyway. This returns 0 there. Drawing keeps GetTile, whose
       clamp is right for a viewport. }
     function TileAtRaw(X, Y: Integer): Integer;
+    { Sub-op 14's writer - 0x0044DB3C, the setter beside TileMap_Get. The
+      original stores a WORD, which is what the .map file holds, and it does
+      not bounds-check; refusing out of range here is a guard against a Pascal
+      range error rather than a behaviour, since a bad index in the original
+      would corrupt a neighbouring row. }
+    procedure SetTileRaw(X, Y, Tile: Integer);
 
     { 0x0044DAE0, TileMap_DefineTile. Repoints one tile id at a different cell
       of the tileset. This is how TMYBGANIME animates a background: it changes
@@ -248,6 +254,13 @@ begin
   if (Idx < 0) or (Idx >= FMapW * FMapH) then
     Exit(0);
   Result := FTiles[Idx];
+end;
+
+procedure TTileMap.SetTileRaw(X, Y, Tile: Integer);
+begin
+  if (X < 0) or (Y < 0) or (X >= FMapW) or (Y >= FMapH) then
+    Exit;
+  FTiles[Y * FMapW + X] := Word(Tile);
 end;
 
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;

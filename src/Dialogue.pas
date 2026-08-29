@@ -85,6 +85,7 @@ interface
 
 uses
   Classes, SysUtils, Graphics, GameFont, PlayerState, EventRunner, EventScripts,
+  TileMaps,
   GameState, Entities;
 
 const
@@ -241,6 +242,8 @@ type
     FOnResumeMusic: TOverlayResumeMusic;
     FOnStartFade: TOverlayStartFade;
     FOnFadeBusy: TOverlayFadeBusy;
+    FOnFadeMusic: TOverlayMusic;
+    FMap: TTileMap;
     procedure TakePage(const Text: string);
     procedure PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY: Integer);
     function EventSlot(EventId: Integer): Integer;
@@ -281,6 +284,12 @@ type
       DDDDComponent. Routed through callbacks so this unit stays off it. }
     procedure StartFade(Out_: Boolean); override;
     function FadeBusy: Boolean; override;
+    { Sub-op 12. The FADE play path, 0x00450F74, not the hard-cut one - the
+      interpreter's two calls are at 0x00455AAF and 0x00455AFB and both go
+      through it. }
+    procedure PlayMusic(Track: Integer; Loop: Boolean); override;
+    { Sub-op 14 @ 0x00455Exx: TileMap_Set on layer 0. }
+    procedure SetTile(X, Y, Tile: Integer); override;
 
     { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
       not the level. Returns True while the box is up, which is the caller's
@@ -305,6 +314,10 @@ type
     property OnStartFade: TOverlayStartFade read FOnStartFade
                                             write FOnStartFade;
     property OnFadeBusy: TOverlayFadeBusy read FOnFadeBusy write FOnFadeBusy;
+    { Sub-op 12 fades; the power-up fanfare cuts. Two different wrappers in
+      the original, so two callbacks here. }
+    property OnFadeMusic: TOverlayMusic read FOnFadeMusic write FOnFadeMusic;
+    property Map: TTileMap read FMap write FMap;
     { The panel stays up for as long as its fanfare plays - Overlay_Update
       asks the music player and closes when it stops. The form owns the
       player, so it answers. }
@@ -484,6 +497,18 @@ begin
   if (Slot = SLOT_NONE) or (FPool = nil) then
     Exit;
   FPool.SetField(Slot, EF_STATE, Value);
+end;
+
+procedure TDialogueBox.PlayMusic(Track: Integer; Loop: Boolean);
+begin
+  if Assigned(FOnFadeMusic) then
+    FOnFadeMusic(Track, Loop);
+end;
+
+procedure TDialogueBox.SetTile(X, Y, Tile: Integer);
+begin
+  if FMap <> nil then
+    FMap.SetTileRaw(X, Y, Tile);
 end;
 
 procedure TDialogueBox.StartFade(Out_: Boolean);
