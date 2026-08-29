@@ -4314,6 +4314,11 @@ begin
     Pin('type 64 wait', T64_WAIT_ADDR, 3, @T64_WAIT[0], 3);
     Pin('type 64 rest', T64_REST_ADDR, 3, @T64_REST[0], 3);
     Pin('type 64 rise', T64_RISE_ADDR, 3, @T64_RISE[0], 3);
+    Pin('type 65 sprites', T65_TABLE_ADDR, 2, @T65_SPRITES[0], 2);
+    Pin('type 65 hops', T65_HOP_ADDR, 2, @T65_HOP[0], 2);
+    Pin('type 66 anchor sprites', T66_V0_TABLE_ADDR, 3, @T66_V0_SPRITES[0], 3);
+    Pin('type 66 satellite sprites', T66_V1_TABLE_ADDR, 2,
+        @T66_V1_SPRITES[0], 2);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));

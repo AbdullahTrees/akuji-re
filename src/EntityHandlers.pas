@@ -86,6 +86,8 @@
       0x0045DDF4  type 63  a walker that stops to shoot, then turns round
       0x0045E030  type 64  a slammer that drops, sends a wave each way, and
                            climbs back to the ceiling
+      0x0045E25C  type 65  a third boss - you have to HIT it to start it
+      0x0045E4EC  type 66  an anchor and the satellite that orbits it
 
   And the dispatcher they hang off:
 
@@ -1611,6 +1613,82 @@ const
   T64_WAVE_SPEED = $20;
   T64_SND_SLAM = $2A;
 
+  { --- Types 65 and 66 --------------------------------------------------
+    TYPE 65 is the third boss and the only enemy in the game that reads the
+    INPUT STATE. It will not start until the player presses ATTACK - Button[1]
+    held with ButtonLatch[1] clear, which is the rising edge - while standing
+    inside a 10x2 box around it. Type 40 is the only other handler that takes
+    the input, and it is a switch.
+
+    After that it is type 54's shape again: blink out, fire, hold, HOP, blink
+    back in. Its hop table has only TWO entries, (-96, +96) scaled by 0x20, so
+    it toggles between two places 96 pixels apart rather than walking a
+    circuit. EF_CHILD_B starts from EF_VARIANT, so the placement chooses which
+    of the two it starts on.
+
+    What it fires is a type 57 with EF_VARIANT 2 - the homing fireball - and
+    it writes two fields on the shot that no other spawner writes:
+    EF_VULN_KIND 6 and EF_HIT_SOUND 2. So this boss's fireball can be hurt,
+    and it makes a different noise when it is.
+
+    On any difficulty above easy it gives ITSELF 2 more HP. That is the
+    opposite direction from types 50, 52 and 54, which subtract.
+
+    TYPE 66 is a pair: an anchor (variant 0) and a satellite (variant 1) that
+    it spawns once and then never touches again.
+
+    Both read their placement parameters out of the same two fields, and both
+    read them in unusual ways:
+
+      EF_FACING is not a direction here. Its SIGN picks which way the pair
+      turns and its MAGNITUDE is a speed multiplier - the satellite's velocity
+      is Abs(EF_FACING) * half the direction component.
+
+      EF_BLOCK_A[1] is a period: the anchor advances its own frame every that
+      many ticks, and the satellite recomputes its velocity every that many.
+
+    The two sign tests are written differently - the anchor asks
+    Compare(EF_FACING, 0) < 1 and the satellite asks < 0 - so at EF_FACING = 0
+    the anchor still advances its frame while the satellite still advances its
+    angle. Both happen to increment; the asymmetry is real but harmless.
+
+    The satellite's angle wraps through the whole 64-step circle and plays a
+    sound on every wrap, so a full orbit is audible. }
+  T65_FRAMES = 2;  T65_TICKS = 4;
+  T65_TABLE_ADDR = $0046C41C;
+  T65_SPRITES: array[0..T65_FRAMES - 1] of Integer = (195, 196);
+  T65_HOP_ADDR = $0046C424;
+  T65_HOPS = 2;
+  T65_HOP: array[0..T65_HOPS - 1] of Integer = (-96, 96);
+  T65_HOP_SCALE = $20;
+  T65_HARD_HP_BONUS = 2;    { it gives ITSELF hp - the others take it away }
+  T65_WAKE_X = 10;
+  T65_WAKE_Y = 2;
+  T65_ATTACK_BUTTON = 1;
+  T65_BLINK = $1E;
+  T65_HOLD = $3C;
+  T65_AIM_SHIFT = 5;
+  T65_SHOT_TYPE = $39;      { 57 ... }
+  T65_SHOT_VARIANT = 2;     { ... variant 2, the homing fireball }
+  T65_SHOT_SPEED = $40;
+  T65_SHOT_VULN = 6;
+  T65_SHOT_HIT_SOUND = 2;
+  T65_BOB_TICKS = 2;
+  T65_SND_BLINK = $1C;
+
+  T66_ANCHOR = 0;
+  T66_SATELLITE = 1;
+  T66_V0_FRAMES = 3;
+  T66_V0_TABLE_ADDR = $0046C42C;
+  T66_V0_SPRITES: array[0..T66_V0_FRAMES - 1] of Integer = (197, 198, 199);
+  T66_V1_FRAMES = 2;  T66_V1_TICKS = 2;
+  T66_V1_TABLE_ADDR = $0046C438;
+  T66_V1_SPRITES: array[0..T66_V1_FRAMES - 1] of Integer = (490, 491);
+  T66_SELF_TYPE = $42;      { 66 - the anchor spawns another of itself }
+  T66_LIFT_UNIT = -$A0;     { facing * period * this, above the anchor }
+  T66_ANCHOR_DEPTH = 2;
+  T66_SND_LAP = $2E;        { on every wrap of the orbit }
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1908,6 +1986,16 @@ procedure EntityUpdate_Type63(var E: TEntity; AGameState: Integer;
 { 0x0045E030. Drops from the ceiling, sends a wave each way along the
   floor, rests, and climbs back. }
 procedure EntityUpdate_Type64(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045E25C. The third boss. It reads the input directly: nothing happens
+  until the player presses ATTACK while standing in its box. See T65_. }
+procedure EntityUpdate_Type65(var E: TEntity; AGameState: Integer;
+                              var Inp: TInputState; World: TEntityWorld);
+
+{ 0x0045E4EC. An anchor and the satellite that orbits it, one handler and
+  two variants. See the T66_ block for what EF_FACING means here. }
+procedure EntityUpdate_Type66(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -3596,6 +3684,223 @@ begin
       E.Raw[EF_STATE] := 1;
       E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
     end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+end;
+
+procedure EntityUpdate_Type65(var E: TEntity; AGameState: Integer;
+                              var Inp: TInputState; World: TEntityWorld);
+var
+  Frame, D, Slot, Hop, Shot, PlayerX: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T65_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T65_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+  PlayerX := Player^.Raw[EF_POS_X];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    { Above easy it gives ITSELF hp. Types 50, 52 and 54 take it away. }
+    if D <> 0 then
+      Inc(E.Raw[EF_HP], T65_HARD_HP_BONUS);
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_CHILD_B] := E.Raw[EF_VARIANT];
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX) shl T65_AIM_SHIFT;
+    { The rising edge of ATTACK, inside a 10x2 box. Nothing else starts it. }
+    if EntitiesOverlap(E, Player^, T65_WAKE_X, T65_WAKE_Y)
+       and Inp.Button[T65_ATTACK_BUTTON]
+       and (not Inp.ButtonLatch[T65_ATTACK_BUTTON]) then
+    begin
+      World.PlaySound(T65_SND_BLINK);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_DEATH_TIMER] := T65_BLINK;
+      E.Raw[EF_TIMER] := T65_BLINK;
+    end;
+  end;
+
+  if (E.Raw[EF_STATE] = 2) and (E.Raw[EF_DEATH_TIMER] = 0) then
+  begin
+    E.Raw[EF_STATE] := 3;
+    E.Raw[EF_CHILD_A] := 0;
+    Slot := World.Spawn(EKIND_MINOR, T65_SHOT_TYPE,
+                        E.Raw[EF_POS_X] - POSITION_BIAS,
+                        E.Raw[EF_POS_Y] - POSITION_BIAS);
+    World.SetSpawnField(Slot, EF_VARIANT, T65_SHOT_VARIANT);
+    Shot := Compare(E.Raw[EF_POS_X], PlayerX) * T65_SHOT_SPEED;
+    if Shot = 0 then
+      Shot := T65_SHOT_SPEED;
+    World.SetSpawnField(Slot, EF_VEL_X, Shot);
+    { Only this boss writes these two on its shot. }
+    World.SetSpawnField(Slot, EF_VULN_KIND, T65_SHOT_VULN);
+    World.SetSpawnField(Slot, EF_HIT_SOUND, T65_SHOT_HIT_SOUND);
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    E.Raw[EF_DEATH_TIMER] := 1;
+    E.Raw[EF_TIMER] := 2;
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T65_HOLD then
+    begin
+      World.PlaySound(T65_SND_BLINK);
+      E.Raw[EF_STATE] := 4;
+      E.Raw[EF_CHILD_A] := 0;
+      Hop := E.Raw[EF_CHILD_B];
+      if (Hop < 0) or (Hop >= T65_HOPS) then
+        Hop := 0;
+      Inc(E.Raw[EF_POS_X], T65_HOP[Hop] * T65_HOP_SCALE);
+      E.Raw[EF_CHILD_B] := (E.Raw[EF_CHILD_B] + 1) mod T65_HOPS;
+      E.Raw[EF_DEATH_TIMER] := T65_BLINK;
+      E.Raw[EF_TIMER] := T65_BLINK;
+    end;
+  end;
+
+  if (E.Raw[EF_STATE] = 4) and (E.Raw[EF_DEATH_TIMER] = 0) then
+  begin
+    E.Raw[EF_STATE] := 5;
+    E.Raw[EF_CHILD_A] := 0;
+  end;
+
+  if E.Raw[EF_STATE] = 5 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T65_HOLD then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_CHILD_A] := 0;
+    end;
+  end;
+
+  { The bob, in every state. }
+  Inc(E.Raw[EF_SHOTS]);
+  if E.Raw[EF_SHOTS] > T65_BOB_TICKS then
+  begin
+    E.Raw[EF_SHOTS] := 0;
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
+  end;
+  E.Raw[EF_VEL_Y] := HalfExtent(DirVelY(E.Raw[EF_FACING]));
+  Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T65_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T65_FRAMES;
+  end;
+end;
+
+procedure EntityUpdate_Type66(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, Slot, Period: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if E.Raw[EF_VARIANT] = T66_ANCHOR then
+  begin
+    if (Frame < 0) or (Frame >= T66_V0_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T66_V0_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = T66_SATELLITE then
+  begin
+    if (Frame < 0) or (Frame >= T66_V1_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T66_V1_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  { A placement parameter, not a timer - see the T66_ block. }
+  Period := E.Raw[EF_BLOCK_A + 1];
+
+  if E.Raw[EF_VARIANT] = T66_ANCHOR then
+  begin
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_TYPEF_0C] := 0;
+      E.Raw[EF_VULN_KIND] := 0;
+      E.Raw[EF_DEPTH] := T66_ANCHOR_DEPTH;
+      Slot := World.Spawn(EKIND_MINOR, T66_SELF_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            - World.Layer.DeltaX,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS
+                            + E.Raw[EF_FACING] * Period * T66_LIFT_UNIT
+                            - World.Layer.DeltaY);
+      World.SetSpawnField(Slot, EF_VARIANT, T66_SATELLITE);
+      World.SetSpawnField(Slot, EF_FACING, E.Raw[EF_FACING]);
+      World.SetSpawnField(Slot, EF_BLOCK_A + 1, Period);
+    end;
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if Period < E.Raw[EF_BLOCK_B] then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      { `< 1`, where the satellite below asks `< 0`. }
+      if Compare(E.Raw[EF_FACING], 0) < 1 then
+        Inc(E.Raw[EF_FLAG1C])
+      else
+        Dec(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T66_V0_FRAMES - 1 then
+        E.Raw[EF_FLAG1C] := 0;
+      if E.Raw[EF_FLAG1C] < 0 then
+        E.Raw[EF_FLAG1C] := T66_V0_FRAMES - 1;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = T66_SATELLITE then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T66_V1_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T66_V1_FRAMES;
+    end;
+
+    Dec(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] < 1 then
+    begin
+      E.Raw[EF_CHILD_A] := Period;
+      { The MAGNITUDE of EF_FACING is a speed, not a heading. }
+      E.Raw[EF_VEL_X] := Abs(E.Raw[EF_FACING])
+                         * HalfExtent(DirVelX(E.Raw[EF_CHILD_B]));
+      E.Raw[EF_VEL_Y] := Abs(E.Raw[EF_FACING])
+                         * HalfExtent(DirVelY(E.Raw[EF_CHILD_B]));
+      { And its SIGN is which way round the orbit goes. }
+      if Compare(E.Raw[EF_FACING], 0) < 0 then
+        Dec(E.Raw[EF_CHILD_B])
+      else
+        Inc(E.Raw[EF_CHILD_B]);
+      if E.Raw[EF_CHILD_B] > DIR_COUNT - 1 then
+      begin
+        E.Raw[EF_CHILD_B] := 0;
+        World.PlaySound(T66_SND_LAP);
+      end;
+      if E.Raw[EF_CHILD_B] < 0 then
+      begin
+        E.Raw[EF_CHILD_B] := DIR_COUNT - 1;
+        World.PlaySound(T66_SND_LAP);
+      end;
+    end;
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
   end;
 end;
@@ -6288,11 +6593,13 @@ begin
       62: EntityUpdate_Type62(E^, AGameState, World);
       63: EntityUpdate_Type63(E^, AGameState, World);
       64: EntityUpdate_Type64(E^, AGameState, World);
+      65: EntityUpdate_Type65(E^, AGameState, Inp, World);
+      66: EntityUpdate_Type66(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 16 arms are in HANDLER_ADDR, untranslated }
+      { the other 14 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
