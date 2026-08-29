@@ -138,6 +138,31 @@ type
     procedure BeginStage(StageIndex: Integer; var AGameState: Integer);
 
     { One frame of logic. }
+    { THE FRAME IS THREE PARTS, because the original's is.
+      notes/trace_findings.md has the evidence: Entity_UpdateAll was called
+      20304 times in 20304 frames - once per frame, in EVERY state, including
+      the title menu and every one of the 105 pause frames - while
+      Events_SpawnNearCamera ran 14560 times, which is exactly the 12347
+      frames of state 60 plus the 2213 of state 140.
+
+      So the entity update is not part of the state dispatch at all. It sits
+      between two dispatches and is gated internally by the state argument,
+      which is why every handler carries its own `if AGameState <> GS_PLAY
+      then Exit`. Those exits were translated faithfully without my noticing
+      what they implied about the caller. }
+
+    { Clears the scroll delta. Called at the top of every frame in every
+      state - if it only ran in the states that scroll, a pause would carry
+      the last play frame's delta and every entity would drift once per
+      paused frame. }
+    procedure BeginFrame;
+    { The part before the entity update: spawning near the camera, and the
+      event script. States 60 and 140 only. }
+    procedure TickPre(var AGameState: Integer);
+    { The entity update itself. EVERY state, every frame. }
+    procedure TickEntities(var AGameState: Integer);
+    { All three in order. The frame loop calls the parts, because it has to
+      put the state dispatch between them; the self-tests call this. }
     procedure Frame(var AGameState: Integer);
 
     { 0x0044E2C0, once a frame. Deliberately NOT part of Frame: AppIdle ticks
@@ -536,14 +561,9 @@ begin
     FBgAnime.Tick;
 end;
 
-procedure TGameSession.Frame(var AGameState: Integer);
+procedure TGameSession.BeginFrame;
 begin
-  { THE SCROLL DELTA IS PER-FRAME. TFrm_main_AppIdle @ 0x00464D30 zeroes
-    p_LayerInfo+8 and +0x0C at the top of every frame - twice over, once on
-    entry and again right after TDDDD_Clear - and Camera_ApplyMove* is the
-    only thing that ever sets them.
-
-    That matters because Entity_UpdateAll adds the delta to every non
+  { That matters because Entity_UpdateAll adds the delta to every non
     screen-space entity's position, which is how the world carries things
     along when the view scrolls. Leave it set and the carry never stops: one
     scroll and every entity drifts in that direction forever. Two mana stones
@@ -555,17 +575,32 @@ begin
     collision queries read. There is no second copy to keep in step. }
   FWorld.Layer.DeltaX := 0;
   FWorld.Layer.DeltaY := 0;
+end;
 
+procedure TGameSession.TickPre(var AGameState: Integer);
+begin
   FRunner.SpawnNearCamera(FEvents, FPool, FWorld.Layer, CamTileX, CamTileY,
                           Player, AGameState);
 
-  EntityUpdateAll(FPool, FWorld, FSprites, Player, FWorld.Layer, Input,
-                  AGameState);
-
-  { A script runs only while the game is in its own state, which is what
-    stops the player moving during a conversation. }
+  { BEFORE the entity update, not after, and NOT gated on whether a message
+    box is up. EventScript_Execute was logged 2213 times against 2213 frames
+    of state 140 - every one of them - and always ahead of Entity_UpdateAll.
+    This used to run afterwards, and only when no dialogue was active. }
   if AGameState = GS_STATE_140 then
     FRunner.Execute(FEventHost, FEvents, Player, AGameState);
+end;
+
+procedure TGameSession.TickEntities(var AGameState: Integer);
+begin
+  EntityUpdateAll(FPool, FWorld, FSprites, Player, FWorld.Layer, Input,
+                  AGameState);
+end;
+
+procedure TGameSession.Frame(var AGameState: Integer);
+begin
+  BeginFrame;
+  TickPre(AGameState);
+  TickEntities(AGameState);
 end;
 
 end.

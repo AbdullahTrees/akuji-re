@@ -139,6 +139,17 @@ printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
 [ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
 
 note ""
+note "=== the frame loop still has the shape the real game has ==="
+# The defect this guards was a wrong PLACE, not a wrong value, and all
+# thirteen behavioural self-tests passed both before and after the fix - they
+# drive a session directly and never touch the frame loop's structure.
+python "$REPO/tools/frame_shape.py" > "$SCRATCH/frame.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "frame_shape" "$rc"     "$(tail -1 "$SCRATCH/frame.log")"
+[ $rc -ne 0 ] && { fail=1; cat "$SCRATCH/frame.log" | head -8; }
+
+note ""
 note "=== table lengths are pinned from OUTSIDE the table ==="
 # The 181 value-pins in --selftest-entities cannot catch a short table: the
 # count they check with comes from the array being checked. This bounds each

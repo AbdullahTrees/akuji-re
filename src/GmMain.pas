@@ -87,7 +87,10 @@ type
     procedure DrawHud;
     procedure AppIdle(Sender: TObject; var Done: Boolean);
     procedure PollInput;
-    procedure DispatchState;
+    { The state dispatch is in two halves with the entity update between
+      them - see the note in AppIdle. }
+    procedure DispatchPre;
+    procedure DispatchPost;
     procedure FormPaint(Sender: TObject);
     procedure DrawScene;
     procedure DrawDebugOverlay;
@@ -321,8 +324,27 @@ begin
     dispatch - which is where AppIdle ticks them, so a wall keeps moving
     behind a dialogue box or a pause. }
   FSession.TickBackground;
-  DispatchState;          { step 5 }
-  { TODO step 6: sprite/entity update across 8 layers }
+
+  { TWO DISPATCHES WITH THE ENTITY UPDATE BETWEEN THEM.
+
+    This used to be one DispatchState with the session tick inside the play
+    arm, and the trace in notes/trace_findings.md says that is not the shape.
+    Frame 1 of a real session runs Title_Init, then Entity_UpdateAll, then
+    Title_MainMenu - two different state arms in one frame, with the entity
+    update in the middle, because Title_Init changes the state before the
+    second dispatch reads it.
+
+    Which arm goes where is not a guess either; it is what the log shows:
+
+        before      10 Title_Init, 30 Stage_Begin,
+                    60 SpawnNearCamera, 140 SpawnNearCamera + script
+        between     Entity_UpdateAll, every state, every frame
+        after       20 Title_MainMenu, 40 Game_StartOrLoad,
+                    130 PauseMenu_Update, 140 MessageBox_Update, 60 HUD }
+  FSession.BeginFrame;
+  DispatchPre;
+  FSession.TickEntities(GameStateValue);
+  DispatchPost;
   { TODO step 7: button edge-detection and repeat timers }
   DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
   DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
@@ -739,9 +761,8 @@ begin
 end;
 
 { Step 5: the state machine. Values and handler addresses in GameState.pas. }
-procedure TFrm_main.DispatchState;
-var
-  Mode: TStartMode;
+{ The arms that run BEFORE the entity update. }
+procedure TFrm_main.DispatchPre;
 begin
   case GameStateValue of
     GS_TITLE_INIT:
@@ -760,14 +781,6 @@ begin
         advance, last character $5F - which is independent confirmation of
         constants that were originally read out of the font sheet itself. }
       TitleInit;
-    GS_TITLE_MENU:
-      begin
-        FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
-        FMoveY := 0;
-        FMoveX := 0;
-        FConfirm := False;
-        FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
-      end;
     GS_STAGE_BEGIN:
       begin
         { Stage_Begin @ 0x00462210. The ASSETS are the form's - it owns the
@@ -780,6 +793,35 @@ begin
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
         FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
                        FSession.Pool);
+      end;
+    GS_PLAY,
+    GS_STATE_140:
+      { Spawning near the camera and the event script, both ahead of the
+        entity update. Unconditional now: this used to be skipped entirely
+        whenever a message box was up, and the trace shows the script running
+        on all 2213 frames of state 140, box or no box. }
+      FSession.TickPre(GameStateValue);
+  end;
+end;
+
+{ The arms that run AFTER it. }
+procedure TFrm_main.DispatchPost;
+var
+  Mode: TStartMode;
+begin
+  case GameStateValue of
+    { AFTER the entity update: frame 1 of a real session runs Title_Init,
+      then Entity_UpdateAll, then Title_MainMenu. Both arms in one frame,
+      because Title_Init sets the state to 20 before this dispatch reads it -
+      which is also why the very first frame draws the menu rather than
+      showing a blank one. }
+    GS_TITLE_MENU:
+      begin
+        FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
+        FMoveY := 0;
+        FMoveX := 0;
+        FConfirm := False;
+        FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
       end;
     GS_PLAYER_INIT:
       begin
@@ -819,7 +861,14 @@ begin
           { The three-line box is dismissed by the player; the full-screen
             panel is dismissed by its own fanfare finishing, which is what
             Overlay_Update asks the music player. One call, two sources of
-            "done", because the original has one function with two modes. }
+            "done", because the original has one function with two modes.
+
+            The `else FSession.Frame` that used to sit here is gone: the
+            session no longer stops while the box is up. MessageBox_Update and
+            Entity_UpdateAll were logged in the same frames, so entities do
+            keep updating through a conversation - what stops during one is
+            Entity_PlayerTouch, which the log finds in state 60 and nowhere
+            else. That gating belongs to the handlers, not to us. }
           if FDialogue.Mode = omPanel then
             FDialogue.Update(not KbgmPlayer1.IsPlaying, False, False,
                              GameStateValue)
@@ -827,9 +876,7 @@ begin
             FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
                              FSession.Input.AxisY < 0, FSession.Input.AxisY > 0,
                              GameStateValue);
-        end
-        else
-          FSession.Frame(GameStateValue);
+        end;
         DrawScene;
       end;
     GS_PAUSE:
