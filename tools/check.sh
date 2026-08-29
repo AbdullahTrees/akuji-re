@@ -84,7 +84,18 @@ run --selftest-settings "$GAME" "$SCRATCH"
 note ""
 note ""
 note "=== how much is CODE, not commentary ==="
-python "$REPO/tools/implemented.py" 2>/dev/null | tail -4 | sed 's/^/  /'
+python "$REPO/tools/implemented.py" 2>/dev/null > "$SCRATCH/impl.log"
+sed 's/^/  /' "$SCRATCH/impl.log" | tail -4
+# A DROP is a failure, not a note. Coverage silently went 149 -> 148 when a
+# refactor moved an address comment away from the routine it belonged to, and
+# the gate printed the smaller number and passed.
+impl_total=$(grep -oE 'game-layer functions *: *[0-9]+' "$SCRATCH/impl.log" | grep -oE '[0-9]+$')
+impl_done=$(grep -oE 'implemented *: *[0-9]+' "$SCRATCH/impl.log" | grep -oE '[0-9]+$')
+if [ -n "$impl_total" ] && [ "$impl_done" != "$impl_total" ]; then
+    note "  FAIL: $impl_done of $impl_total implemented - an address comment has"
+    note "        probably drifted away from its routine; --described names it"
+    fail=1
+fi
 note ""
 note "=== reference implementations ==="
 ref() {

@@ -641,13 +641,6 @@ begin
   end;
 end;
 
-{ 0x00464484. One ending picture at a time: free whatever surface is up,
-  build a 320x240 one, and load `ed%.3d.bmp` into it - from bmp.qda when the
-  archive is in use and from bmp\ loose otherwise, which is the same pair of
-  format strings every other loader here uses.
-
-  The original keeps the surface in a global at 0x0046D1F0 and frees it on
-  the next call; holding one TBitmap is the same lifetime. }
 { One frame of the cutscene. True while it is still running, which is what
   holds GameStartOrLoad at the door.
 
@@ -736,6 +729,13 @@ begin
   FForm.PlayMusicTrack(Track, Loop, FadeSeconds);
 end;
 
+{ 0x00464484. One ending picture at a time: free whatever surface is up,
+  build a 320x240 one, and load `ed%.3d.bmp` into it - from bmp.qda when the
+  archive is in use and from bmp\ loose otherwise, which is the same pair of
+  format strings every other loader here uses.
+
+  The original keeps the surface in a global at 0x0046D1F0 and frees it on
+  the next call; holding one TBitmap is the same lifetime. }
 procedure TFrm_main.EndingPicture(Index: Integer);
 begin
   FreeAndNil(FEndingBmp);

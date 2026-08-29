@@ -81,6 +81,24 @@ draw, sprite depth ordering, the life-icon row in the HUD, and the fade both
 end screens wait on - which is why they step straight through their first
 phase. Those are tracked as category B in `notes/divergences.md`.
 
+## 1a. TODO: move the tests out of akuji.exe
+
+**`akuji.lpr` contains the self-test dispatch and about 8,000 lines of test
+code. It should not.** The original's `entry` has four statements; ours checks
+argv first, and although that check runs before `Application.Initialize` and
+otherwise falls straight through - which is why it is filed as DIV-007,
+category C - the objection is not about today's behaviour. A test mode that
+EXISTS is a test mode something can eventually branch on, and a ledger entry
+records that risk rather than removing it.
+
+The fix is structural, not a tightening: a second program, `akujitest.lpr`,
+that `uses` the same units and holds all of the test code, leaving `akuji.lpr`
+as the four statements the original has. Same units, same coverage, no test
+code in the shipped binary, and DIV-007 disappears instead of being managed.
+
+Roughly 8,000 of `akuji.lpr`'s 8,800 lines move. Do it as one deliberate
+change, not folded into a bug fix.
+
 ## 2. The three layers — most important section
 
 The binary is not "game code plus Windows APIs". Only the innermost is Akuji's:

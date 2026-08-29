@@ -238,6 +238,7 @@ type
     FOnRememberMusic: TOverlayRememberMusic;
     FOnResumeMusic: TOverlayResumeMusic;
     procedure TakePage(const Text: string);
+    procedure PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY: Integer);
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -252,6 +253,19 @@ type
       pool to find it, exactly as the original reaches p_Entities through the
       event table. }
     procedure SubMode; override;
+
+    { Sub-op 0 and sub-op 1: the stage load and the warp. Both carry TILE
+      coordinates and convert them identically - and the conversion was
+      already read and written down in PlayerState.pas, complete with the
+      asymmetric +16 / +19, long before anything called it.
+
+      Nothing overrode either, so LoadStage did nothing at all: the interpreter
+      set GS_STAGE_BEGIN, the stage number never changed, and the stage
+      reloaded itself. Walking out of room 1 put you back in room 1. }
+    procedure LoadStage(Stage, PlayerTileX, PlayerTileY,
+                        CamTileX, CamTileY: Integer); override;
+    procedure WarpPlayer(PlayerTileX, PlayerTileY,
+                         CamTileX, CamTileY: Integer); override;
 
     { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
       not the level. Returns True while the box is up, which is the caller's
@@ -375,6 +389,49 @@ begin
   FPlayer := APlayer;
   FPool := APool;
   FWorld := AWorld;
+end;
+
+{ Where a destination in tiles lands in the player state. The original does
+  this five times in a row at 0x004553B2..0x004554C2, reading each argument
+  out of the step at a fixed column and multiplying by the LAYER's tile size -
+  not by a constant 32, which is why the layer has to be reachable here. }
+procedure TDialogueBox.PlaceAt(PlayerTileX, PlayerTileY,
+                               CamTileX, CamTileY: Integer);
+var
+  TW, TH: Integer;
+begin
+  if FPlayer = nil then
+    Exit;
+  { The shipped maps are all 32x32, but the map header carries the size and
+    the original multiplies by the LAYER's value, so this does too. The
+    fallback is only for a world that has not loaded a map yet. }
+  TW := 32;
+  TH := 32;
+  if FWorld <> nil then
+  begin
+    if FWorld.Layer.TileW > 0 then TW := FWorld.Layer.TileW;
+    if FWorld.Layer.TileH > 0 then TH := FWorld.Layer.TileH;
+  end;
+  FPlayer^.SpawnX  := PlayerTileX * TW + SPAWN_CENTRE_X;
+  FPlayer^.SpawnY  := PlayerTileY * TH + SPAWN_CENTRE_Y;
+  FPlayer^.ScrollX := CamTileX * TW;
+  FPlayer^.ScrollY := CamTileY * TH;
+end;
+
+procedure TDialogueBox.LoadStage(Stage, PlayerTileX, PlayerTileY,
+                                 CamTileX, CamTileY: Integer);
+begin
+  { 0x004553B8 - the stage number goes straight into the settings, and
+    Stage_Begin reads it back. The interpreter sets GS_STAGE_BEGIN itself. }
+  Settings.CurrentStage := Stage;
+  PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY);
+end;
+
+procedure TDialogueBox.WarpPlayer(PlayerTileX, PlayerTileY,
+                                  CamTileX, CamTileY: Integer);
+begin
+  { Sub-op 1: the same placement without a stage change. }
+  PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY);
 end;
 
 procedure TDialogueBox.SubMode;
