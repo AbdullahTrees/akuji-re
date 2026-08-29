@@ -58,6 +58,8 @@ type
     FThread: TKbgmThread;
     FCurrent: Integer;
     FVolume: Integer;
+    { 0x0046EAA4 - the track to come back to after an interruption. }
+    FRemembered: string;
     FOpened: Boolean;
     procedure SetAutoLoadMidis(Value: TStrings);
     procedure SetVolumeProp(Value: Integer);
@@ -106,6 +108,19 @@ type
                    FadeSeconds: Integer = 0);
     { 0x00450CBC. Zero stops dead, anything else fades over that many seconds. }
     procedure StopOrFade(FadeSeconds: Integer);
+
+    { 0x00450EDC and 0x00450EF0 - the pair that survives an interruption.
+
+      PowerUp_Show calls the first before starting its fanfare: it copies the
+      current track's NAME into a global at 0x0046EAA4, nothing more. It is not
+      a stop, which is what it looked like until it was read.
+
+      Overlay_Update calls the second when the fanfare finishes - a hard stop,
+      then the remembered name again, LOOPING. That is how the stage music
+      comes back after a power-up. Without it the fanfare simply replaces the
+      music and the stage stays silent for good. }
+    procedure RememberCurrent;
+    procedure ResumeRemembered;
     procedure Stop;
     procedure FadeOut(MilliSeconds: Integer);
     procedure FadeIn(Index: Integer; MilliSeconds: Integer);
@@ -550,6 +565,25 @@ begin
     FDevice.Close;
   FCurrent := -1;
   FOpened := False;
+end;
+
+procedure TKbgmPlayer.RememberCurrent;
+begin
+  { DAT_0046EAA4 := self.CurrentTrackName. A name, not a position: the track
+    restarts from the top when it comes back, which is what the original does. }
+  if (FCurrent >= 0) and (FCurrent < FAutoLoadMidis.Count) then
+    FRemembered := FAutoLoadMidis[FCurrent]
+  else
+    FRemembered := '';
+end;
+
+procedure TKbgmPlayer.ResumeRemembered;
+begin
+  if FRemembered = '' then
+    Exit;
+  StopOrFade(KBGM_STOP_HARD);
+  { Looping - the third argument at 0x00450EF0 is 1. }
+  PlayName(FRemembered, True);
 end;
 
 procedure TKbgmPlayer.StopOrFade(FadeSeconds: Integer);

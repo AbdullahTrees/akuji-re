@@ -155,6 +155,9 @@ type
       through 0x00450F14, which stops dead - fade 0 - so this is not a
       convenience default, it is the value those two call sites use. }
     procedure PlayMusicCut(Track: Integer; Loop: Boolean);
+    { 0x00450EDC / 0x00450EF0 - see KbgmPlayer.pas. }
+    procedure RememberMusicTrack;
+    procedure ResumeMusicTrack;
     procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
@@ -336,7 +339,8 @@ begin
     it the overlay was waiting on the looping stage music - see Dialogue.pas. }
   FDialogue.OnSound := TitleSound;
   FDialogue.OnMusic := PlayMusicCut;
-  FDialogue.OnStopMusic := StopMusicTrack;
+  FDialogue.OnRememberMusic := RememberMusicTrack;
+  FDialogue.OnResumeMusic := ResumeMusicTrack;
   FOpening.OnPicture := OpeningPicture;
   FOpening.OnMusic := PlayMusicCut;
   FOpening.OnStopMusic := StopMusicTrack;
@@ -661,6 +665,16 @@ end;
 procedure TFrm_main.PlayMusicCut(Track: Integer; Loop: Boolean);
 begin
   PlayMusicTrack(Track, Loop, KBGM_STOP_HARD);
+end;
+
+procedure TFrm_main.RememberMusicTrack;
+begin
+  KbgmPlayer1.RememberCurrent;
+end;
+
+procedure TFrm_main.ResumeMusicTrack;
+begin
+  KbgmPlayer1.ResumeRemembered;
 end;
 
 procedure TFrm_main.StopMusicTrack;

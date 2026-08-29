@@ -128,6 +128,11 @@ def main():
     if 'TFormAudio = class(TSessionAudio)' not in text:
         bad.append("there is no TFormAudio - the TSessionAudio defaults do "
                    'nothing, so event sounds and event music are silent')
+    if 'FDialogue.OnResumeMusic' not in text:
+        bad.append('FDialogue.OnResumeMusic is not wired - Overlay_Update '
+                   'restores the remembered track when the fanfare ends '
+                   '(0x00450EF0), and without it the stage goes silent after '
+                   'every power-up')
     if 'FSession.Audio := TFormAudio.Create' not in text:
         bad.append('TFormAudio exists but is not installed on the session')
 
@@ -150,7 +155,7 @@ def main():
                    'the Sleep(1) in AppIdle takes about 15.6 ms and caps the '
                    'frame rate anyway')
     for cb in ('FDialogue.OnSound', 'FDialogue.OnMusic',
-               'FDialogue.OnStopMusic'):
+               'FDialogue.OnRememberMusic'):
         if cb not in text:
             bad.append('%s is not wired - without the fanfare the power-up '
                        'panel has nothing to dismiss it' % cb)
@@ -163,13 +168,13 @@ def main():
     # the Assigned() guard behind and the check still passed - which it did,
     # under mutation, before this was tightened.
     for name, call in (('FOnSound', r'FOnSound\s*\('),
-                       ('FOnStopMusic', r'^\s*FOnStopMusic\s*;'),
+                       ('FOnRememberMusic', r'^\s*FOnRememberMusic\s*;'),
                        ('FOnMusic', r'FOnMusic\s*\(')):
         if not re.search(r'Assigned\s*\(\s*%s\s*\)' % name, seg) or            not re.search(call, seg, re.M):
             bad.append('TDialogueBox.SubMode does not guard AND call %s - '
-                       'PowerUp_Show plays effect $10, STOPS the music, then '
-                       'starts playlist entry 4, and the panel is dismissed by '
-                       'that track ending' % name)
+                       'PowerUp_Show plays effect $10, REMEMBERS the current '
+                       'track (0x00450EDC), then starts playlist entry 4; the '
+                       'panel is dismissed by that track ending' % name)
 
     if bad:
         print('FAIL - the frame loop no longer matches the traced game:')

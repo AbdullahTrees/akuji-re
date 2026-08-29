@@ -202,7 +202,10 @@ type
     Title.pas and Ending.pas do. }
   TOverlaySound = procedure(Id: Integer) of object;
   TOverlayMusic = procedure(Track: Integer; Loop: Boolean) of object;
-  TOverlayStopMusic = procedure of object;
+  { 0x00450EDC before the fanfare, 0x00450EF0 when it finishes. The first
+    remembers what was playing; the second brings it back, looping. }
+  TOverlayRememberMusic = procedure of object;
+  TOverlayResumeMusic = procedure of object;
 
   { The message overlay as the interpreter's collaborator. It owns no drawing
     surface - the form hands it a canvas - and it advances the script itself,
@@ -229,7 +232,8 @@ type
     FPlayer: PPlayerState;
     FOnSound: TOverlaySound;
     FOnMusic: TOverlayMusic;
-    FOnStopMusic: TOverlayStopMusic;
+    FOnRememberMusic: TOverlayRememberMusic;
+    FOnResumeMusic: TOverlayResumeMusic;
     procedure TakePage(const Text: string);
   public
     { Where the script and the state it answers into live. Set once. }
@@ -261,8 +265,10 @@ type
     property Mode: TOverlayMode read FMode;
     property OnSound: TOverlaySound read FOnSound write FOnSound;
     property OnMusic: TOverlayMusic read FOnMusic write FOnMusic;
-    property OnStopMusic: TOverlayStopMusic read FOnStopMusic
-                                            write FOnStopMusic;
+    property OnRememberMusic: TOverlayRememberMusic read FOnRememberMusic
+                                                    write FOnRememberMusic;
+    property OnResumeMusic: TOverlayResumeMusic read FOnResumeMusic
+                                                write FOnResumeMusic;
     { The panel stays up for as long as its fanfare plays - Overlay_Update
       asks the music player and closes when it stops. The form owns the
       player, so it answers. }
@@ -413,8 +419,10 @@ begin
     closes; that was the softlock on the dash orb. }
   if Assigned(FOnSound) then
     FOnSound(POWERUP_SOUND);
-  if Assigned(FOnStopMusic) then
-    FOnStopMusic;
+  { REMEMBER, not stop. 0x00450EDC only copies the current track's name
+    aside; the stop happens inside the play below, which is 0x00450F14. }
+  if Assigned(FOnRememberMusic) then
+    FOnRememberMusic;
   if Assigned(FOnMusic) then
     FOnMusic(POWERUP_MIDI, False);
 
@@ -456,6 +464,10 @@ begin
   begin
     if not Confirm then
       Exit;
+    { Overlay_Update's order when the fanfare ends: restore the music FIRST,
+      then clear the overlay, then advance the script. }
+    if Assigned(FOnResumeMusic) then
+      FOnResumeMusic;
     FActive := False;
     Result := False;
     FPanelText := '';
