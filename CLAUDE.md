@@ -12,42 +12,55 @@ Read sections 1–4 before touching anything.
 
 **The rebuilt source builds and runs.** `lazbuild akuji.lpi` in `src/` produces a
 working 320x240 window titled "Akuji the Demon". The recovered form loads and all
-four component classes resolve, with working sound and music. The game
-loop, title menu, save loading and tilemap rendering run; entity logic does not.
+four component classes resolve, with working sound and music. The game loop,
+title menu, save loading, tilemap rendering, the player controller, the event
+interpreter, the message box and the entity system all run.
 
 Toolchain: Lazarus at `E:\lazarus`, FPC 3.2.2, targets Win64.
 Build: `E:\lazarus\lazbuild.exe akuji.lpi`
 
+**Coverage** (`python tools/implemented.py`): of 149 game-layer functions,
+**141 have executable Pascal and 0 are untouched**. The remaining 8 are
+*described* - read and written up, no code - and are listed by
+`tools/implemented.py --described`. They are, in order of what they would buy:
+
+| Address | Name | Why it is still prose |
+|---|---|---|
+| `0x461BA8` | `HUD_Draw` | needs the life-icon art wired |
+| `0x461EE4` | `PauseMenu_Update` | the pause screen paints the frozen scene and steps nothing |
+| `0x462330` | `Title_MainMenu` | `Title.pas` has the logic; the screen is not driven from it |
+| `0x46214C` | `Title_Init` | the boot path, partly inlined in `GmMain` |
+| `0x4568D0` | `Overlay_Update` | `Dialogue.pas` is written from it but not attributed |
+| `0x463154` | `Opening_Update` | called from `Game_StartOrLoad`, not a state handler |
+| `0x465584` | `TFrm_main_DDDD1Init` | init, partly inlined in `GmMain` |
+| `0x46716C` | `entry` | the `.dpr` block |
+
+**All 78 entity-type handlers are translated**, and that is checked rather
+than claimed: `--selftest-entities` reads the jump table out of `akuji.exe`,
+drives one entity of every type through `EntityUpdateAll`, and requires the
+78 armed types to reach a case and the 3 unarmed ones to fall through.
+
+**Every table any handler names is pinned to the binary** - 187 of them,
+extent and values, with the extent taken from where the *next* table begins
+rather than from the constant under test.
+
 **Audio works**: 57 effects and 15 MIDI tracks, both readers cross-checked
 against independent Python implementations (section 13).
 
-**The entity system is largely decoded** - the record, the dispatcher, the
-collision path, the death and damage rules, and the player controller. See
-section 15.
+**The event system is decoded end to end** - both halves of the mini-language
+and the placement machinery around it. Section 8b.
 
-**The event system is now decoded end to end** - both halves of the mini-language
-AND the placement machinery around it: what makes an event spawn, what makes it
-stop existing for good, and how difficulty selects placements. Section 8b.
-
-**Coverage** (`python tools/coverage.py`): 55 of 149 game-layer functions have
-a Pascal counterpart, and 102 of the 149 carry real names. The denominator has
-moved twice - 48 hidden handlers created (section 12), then the game-layer floor
-corrected from `0x455000` to `0x454790`. The work did not grow either time.
-
-**The player controller now RUNS.** `src/Player.pas` is the first piece of game
-behaviour written as executing code rather than described in a comment - the
-whole state machine including the glide, air dash and knockback. Section 14a.
-
-**Before committing, run `tools/check.sh`.** One command: build, ten
-self-tests, three reference implementations, a records check and a negative
+**Before committing, run `tools/check.sh`.** One command: build, eleven
+self-tests, five reference implementations, a records check and a negative
 control. It exits non-zero on any failure, so use it as
 `tools/check.sh && git commit`.
 
-**Next:** the 74 remaining entity-type handlers. Read and write each one
-together - they are the same task, and `EntityHandlers.EntityUpdateAll` now
-gives them somewhere to plug in. `HANDLER_ADDR` is the to-do list, and it comes
-out of the binary's own jump table rather than being transcribed by hand.
-The event system has no open questions left.
+**What is left is presentation, not logic.** The gaps that would show on
+screen: the dialogue box's decoration (the original outlines its text through
+`Game_DrawTextOutlined` at a 6-px char step; this draws a filled rectangle and
+plain font text), the multi-layer tile draw, sprite depth ordering, the
+life-icon row in the HUD, and the fade the game-over and ending screens wait
+on - which is why both step straight through their first phase.
 
 ## 2. The three layers — most important section
 
@@ -683,7 +696,8 @@ repeating the mistake:
 | `entity_usage.py` | **which types does the shipped data actually place, and with what arguments?** Prioritises the remaining handlers by how much of the game they buy, and cross-checks table lengths: an argument range of exactly 0..N-1 against an N-entry table agrees from both directions. `--paramb` groups by script, which is what identified the save point |
 | `x87_sim.py` | **what would the original's FPU have produced?** Exact rational simulation of an x87 sequence at 64-bit significands. FPC on x86-64 has no 80-bit type, so some integer arithmetic done through the FPU cannot be reproduced with floats at all and has to be modelled in integers; this is the reference that says the model is right, and regenerates the golden table the self-test asserts |
 | `mutate.sh` | section 14 — the mutation harness |
-| `coverage.py` | how much of the game layer has a Pascal counterpart |
+| `coverage.py` | how much of the game layer is MENTIONED anywhere in `src/` |
+| `implemented.py` | how much of it actually EXECUTES - the number that counts. `--all` lists the untouched, `--described` the ones that are still only prose |
 
 Raw disassembly without Ghidra:
 `objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`
