@@ -2070,10 +2070,11 @@ begin
     EKIND_ACTOR:  begin First := SLOT_ACTOR_FIRST;  Last := SLOT_ACTOR_LAST;  end;
     EKIND_MINOR:  begin First := SLOT_MINOR_FIRST;  Last := SLOT_MINOR_LAST;  end;
   else
-    { The original leaves its range registers uninitialised for any other value
-      and scans from whatever happened to be in them. Refusing is the one place
-      this deliberately does NOT reproduce the original, because reproducing it
-      means reading uninitialised memory. }
+    { DIVERGENCE DIV-003. The original leaves its range registers uninitialised
+      for any other value and scans from whatever happened to be in them.
+      Refusing is the one place this deliberately does NOT reproduce the
+      original, because reproducing it means reading uninitialised memory -
+      and uninitialised memory has no single behaviour to copy. }
     Exit;
   end;
 

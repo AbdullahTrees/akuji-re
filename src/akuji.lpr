@@ -8230,7 +8230,8 @@ end;
   and everything the game does hangs off the last one, because
   TApplication.Run's idle handler is TFrm_main_AppIdle.
 
-  The self-test dispatch above the four is OURS. It is not in the original
+  The self-test dispatch above the four is OURS. DIVERGENCE DIV-007: it is
+  not in the original
   and it is deliberately before Application.Initialize so a test run never
   creates a window.
 

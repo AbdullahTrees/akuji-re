@@ -139,6 +139,18 @@ printf '  %-22s exit=%d  %s\n' "function_map" "$rc" \
 [ $rc -ne 0 ] && { fail=1; grep -E '^  0x' "$SCRATCH/fmap.log" | head -10; }
 
 note ""
+note "=== the divergence ledger agrees with the source ==="
+# Every place we knowingly differ from the binary has to be written down. This
+# cannot find an UNdeclared divergence - only the differential tests can - but
+# it stops a declared one rotting, and it refuses to let a mistranslation be
+# filed as an acceptable difference instead of being fixed.
+python "$REPO/tools/divergences.py" > "$SCRATCH/div.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "divergences" "$rc"     "$(grep -E '^[0-9]+ divergences' "$SCRATCH/div.log" | tail -1)"
+[ $rc -ne 0 ] && { fail=1; sed -n '/^FAIL/,$p' "$SCRATCH/div.log" | head -12; }
+
+note ""
 note "=== negative control: a wrong directory must FAIL ==="
 rm -f "$REPO/src/selftest.log"
 "$EXE" --selftest-script "$SCRATCH/definitely-not-here" > /dev/null 2>&1

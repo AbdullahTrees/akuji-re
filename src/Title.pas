@@ -14,7 +14,8 @@
   Rendering goes through the game's own bitmap font (GameFont.pas), the same
   font9x9-01.bmp sheet the original used, so metrics and colours match.
 
-  Still stubbed: option value editing (MoveX) and key rebinding, which needs raw
+  Still stubbed - DIVERGENCE DIV-009: option value editing (MoveX) and key
+  rebinding, which needs raw
   button polling rather than an axis. The menu backgrounds (p_Surfaces[1] and
   [2]) are not loaded yet. }
 

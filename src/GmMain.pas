@@ -294,7 +294,7 @@ end;
 { ---------------------------------------------------------------------------
   AppIdle - TFrm_main_AppIdle @ 0x00464D30, the frame loop.
 
-  DELIBERATE DIVERGENCE: the original set Done := False unconditionally and then
+  DIVERGENCE DIV-001: the original set Done := False unconditionally and then
   spin-waited on timeGetTime until >15 ms had elapsed, which pegs a CPU core at
   100%. Here the frame is paced with a real sleep and Done is left True when
   there is time to spare, so the process idles properly between frames. Same
@@ -623,7 +623,8 @@ end;
 
 procedure TFrm_main.GameOverFade(FadeIn: Boolean);
 begin
-  { No fader is modelled. Recorded rather than silently dropped: the original
+  { DIVERGENCE DIV-005. No fader is modelled. Recorded rather than dropped:
+    the original
     sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48 with
     FadeIn as its third argument. }
 end;
@@ -897,7 +898,7 @@ begin
   if (Key = Ord('R')) and (Shift = [ssCtrl]) then
     GameStateValue := GS_TITLE_INIT;
 
-  { DIVERGENCE, not part of the original handler. The original reads movement
+  { DIVERGENCE DIV-002, not part of the original handler. The original reads movement
     and buttons from the Joy component in the frame loop, through one of three
     DirectInput paths; none of that is implemented yet, so the menus are driven
     from the keyboard here instead. Delete this block once Joy polls for real. }

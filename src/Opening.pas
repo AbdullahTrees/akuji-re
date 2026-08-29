@@ -152,7 +152,8 @@ type
 
 { The picture id for a slide, and -1 when it has none. Indexes the table the
   way the original does - slide - 1 - and returns -1 rather than reading past
-  the end, which the original does not check. }
+  the end, which the original does not check. DIVERGENCE DIV-004; Update clamps
+  Slide to 1..10 first, so the guard never fires. }
 function OpeningPictureFor(ASlide: Integer): Integer;
 
 implementation

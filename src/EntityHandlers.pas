@@ -8718,7 +8718,8 @@ begin
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
       { Every arm in HANDLER_ADDR now has a case above. This else is not in
         the original - the compiler emitted a jump table with no default -
-        and exists only so the claim can be checked; see EntitiesUnhandled. }
+        and exists only so the claim can be checked; see EntitiesUnhandled.
+        DIVERGENCE DIV-006. }
     else
       Inc(EntitiesUnhandled);
     end;

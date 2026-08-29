@@ -1,6 +1,7 @@
 { TDDDD - display surface component.
 
-  STUB. Does nothing yet. Its only job right now is to exist with the exact
+  STUB - DIVERGENCE DIV-008. Does nothing yet. Its only job right now is to
+  exist with the exact
   published interface GmMain.lfm expects, so the form can load and the project
   can build.
 
