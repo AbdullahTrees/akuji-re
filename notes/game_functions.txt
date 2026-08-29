@@ -110,8 +110,8 @@
 0045d598  EntityUpdate_Type58
 0045d670  EntityUpdate_Type59
 0045d7d8  EntityUpdate_Type60_Walker
-0045da28  FUN_0045da28
-0045dc84  FUN_0045dc84
+0045da28  EntityUpdate_Type61_Fleer
+0045dc84  EntityUpdate_Type62_Walker
 0045ddf4  EntityUpdate_Type63
 0045e030  EntityUpdate_Type64
 0045e25c  EntityUpdate_Type65

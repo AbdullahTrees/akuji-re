@@ -80,6 +80,9 @@
       0x0045D598  type 58  a dormant thing that wakes on contact
       0x0045D670  type 59  a sleeper that rises, aims once, and flies
       0x0045D7D8  type 60  a walker that turns at ledges and enrages when hurt
+      0x0045DA28  type 61  a critter that wakes and RUNS AWAY
+      0x0045DC84  type 62  a walker whose vulnerability depends on which way it
+                           is facing relative to you
 
   And the dispatcher they hang off:
 
@@ -1455,6 +1458,82 @@ const
   T57_V3_HATCHLING_HP = 8;
   T57_V3_HATCHLING_DEPTH = 5;
 
+  { --- Types 61 and 62 --------------------------------------------------
+    TYPE 61 hovers until you get close and then runs AWAY from you. That is
+    not a slip in the transcription - the acceleration is
+
+        Compare(player.x, self.x) * 4
+
+    and Compare(A, B) is the sign of B - A, so this is the sign of
+    self.x - player.x: positive when the critter is to the RIGHT of the
+    player, which accelerates it further right. Every other chaser in the
+    game writes Compare(self.x, player.x). Reproduced as written.
+
+    It also zeroes its OWN EF_HP whenever its box overlaps the player's at
+    1x1, at the very end of the handler and in BOTH states - so catching it
+    is what kills it.
+
+    Its idle is another heading-as-oscillator, this one stepping a QUARTER
+    turn a frame, so DirVelX runs 32, 0, -32, 0 and it sways over four
+    frames. Type 52's circle uses the same quarter step.
+
+    Its wake box is 6x2 - wide and flat, so it notices you from across the
+    room but not from above.
+
+    TYPE 62 walks a platform like type 60, with the same wall-and-ledge
+    double probe, and rewrites its own EF_VULN_KIND EVERY FRAME from the
+    geometry:
+
+        2 when it is moving TOWARDS the player, 1 otherwise
+
+    Type 50 changes its own vulnerability too, but as part of an animation.
+    This one recomputes it from where you are standing, which makes it the
+    only enemy whose weak side depends on your position rather than its own
+    state.
+
+    Its opening move is an offset BACKWARDS along its line of travel:
+
+        POS_X += Compare(VEL_X, 0) * 0x400 * EF_VARIANT
+
+    and Compare(VEL_X, 0) is -sign(VEL_X), so a group of them placed on one
+    spot with variants 0, 1, 2 ... spreads into a column 32 pixels apart, all
+    marching the same way. The variant is a rank in a queue.
+
+    EF_CHILD_A is a freeze counter - while it is non-zero the walker does not
+    move and the counter runs down instead. Nothing in this handler ever sets
+    it, so whatever freezes a type 62 is somewhere else. }
+  T61_FRAMES = 2;  T61_TICKS = 2;
+  T61_TABLE_ADDR = $0046C368;
+  T61_SPRITES: array[0..3] of Integer = (175, 176, 177, 178);
+  T61_SPEED_ADDR = $0046C378;
+  T61_SPEED: array[0..2] of Integer = (4, 6, 8);
+  T61_IDLE_TURN = $10;      { a quarter turn a frame - it sways }
+  T61_WAKE_X = 6;           { wide and flat }
+  T61_WAKE_Y = 2;
+  T61_RUN_FIRST = 2;
+  T61_RUN_LAST = 3;
+  T61_RUN_TICKS = 3;
+  T61_ACCEL = 4;
+  T61_SPEED_SCALE = $10;
+  T61_GRAVITY = 2;
+  T61_TERMINAL = $200;
+  T61_SQUEAK_EVERY = $1E;
+  T61_TOUCH_SCALE = 1;
+  T61_SND_SQUEAK = $29;
+
+  T62_FRAMES = 2;  T62_TICKS = 8;
+  T62_TABLE_ADDR = $0046C384;
+  T62_SPRITES: array[0..1, 0..1] of Integer =
+    ((180, 181),      { going left  }
+     (182, 183));     { going right }
+  T62_SPEED_ADDR = $0046C394;
+  T62_SPEED: array[0..2] of Integer = (1, 2, 4);
+  T62_SPEED_SCALE = $10;
+  T62_RANK_STEP = $400;     { 32 px per variant, BACKWARDS along its travel }
+  T62_LEDGE_PROBE = $400;
+  T62_VULN_AWAY = 1;
+  T62_VULN_TOWARDS = 2;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1732,6 +1811,16 @@ procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
 { 0x0045D00C. Four unrelated entities in one handler, chosen by
   EF_VARIANT. See the T57_ block. }
 procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045DA28. Sways until you get near, then runs away. See the T61_
+  block, and note that the acceleration really is away from the player. }
+procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045DC84. A walker that recomputes its own vulnerability every frame
+  from which way it is heading relative to you. }
+procedure EntityUpdate_Type62(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -3090,6 +3179,159 @@ begin
       end;
     end;
   end;
+end;
+
+procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Cap: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T61_SPRITES)) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T61_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+
+  if E.Raw[EF_STATE] = 0 then
+    E.Raw[EF_STATE] := 1;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T61_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T61_FRAMES;
+    end;
+
+    { A quarter turn a frame: 32, 0, -32, 0 - it sways. }
+    Inc(E.Raw[EF_POS_X], DirVelX(E.Raw[EF_FACING]));
+    E.Raw[EF_FACING] := (E.Raw[EF_FACING] + T61_IDLE_TURN) mod DIR_COUNT;
+
+    if EntitiesOverlap(E, Player^, T61_WAKE_X, T61_WAKE_Y) then
+    begin
+      World.PlaySound(T61_SND_SQUEAK);
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_VEL_X] := 0;
+      E.Raw[EF_FLAG1C] := T61_RUN_FIRST;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    { Compare(player, self), not Compare(self, player) - this accelerates
+      AWAY. Every other chaser has the arguments the other way round. }
+    Inc(E.Raw[EF_VEL_X],
+        Compare(Player^.Raw[EF_POS_X], E.Raw[EF_POS_X]) * T61_ACCEL);
+    Cap := T61_SPEED[D] * T61_SPEED_SCALE;
+    if E.Raw[EF_VEL_X] > Cap then
+      E.Raw[EF_VEL_X] := Cap;
+    if E.Raw[EF_VEL_X] < -Cap then
+      E.Raw[EF_VEL_X] := -Cap;
+
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_X] := World.EdgeDistX(E, E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    Inc(E.Raw[EF_VEL_Y], T61_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T61_TERMINAL then
+      E.Raw[EF_VEL_Y] := T61_TERMINAL;
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T61_RUN_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T61_RUN_LAST then
+        E.Raw[EF_FLAG1C] := T61_RUN_FIRST;
+    end;
+
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T61_SQUEAK_EVERY then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      World.PlaySound(T61_SND_SQUEAK);
+    end;
+  end;
+
+  { In BOTH states, and last: catching it is what kills it. }
+  if EntitiesOverlap(E, Player^, T61_TOUCH_SCALE, T61_TOUCH_SCALE) then
+    E.Raw[EF_HP] := 0;
+end;
+
+procedure EntityUpdate_Type62(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, PlayerX: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T62_FRAMES) then
+    Frame := 0;
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T62_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T62_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  PlayerX := World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X);
+
+  { Recomputed from the geometry every frame - 2 while closing on you. }
+  E.Raw[EF_VULN_KIND] := T62_VULN_AWAY;
+  if ((PlayerX < E.Raw[EF_POS_X]) and (E.Raw[EF_VEL_X] < 0))
+     or ((E.Raw[EF_POS_X] < PlayerX) and (E.Raw[EF_VEL_X] > 0)) then
+    E.Raw[EF_VULN_KIND] := T62_VULN_TOWARDS;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_X] := Compare(E.Raw[EF_POS_X], PlayerX);
+    if E.Raw[EF_VEL_X] = 0 then
+      E.Raw[EF_VEL_X] := 1;
+    E.Raw[EF_VEL_X] := T62_SPEED[D] * E.Raw[EF_VEL_X] * T62_SPEED_SCALE;
+    { Compare(vel, 0) is -sign(vel), so the rank offset goes BACKWARDS. }
+    Inc(E.Raw[EF_POS_X],
+        Compare(E.Raw[EF_VEL_X], 0) * T62_RANK_STEP * E.Raw[EF_VARIANT]);
+  end;
+
+  Dec(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] < 1 then
+  begin
+    E.Raw[EF_BLOCK_B] := T62_TICKS;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T62_FRAMES;
+  end;
+
+  { A wall ahead, or no floor one tile down - type 60's probe pair. }
+  if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+     or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T62_LEDGE_PROBE)
+         < World.SolidThreshold) then
+    E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+
+  { Frozen while EF_CHILD_A runs down. Nothing here ever sets it. }
+  if E.Raw[EF_CHILD_A] = 0 then
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X])
+  else
+    Dec(E.Raw[EF_CHILD_A]);
 end;
 
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
@@ -5776,11 +6018,13 @@ begin
       58: EntityUpdate_Type58(E^, AGameState, World);
       59: EntityUpdate_Type59(E^, AGameState, World);
       60: EntityUpdate_Type60(E^, AGameState, World);
+      61: EntityUpdate_Type61(E^, AGameState, World);
+      62: EntityUpdate_Type62(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 20 arms are in HANDLER_ADDR, untranslated }
+      { the other 18 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

@@ -4301,6 +4301,10 @@ begin
     Pin('type 60 speed', T60_SPEED_ADDR, 3, @T60_SPEED[0], 3);
     Pin('type 60 rage', T60_RAGE_ADDR, 3, @T60_RAGE[0], 3);
     Pin('type 60 turn', T60_TURN_ADDR, 3, @T60_TURN[0], 3);
+    Pin('type 61 sprites', T61_TABLE_ADDR, 4, @T61_SPRITES[0], 4);
+    Pin('type 61 speed', T61_SPEED_ADDR, 3, @T61_SPEED[0], 3);
+    Pin('type 62 sprites', T62_TABLE_ADDR, 4, @T62_SPRITES[0][0], 4);
+    Pin('type 62 speed', T62_SPEED_ADDR, 3, @T62_SPEED[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
