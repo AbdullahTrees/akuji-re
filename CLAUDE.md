@@ -252,7 +252,7 @@ overwrites them.
 |---|---|---|
 | `+0x04` | 0 | **game level / difficulty**, clamped 0..2 by the options screen |
 | `+0x08`..`+0x14` | 0,1,2,3 | **key map, FOUR ints** - `FormDestroy` copies `p_KeyMap[0..3]` here. The shipped file holds the identity mapping |
-| `+0x18`..`+0x1B` | 1,0,0,0 | four flag bytes, each named by the global `FormDestroy` copies it from: `+0x18` `p_SoftwareVsync` `0x46CE60`, `+0x19` `p_WaitOn` `0x46D2E4`, `+0x1A` `p_FullScreenOn` `0x46D268`, `+0x1B` `p_DebugLog` `0x46CDB8` |
+| `+0x18`..`+0x1B` | **1,0,1,0** | four flag bytes, each named by the global `FormDestroy` copies it from: `+0x18` `p_SoftwareVsync` `0x46CE60`, `+0x19` `p_WaitOn` `0x46D2E4`, `+0x1A` `p_FullScreenOn` `0x46D268`, `+0x1B` `p_DebugLog` `0x46CDB8`. This said 1,0,0,0 until `DDDD1Init` was read line by line: fullscreen defaults **on**. The default is then almost always overwritten, because the `system.ini` read below sets `+0x1A` unconditionally — 1 when `[disp] fullscreen` is exactly `on`, 0 otherwise — so it only survives when the INI is missing |
 | `+0x24` | 10 | **volume**, clamped 0..10; applied to all 57 channels as `(10 - v) * -0x1C2` |
 | `+0x28` | 0 | **omake (extras) selection**, clamped 0..6 |
 | `+0x2C`..`+0x32` | 0 | **omake unlock flags**, one byte per extra |

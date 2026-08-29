@@ -155,6 +155,11 @@ var
   PauseMenuIndex: Integer = 0;              // p_MenuIndex       0x0046CF88
   SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  0x0046D2C0
   Input: TInputState;                       // p_InputState      0x0046CC58
+  { p_KeyMap 0x0046CEA8. DDDD1Init copies Settings.KeyMap into this on the way
+    in and FormDestroy copies it back on the way out, so the two are the same
+    four numbers held twice - which is why changing a key in the options
+    screen edits THIS and the file only picks it up at exit. }
+  KeyMap: array[0..3] of Integer;
 
 { 0x00466E4C. "Confirm" is EITHER of the first two buttons, and it is an
   EDGE, not a level:

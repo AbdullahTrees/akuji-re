@@ -22,7 +22,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, LCLType,
   DDDDComponent, DDIDComponent, DDSDComponent, KbgmPlayer, GameState,
-  QdaArchive, Title, Ending, Opening, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
+  IniFiles, QdaArchive, Title, Ending, Opening, GameFont, Surfaces, Sprites, Stages, TileMaps, PlayerState,
   Entities, GameSession, SpritePool, Dialogue;
 
 type
@@ -141,14 +141,30 @@ begin
   Result := '';
 end;
 
+{ TFrm_main_DDDD1Init @ 0x00465584. The whole boot, in the original's order:
+  defaults into the settings record, system.dat over the top, system.ini over
+  THAT for two fields, then every global the frame loop reads.
+
+  Two things about the settings the record had wrong or missing:
+
+    * +0x1A, fullscreen, DEFAULTS TO 1, not 0. CLAUDE.md said 1,0,0,0 for the
+      four flag bytes and it is 1,0,1,0. The default is almost always
+      overwritten anyway, because the INI read sets +0x1A unconditionally - 1
+      when [disp] fullscreen is exactly 'on', 0 otherwise - so it only stands
+      when system.ini is missing.
+    * +0x28, the gallery selection, is zeroed AFTER the file is read, so it
+      does not persist across a run even though it sits inside the 56 bytes
+      that get written back.
+
+  The last thing it does before installing the idle handler is clear the flag
+  at 0x0046CFE8, which is what arms Title_Init's one-off 360 ms sleep. }
 procedure TFrm_main.DDDD1Init(Sender: TObject);
 var
   DataDir: string;
   Sheet: TBitmap;
+  Ini: TIniFile;
+  I: Integer;
 begin
-  { TODO: read system.ini -> input device, fullscreen }
-  { TODO: init input, sprite engine }
-
   DataDir := FindGameData;
   if DataDir <> '' then
   begin
@@ -160,6 +176,26 @@ begin
       initial value is the default and LoadSettings only reports whether the
       file was actually applied. }
     LoadSettings(DataDir);
+
+    { system.ini sits beside the EXE, not in data\. Two fields, and both
+      overwrite what system.dat just supplied. }
+    Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'system.ini');
+    try
+      Settings.FullScreenFlag :=
+        Ord(LowerCase(Trim(Ini.ReadString('disp', 'fullscreen', ''))) = 'on');
+      Settings.InputDevice :=
+        StrToIntDef(Trim(Ini.ReadString('device', 'input', '')), 0);
+    finally
+      Ini.Free;
+    end;
+    { Zeroed after the read, so the gallery cursor never persists. }
+    Settings.GallerySel := 0;
+    SettingsToGlobals;
+
+    { p_KeyMap gets its own copy of the four ints; FormDestroy copies them
+      back on the way out. }
+    for I := 0 to High(Settings.KeyMap) do
+      KeyMap[I] := Settings.KeyMap[I];
 
     FArchive := TQdaArchive.Create(DataDir + 'bmp.qda');
     { p_UseArchive, set by DDDD1Init the same way. }
@@ -240,7 +276,16 @@ begin
   FTitleScreen.OnGallery := TitleGallery;
   FLimitFrames := True;
   FLastFrame := GetTickCount64;
+
+  { The rest of the original's global reset, in its order. }
+  Randomize;
+  FillChar(FSession.Input, SizeOf(FSession.Input), 0);
+  EntitiesLive := 0;
+  EntitiesDrawn := 0;
   GameStateValue := GS_TITLE_INIT;
+  SavedGameState := 0;
+  { 0x0046CFE8 - armed here, spent once by Title_Init. }
+  FTitleSlept := False;
 
   { The original: Application.FOnIdle := TFrm_main_AppIdle (+0xD8/+0xDC). }
   Application.OnIdle := AppIdle;
