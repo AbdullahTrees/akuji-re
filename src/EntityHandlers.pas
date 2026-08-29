@@ -2992,6 +2992,12 @@ var
   change it mid-loop. That is not defensive: the last of those four reads exists
   precisely so that a touch which starts an event script abandons the rest of
   the frame's entities. }
+{ The type switch on its own - see the note on the implementation. Exposed so
+  --emudiff can run one handler against an entity of its choosing. }
+procedure EntityRunHandler(var E: TEntity; var P: TPlayerState;
+                           var L: TLayerInfo; var Inp: TInputState;
+                           World: TEntityWorld; AGameState: Integer);
+
 procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
                           Sprites: TSpriteSink;
                           var P: TPlayerState; var L: TLayerInfo;
@@ -8617,6 +8623,108 @@ begin
     Result := Sign * Integer(Q + 1);
 end;
 
+{ The type switch, lifted out of EntityUpdateAll's loop so a test can drive
+  one handler without running a whole frame.
+
+  This is a REFACTOR, not a divergence: it is the same case statement, called
+  from the same place, in the same order, and no arm's behaviour changes. It is
+  extracted because --emudiff needs to call a handler by type against an entity
+  it controls, and the alternative was a second copy of a 78-arm switch that
+  could drift from this one silently. In the original the switch is a jump
+  table inlined in Entity_UpdateAll @ 0x004608BC; it is a procedure here for
+  the same reason TEntityWorld is a class - so the parts can be tested. }
+procedure EntityRunHandler(var E: TEntity; var P: TPlayerState;
+                           var L: TLayerInfo; var Inp: TInputState;
+                           World: TEntityWorld; AGameState: Integer);
+begin
+  case E.Raw[EF_TYPE] of
+    1:  PlayerUpdate(E, P, L, Inp, World, AGameState);
+    14: EntityUpdate_Type14(E, AGameState);
+    24: EntityUpdate_Type24(E, AGameState, World);
+    25: EntityUpdate_Type25(E);
+    27: EntityUpdate_Type27(E, AGameState);
+    32: EntityUpdate_Type32_Emitter(E, AGameState, World);
+    33: EntityUpdate_Type33_Explosion(E, AGameState, World);
+    2:  EntityUpdate_Type02(E, AGameState, World);
+    3:  EntityUpdate_Type03(E, AGameState, World);
+    4:  EntityUpdate_Type04(E, AGameState, World);
+    5:  EntityUpdate_Type05(E, AGameState, World);
+    6:  EntityUpdate_Type06(E, AGameState, World);
+    7:  EntityUpdate_Type07(E, AGameState, World);
+    8:  EntityUpdate_Type08(E, AGameState, World);
+    9:  EntityUpdate_Type09(E, AGameState);
+    10: EntityUpdate_Type10(E, AGameState, World);
+    11: EntityUpdate_Type11(E, AGameState);
+    12: EntityUpdate_Type12(E, AGameState);
+    13: EntityUpdate_Type13(E, AGameState, World);
+    15: EntityUpdate_Type15(E, AGameState, World);
+    17: EntityUpdate_Type17(E);
+    19: EntityUpdate_Type19(E);
+    21: EntityUpdate_Type21(E, AGameState, World);
+    23: EntityUpdate_Type23(E, AGameState, World);
+    28: EntityUpdate_Type28(E, AGameState, World);
+    29: EntityUpdate_Type29(E, AGameState, World);
+    30: EntityUpdate_Type30(E, AGameState, World);
+    31: EntityUpdate_Type31(E, AGameState, World);
+    34: EntityUpdate_Type34(E, AGameState, World);
+    35: EntityUpdate_Type35(E, AGameState, World);
+    37: EntityUpdate_Type37(E, AGameState, World);
+    38: EntityUpdate_Type38(E, AGameState, World);
+    39: EntityUpdate_Type39(E, AGameState, World);
+    40: EntityUpdate_Type40(E, AGameState, Inp, World);
+    41: EntityUpdate_Type41(E, AGameState, World);
+    42: EntityUpdate_Type42(E, AGameState, World);
+    43: EntityUpdate_Type43(E, AGameState, World);
+    44: EntityUpdate_Type44(E, AGameState, World);
+    45: EntityUpdate_Type45(E, AGameState, World);
+    46: EntityUpdate_Type46(E, AGameState, World);
+    47: EntityUpdate_Type47(E, AGameState, World);
+    48: EntityUpdate_Type48(E, AGameState, World);
+    49: EntityUpdate_Type49(E, AGameState, World);
+    50: EntityUpdate_Type50(E, AGameState, World);
+    51: EntityUpdate_Type51(E, AGameState, World);
+    53: EntityUpdate_Type53(E, AGameState, World);
+    56: EntityUpdate_Type56(E, AGameState, World);
+    52: EntityUpdate_Type52(E, AGameState, World);
+    54: EntityUpdate_Type54(E, AGameState, World);
+    55: EntityUpdate_Type55(E, AGameState, World);
+    57: EntityUpdate_Type57(E, AGameState, World);
+    58: EntityUpdate_Type58(E, AGameState, World);
+    59: EntityUpdate_Type59(E, AGameState, World);
+    60: EntityUpdate_Type60(E, AGameState, World);
+    61: EntityUpdate_Type61(E, AGameState, World);
+    62: EntityUpdate_Type62(E, AGameState, World);
+    63: EntityUpdate_Type63(E, AGameState, World);
+    64: EntityUpdate_Type64(E, AGameState, World);
+    65: EntityUpdate_Type65(E, AGameState, Inp, World);
+    66: EntityUpdate_Type66(E, AGameState, World);
+    67: EntityUpdate_Type67(E, AGameState, World);
+    68: EntityUpdate_Type68(E, AGameState, World);
+    69: EntityUpdate_Type69(E, AGameState, World);
+    70: EntityUpdate_Type70(E, AGameState, World);
+    71: EntityUpdate_Type71(E, AGameState, World);
+    72: EntityUpdate_Type72(E, AGameState, World);
+    73: EntityUpdate_Type73(E, AGameState, World);
+    74: EntityUpdate_Type74(E, AGameState, World);
+    75: EntityUpdate_Type75(E, AGameState, World);
+    76: EntityUpdate_Type76(E, AGameState, World);
+    77: EntityUpdate_Type77(E, AGameState, World);
+    78: EntityUpdate_Type78(E, AGameState, World);
+    79: EntityUpdate_Type79(E, AGameState, World);
+    80: EntityUpdate_Type80(E, AGameState, World);
+    16: EntityUpdate_Type16_Sign(E);
+    22: EntityUpdate_Type22(E, AGameState, World);
+    26: EntityUpdate_Type26(E, AGameState, World);
+    36: EntityUpdate_Type36_FallingItem(E, AGameState, World);
+    { Every arm in HANDLER_ADDR now has a case above. This else is not in
+      the original - the compiler emitted a jump table with no default -
+      and exists only so the claim can be checked; see EntitiesUnhandled.
+      DIVERGENCE DIV-006. }
+  else
+    Inc(EntitiesUnhandled);
+  end;
+end;
+
 procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
                           Sprites: TSpriteSink;
                           var P: TPlayerState; var L: TLayerInfo;
@@ -8643,92 +8751,7 @@ begin
       Inc(E^.Raw[EF_POS_Y], L.DeltaY);
     end;
 
-    case E^.Raw[EF_TYPE] of
-      1:  PlayerUpdate(E^, P, L, Inp, World, AGameState);
-      14: EntityUpdate_Type14(E^, AGameState);
-      24: EntityUpdate_Type24(E^, AGameState, World);
-      25: EntityUpdate_Type25(E^);
-      27: EntityUpdate_Type27(E^, AGameState);
-      32: EntityUpdate_Type32_Emitter(E^, AGameState, World);
-      33: EntityUpdate_Type33_Explosion(E^, AGameState, World);
-      2:  EntityUpdate_Type02(E^, AGameState, World);
-      3:  EntityUpdate_Type03(E^, AGameState, World);
-      4:  EntityUpdate_Type04(E^, AGameState, World);
-      5:  EntityUpdate_Type05(E^, AGameState, World);
-      6:  EntityUpdate_Type06(E^, AGameState, World);
-      7:  EntityUpdate_Type07(E^, AGameState, World);
-      8:  EntityUpdate_Type08(E^, AGameState, World);
-      9:  EntityUpdate_Type09(E^, AGameState);
-      10: EntityUpdate_Type10(E^, AGameState, World);
-      11: EntityUpdate_Type11(E^, AGameState);
-      12: EntityUpdate_Type12(E^, AGameState);
-      13: EntityUpdate_Type13(E^, AGameState, World);
-      15: EntityUpdate_Type15(E^, AGameState, World);
-      17: EntityUpdate_Type17(E^);
-      19: EntityUpdate_Type19(E^);
-      21: EntityUpdate_Type21(E^, AGameState, World);
-      23: EntityUpdate_Type23(E^, AGameState, World);
-      28: EntityUpdate_Type28(E^, AGameState, World);
-      29: EntityUpdate_Type29(E^, AGameState, World);
-      30: EntityUpdate_Type30(E^, AGameState, World);
-      31: EntityUpdate_Type31(E^, AGameState, World);
-      34: EntityUpdate_Type34(E^, AGameState, World);
-      35: EntityUpdate_Type35(E^, AGameState, World);
-      37: EntityUpdate_Type37(E^, AGameState, World);
-      38: EntityUpdate_Type38(E^, AGameState, World);
-      39: EntityUpdate_Type39(E^, AGameState, World);
-      40: EntityUpdate_Type40(E^, AGameState, Inp, World);
-      41: EntityUpdate_Type41(E^, AGameState, World);
-      42: EntityUpdate_Type42(E^, AGameState, World);
-      43: EntityUpdate_Type43(E^, AGameState, World);
-      44: EntityUpdate_Type44(E^, AGameState, World);
-      45: EntityUpdate_Type45(E^, AGameState, World);
-      46: EntityUpdate_Type46(E^, AGameState, World);
-      47: EntityUpdate_Type47(E^, AGameState, World);
-      48: EntityUpdate_Type48(E^, AGameState, World);
-      49: EntityUpdate_Type49(E^, AGameState, World);
-      50: EntityUpdate_Type50(E^, AGameState, World);
-      51: EntityUpdate_Type51(E^, AGameState, World);
-      53: EntityUpdate_Type53(E^, AGameState, World);
-      56: EntityUpdate_Type56(E^, AGameState, World);
-      52: EntityUpdate_Type52(E^, AGameState, World);
-      54: EntityUpdate_Type54(E^, AGameState, World);
-      55: EntityUpdate_Type55(E^, AGameState, World);
-      57: EntityUpdate_Type57(E^, AGameState, World);
-      58: EntityUpdate_Type58(E^, AGameState, World);
-      59: EntityUpdate_Type59(E^, AGameState, World);
-      60: EntityUpdate_Type60(E^, AGameState, World);
-      61: EntityUpdate_Type61(E^, AGameState, World);
-      62: EntityUpdate_Type62(E^, AGameState, World);
-      63: EntityUpdate_Type63(E^, AGameState, World);
-      64: EntityUpdate_Type64(E^, AGameState, World);
-      65: EntityUpdate_Type65(E^, AGameState, Inp, World);
-      66: EntityUpdate_Type66(E^, AGameState, World);
-      67: EntityUpdate_Type67(E^, AGameState, World);
-      68: EntityUpdate_Type68(E^, AGameState, World);
-      69: EntityUpdate_Type69(E^, AGameState, World);
-      70: EntityUpdate_Type70(E^, AGameState, World);
-      71: EntityUpdate_Type71(E^, AGameState, World);
-      72: EntityUpdate_Type72(E^, AGameState, World);
-      73: EntityUpdate_Type73(E^, AGameState, World);
-      74: EntityUpdate_Type74(E^, AGameState, World);
-      75: EntityUpdate_Type75(E^, AGameState, World);
-      76: EntityUpdate_Type76(E^, AGameState, World);
-      77: EntityUpdate_Type77(E^, AGameState, World);
-      78: EntityUpdate_Type78(E^, AGameState, World);
-      79: EntityUpdate_Type79(E^, AGameState, World);
-      80: EntityUpdate_Type80(E^, AGameState, World);
-      16: EntityUpdate_Type16_Sign(E^);
-      22: EntityUpdate_Type22(E^, AGameState, World);
-      26: EntityUpdate_Type26(E^, AGameState, World);
-      36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { Every arm in HANDLER_ADDR now has a case above. This else is not in
-        the original - the compiler emitted a jump table with no default -
-        and exists only so the claim can be checked; see EntitiesUnhandled.
-        DIVERGENCE DIV-006. }
-    else
-      Inc(EntitiesUnhandled);
-    end;
+    EntityRunHandler(E^, P, L, Inp, World, AGameState);
 
     { --- push the entity onto its sprite ---------------------------------
       Skipped entirely for a type with no sprite, and re-tests aliveness
