@@ -76,6 +76,7 @@
       0x0045CAD8  type 54  a second boss: hovers, blinks out, hops a fixed
                            circuit and fires
       0x0045CC98  type 55  its fireball, and the trail the fireball leaves
+      0x0045D00C  type 57  four different things in one handler, by variant
       0x0045D598  type 58  a dormant thing that wakes on contact
       0x0045D670  type 59  a sleeper that rises, aims once, and flies
       0x0045D7D8  type 60  a walker that turns at ledges and enrages when hurt
@@ -1372,6 +1373,88 @@ const
   T60_ANIM_STEP = -6;
   T60_LEDGE_PROBE = $400;   { one tile down - no floor there means turn }
 
+  { --- Type 57, four entities wearing one handler -----------------------
+    The only handler that switches on EF_VARIANT at the top and never shares
+    a line between the branches. Four separate things:
+
+    VARIANT 0 - type 56's shot. Move by velocity, four frames, nothing else.
+
+    VARIANT 1 - a skimmer that falls when it hits a wall. Its two states read
+    the SAME eight-int table two different ways: state 0 treats it as two rows
+    of four and shows element 0 or element 4 by the sign of EF_VEL_X, and
+    state 1 walks all eight linearly. One table, two shapes.
+
+    VARIANT 2 - a homing fireball, the same construction as type 55's state 0
+    down to the constants: steer(1, 2), multiply both velocity components by
+    difficulty + 1 every frame, stop homing at 240 and end at 241. It differs
+    in what it leaves and what it becomes - a type 28 every eighth frame while
+    alive, and a type 7 with EF_VARIANT 1 when it ends.
+
+    VARIANT 3 - an egg. It bounces with shrinking hops, EF_VEL_Y being
+    (6 - bounces) * -0x10, so the sixth hop has no lift and settles it. Then it
+    rocks for a difficulty-keyed number of cycles - (8, 4, 1), so hard hatches
+    almost at once - and bursts: eight type-6 particles at random headings and
+    random speeds, then a type 68 spawned as an ACTOR with EF_STATE 3.
+
+    That last line is where the type-68-in-state-3 special case in
+    Entity_UpdateAll comes from. The extra Entity_PlayerTouch that
+    TYPE_TOUCH_IN_STATE_3 describes exists for whatever hatches out of here.
+
+    The bounce is worth reading twice. On the frame it hits a wall it writes
+    the EXACT distance to that wall into EF_VEL_X so it lands flush, which
+    would throw the reversed velocity away - so the reversal is parked in
+    EF_PARKED_VEL and picked up on the next frame. }
+  T57_V0_FRAMES = 4;  T57_V0_TICKS = 2;
+  T57_V0_TABLE_ADDR = $0046C298;
+  T57_V0_SPRITES: array[0..T57_V0_FRAMES - 1] of Integer =
+    (252, 253, 254, 255);
+
+  T57_V1_FRAMES = 8;  T57_V1_TICKS = 2;
+  T57_V1_TABLE_ADDR = $0046C2A8;
+  { Read as two rows of four in state 0 and as one run of eight in state 1. }
+  T57_V1_SPRITES: array[0..T57_V1_FRAMES - 1] of Integer =
+    (262, 263, 264, 265, 266, 267, 268, 269);
+  T57_V1_ROW = 4;
+  T57_V1_HOP = -$40;
+  T57_V1_GRAVITY = 2;
+  T57_V1_TERMINAL = $200;
+  T57_V1_SND_HIT = $F;
+
+  T57_V2_FRAMES = 8;  T57_V2_TICKS = 2;
+  T57_V2_TABLE_ADDR = $0046C2C8;
+  T57_V2_SPRITES: array[0..T57_V2_FRAMES - 1] of Integer =
+    (271, 272, 273, 274, 275, 276, 277, 278);
+  T57_V2_TURN_TIMER = 1;
+  T57_V2_TURN_RELOAD = 2;
+  T57_V2_HOMING_UNTIL = $F0;
+  T57_V2_LIFETIME = $F0;
+  T57_V2_TRAIL_EVERY = 8;
+  T57_V2_TRAIL_TYPE = $1C;   { 28 }
+  T57_V2_END_TYPE = 7;
+  T57_V2_END_VARIANT = 1;
+  T57_V2_SND_LOOP = $26;
+
+  T57_V3_FRAMES = 3;  T57_V3_TICKS = 2;
+  T57_V3_ROCK_FRAMES = 2;
+  T57_V3_TABLE_ADDR = $0046C2E8;
+  T57_V3_SPRITES: array[0..T57_V3_FRAMES - 1] of Integer = (288, 289, 290);
+  T57_V3_HATCH_ADDR = $0046C460;
+  T57_V3_HATCH: array[0..2] of Integer = (8, 4, 1);   { hard hatches at once }
+  T57_V3_HOPS = 6;
+  T57_V3_HOP_UNIT = -$10;
+  T57_V3_GRAVITY = 4;
+  T57_V3_TERMINAL = $200;
+  T57_V3_SND_LAND = $1B;
+  T57_V3_SND_HATCH = $31;
+  T57_V3_BURST = 8;
+  T57_V3_BURST_TYPE = 6;
+  T57_V3_SPEED_SPREAD = 2;   { RandomBelow(2) + 3, so 3 or 4 half-components }
+  T57_V3_SPEED_BASE = 3;
+  T57_V3_HATCHLING = $44;    { 68 - the type Entity_UpdateAll touches twice }
+  T57_V3_HATCHLING_STATE = 3;
+  T57_V3_HATCHLING_HP = 8;
+  T57_V3_HATCHLING_DEPTH = 5;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1644,6 +1727,11 @@ procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
 
 { 0x0045CC98. The boss's fireball in state 0 and its trail in state 1. }
 procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045D00C. Four unrelated entities in one handler, chosen by
+  EF_VARIANT. See the T57_ block. }
+procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -2768,6 +2856,238 @@ begin
       Inc(E.Raw[EF_FLAG1C]);
       if E.Raw[EF_FLAG1C] > T55_TRAIL_FRAMES - 1 then
         World.DestroyEntity(E, False);
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, I, Slot, Facing: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+
+  { --- the sprite, four different ways --- }
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    if (Frame < 0) or (Frame >= T57_V0_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T57_V0_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    if (Frame < 0) or (Frame >= T57_V1_FRAMES) then
+      Frame := 0;
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      { The same table as two rows, by the sign - two ifs and no else. }
+      if E.Raw[EF_VEL_X] > 0 then
+        E.Raw[EF_ANIM_ID] := T57_V1_SPRITES[0];
+      if E.Raw[EF_VEL_X] < 0 then
+        E.Raw[EF_ANIM_ID] := T57_V1_SPRITES[T57_V1_ROW];
+    end
+    else
+      E.Raw[EF_ANIM_ID] := T57_V1_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 2 then
+  begin
+    if (Frame < 0) or (Frame >= T57_V2_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T57_V2_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 3 then
+  begin
+    if (Frame < 0) or (Frame >= T57_V3_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T57_V3_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  { --- variant 0: type 56's shot --- }
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T57_V0_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T57_V0_FRAMES;
+    end;
+  end;
+
+  { --- variant 1: skims, then falls when it meets a wall --- }
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+      if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      begin
+        World.PlaySound(T57_V1_SND_HIT);
+        E.Raw[EF_STATE] := 1;
+        E.Raw[EF_VEL_Y] := T57_V1_HOP;
+      end;
+    end;
+
+    if E.Raw[EF_STATE] = 1 then
+    begin
+      Inc(E.Raw[EF_VEL_Y], T57_V1_GRAVITY);
+      if E.Raw[EF_VEL_Y] > T57_V1_TERMINAL then
+        E.Raw[EF_VEL_Y] := T57_V1_TERMINAL;
+      Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+      Inc(E.Raw[EF_BLOCK_B]);
+      if E.Raw[EF_BLOCK_B] > T57_V1_TICKS then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T57_V1_FRAMES;
+      end;
+    end;
+  end;
+
+  { --- variant 2: the homing fireball, type 55's state 0 rebuilt --- }
+  if E.Raw[EF_VARIANT] = 2 then
+  begin
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T57_V2_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T57_V2_FRAMES;
+      if E.Raw[EF_FLAG1C] = 0 then
+        World.PlaySound(T57_V2_SND_LOOP);
+    end;
+
+    Inc(E.Raw[EF_SHOTS]);
+    if E.Raw[EF_SHOTS] < T57_V2_HOMING_UNTIL then
+    begin
+      if World.Pool <> nil then
+        World.Pool.Steer(E.Raw[EF_SLOT], T57_V2_TURN_TIMER,
+                         T57_V2_TURN_RELOAD);
+      E.Raw[EF_VEL_X] := (D + 1) * E.Raw[EF_VEL_X];
+      E.Raw[EF_VEL_Y] := (D + 1) * E.Raw[EF_VEL_Y];
+    end;
+
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+
+    Inc(E.Raw[EF_BLOCK_B + 4]);
+    if E.Raw[EF_BLOCK_B + 4] mod T57_V2_TRAIL_EVERY = 0 then
+      World.Spawn(EKIND_MINOR, T57_V2_TRAIL_TYPE,
+                  E.Raw[EF_POS_X] - POSITION_BIAS,
+                  E.Raw[EF_POS_Y] - POSITION_BIAS);
+
+    if E.Raw[EF_BLOCK_B + 4] > T57_V2_LIFETIME then
+    begin
+      Slot := World.Spawn(EKIND_MINOR, T57_V2_END_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(Slot, EF_VARIANT, T57_V2_END_VARIANT);
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+  end;
+
+  { --- variant 3: the egg --- }
+  if E.Raw[EF_VARIANT] = 3 then
+  begin
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_CHILD_A]);
+      { Shrinking hops - the sixth has no lift at all. }
+      E.Raw[EF_VEL_Y] := (T57_V3_HOPS - E.Raw[EF_CHILD_A]) * T57_V3_HOP_UNIT;
+      if E.Raw[EF_CHILD_A] < T57_V3_HOPS then
+        E.Raw[EF_STATE] := 1
+      else
+        E.Raw[EF_STATE] := 2;
+    end;
+
+    if E.Raw[EF_STATE] = 1 then
+    begin
+      Inc(E.Raw[EF_BLOCK_B]);
+      if E.Raw[EF_BLOCK_B] > T57_V3_TICKS then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T57_V3_ROCK_FRAMES;
+      end;
+
+      { Last frame's reversal, collected now that the flush landing is done. }
+      if E.Raw[EF_PARKED_VEL] <> 0 then
+      begin
+        E.Raw[EF_VEL_X] := E.Raw[EF_PARKED_VEL];
+        E.Raw[EF_PARKED_VEL] := 0;
+      end;
+
+      if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+      begin
+        E.Raw[EF_PARKED_VEL] := -E.Raw[EF_VEL_X];
+        E.Raw[EF_VEL_X] := World.EdgeDistX(E, E.Raw[EF_VEL_X]);
+      end;
+      Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+      Inc(E.Raw[EF_VEL_Y], T57_V3_GRAVITY);
+      if E.Raw[EF_VEL_Y] > T57_V3_TERMINAL then
+        E.Raw[EF_VEL_Y] := T57_V3_TERMINAL;
+      if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+      begin
+        World.PlaySound(T57_V3_SND_LAND);
+        E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+        E.Raw[EF_STATE] := 0;
+        E.Raw[EF_FLAG1C] := 0;
+      end;
+      Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+    end;
+
+    if E.Raw[EF_STATE] = 2 then
+    begin
+      Inc(E.Raw[EF_BLOCK_B]);
+      if E.Raw[EF_BLOCK_B] > T57_V3_TICKS then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        Inc(E.Raw[EF_FLAG1C]);
+        if E.Raw[EF_FLAG1C] > T57_V3_FRAMES - 1 then
+        begin
+          E.Raw[EF_FLAG1C] := 0;
+          Inc(E.Raw[EF_CHILD_A]);
+        end;
+
+        if T57_V3_HATCH[D] < E.Raw[EF_CHILD_A] then
+        begin
+          for I := 1 to T57_V3_BURST do
+          begin
+            Slot := World.Spawn(EKIND_MINOR, T57_V3_BURST_TYPE,
+                                E.Raw[EF_POS_X] - POSITION_BIAS,
+                                E.Raw[EF_POS_Y] - POSITION_BIAS);
+            World.SetSpawnField(Slot, EF_BLOCK_A + 1, 0);
+            Facing := World.RandomBelow(DIR_COUNT);
+            World.SetSpawnField(Slot, EF_FACING, Facing);
+            World.SetSpawnField(Slot, EF_VEL_X,
+              (World.RandomBelow(T57_V3_SPEED_SPREAD) + T57_V3_SPEED_BASE)
+              * HalfExtent(DirVelX(Facing)));
+            World.SetSpawnField(Slot, EF_VEL_Y,
+              (World.RandomBelow(T57_V3_SPEED_SPREAD) + T57_V3_SPEED_BASE)
+              * HalfExtent(DirVelY(Facing)));
+          end;
+          World.PlaySound(T57_V3_SND_HATCH);
+
+          { An ACTOR, not a minor - and in state 3, which is the state
+            Entity_UpdateAll touch-tests twice. }
+          Slot := World.Spawn(EKIND_ACTOR, T57_V3_HATCHLING,
+                              E.Raw[EF_POS_X] - POSITION_BIAS,
+                              E.Raw[EF_POS_Y] - POSITION_BIAS);
+          World.SetSpawnField(Slot, EF_STATE, T57_V3_HATCHLING_STATE);
+          World.SetSpawnField(Slot, EF_HP, T57_V3_HATCHLING_HP);
+          World.SetSpawnField(Slot, EF_TYPEF_0C, 1);
+          World.SetSpawnField(Slot, EF_DEPTH, T57_V3_HATCHLING_DEPTH);
+          World.DestroyEntity(E, False);
+        end;
+      end;
     end;
   end;
 end;
@@ -5452,6 +5772,7 @@ begin
       52: EntityUpdate_Type52(E^, AGameState, World);
       54: EntityUpdate_Type54(E^, AGameState, World);
       55: EntityUpdate_Type55(E^, AGameState, World);
+      57: EntityUpdate_Type57(E^, AGameState, World);
       58: EntityUpdate_Type58(E^, AGameState, World);
       59: EntityUpdate_Type59(E^, AGameState, World);
       60: EntityUpdate_Type60(E^, AGameState, World);
@@ -5459,7 +5780,7 @@ begin
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 21 arms are in HANDLER_ADDR, untranslated }
+      { the other 20 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------

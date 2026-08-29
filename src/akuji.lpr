@@ -4030,7 +4030,11 @@ const
   { Wide enough to take in the sound table at 0x00468E34 as well as the run of
     sprite tables. Widening only ADDS starts below every existing base, so it
     cannot change an extent that was already pinned. }
-  BODY_LO = $00468000;  BODY_HI = $0046C400;
+  { The run of table bodies does not stop at 0x0046C400 - bodies and pointer
+    globals interleave above it, and type 57's hatch table is at 0x0046C460.
+    Widening the body window only ADDS starts above every base already pinned,
+    so it cannot change an extent that already passed. }
+  BODY_LO = $00468000;  BODY_HI = $0046D400;
 var
   Exe: TMemoryStream;
   ExeName: string;
@@ -4285,6 +4289,11 @@ begin
     Pin('type 56 count', T56_COUNT_ADDR, 3, @T56_COUNT[0], 3);
     Pin('type 56 speed', T56_SPEED_ADDR, 3, @T56_SPEED[0], 3);
     { three ints - frame 2 is the dormant sprite, 0 and 1 the awake pair }
+    Pin('type 57 v0 sprites', T57_V0_TABLE_ADDR, 4, @T57_V0_SPRITES[0], 4);
+    Pin('type 57 v1 sprites', T57_V1_TABLE_ADDR, 8, @T57_V1_SPRITES[0], 8);
+    Pin('type 57 v2 sprites', T57_V2_TABLE_ADDR, 8, @T57_V2_SPRITES[0], 8);
+    Pin('type 57 v3 sprites', T57_V3_TABLE_ADDR, 3, @T57_V3_SPRITES[0], 3);
+    Pin('type 57 hatch', T57_V3_HATCH_ADDR, 3, @T57_V3_HATCH[0], 3);
     Pin('type 58 sprites', T58_TABLE_ADDR, 3, @T58_SPRITES[0], 3);
     Pin('type 59 sprites', T59_TABLE_ADDR, 6, @T59_SPRITES[0], 6);
     Pin('type 59 speed', T59_SPEED_ADDR, 3, @T59_SPEED[0], 3);

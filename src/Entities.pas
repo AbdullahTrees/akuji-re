@@ -281,6 +281,13 @@ const
                             field, two roles by role - see the note below. }
   EF_TYPEF_04    = EF_HP; { the old provenance name, kept for the spawn code }
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
+  { +0xB0. A velocity PARKED for one frame. Type 57 variant 3 uses it to
+    bounce off a wall: on the frame it hits, EF_VEL_X is overwritten with the
+    exact distance to the wall so it lands flush, and the reversed velocity is
+    left here for the NEXT frame to pick up. Without the parking spot the
+    flush-landing write would destroy the bounce. }
+  EF_PARKED_VEL  = $2C;
+
   EF_EVENT_ID    = $2E;   { +0xB8. The event record this entity came from, or
                             -1 when it came from nowhere. Entity_SolidCollideX
                             and ...Y index p_EventTable by it (stride 0x24) to
