@@ -34,7 +34,7 @@ the NEXT table along, which genuinely is indexed 0..15.
 
 USAGE
 
-    python tools/table_bounds.py <exe> --region 0x46B800 0x46C400
+    python tools/table_bounds.py <exe> --region 0x468000 0x46D400
     python tools/table_bounds.py <exe> --at 0x46BDA0
     python tools/table_bounds.py <exe> --ptr 0x46CBA0 --readers
 """
@@ -50,6 +50,13 @@ CODE_VA_BIAS = 0x400C00
 # Where Delphi put the pointer globals in this exe. Generous on purpose: a
 # stray dword that happens to look like a pointer can only ever make a table
 # look SHORTER, never longer, so it cannot hide a too-long claim.
+#
+# The default REGION below is the same span --selftest-entities sweeps. It used
+# to stop at 0x0046C400 on the assumption that the pointer globals began there
+# and the bodies ended - and they interleave instead. A table body above that
+# line then had no visible successor and the tool said "not the start of any
+# table", which reads like a wrong address rather than a window that is too
+# small. Type 57's hatch table at 0x0046C460 is one of those.
 PTRS_LO, PTRS_HI = 0x0046C400, 0x0046D400
 
 
@@ -95,7 +102,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('exe')
     ap.add_argument('--region', nargs=2, metavar=('LO', 'HI'),
-                    default=['0x46B800', '0x46C400'],
+                    default=['0x468000', '0x46D400'],
                     help='the span of table bodies to partition')
     ap.add_argument('--at', metavar='VA', help='report the extent of one table')
     ap.add_argument('--ptr', metavar='VA', help='resolve a pointer global first')

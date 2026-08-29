@@ -4305,6 +4305,15 @@ begin
     Pin('type 61 speed', T61_SPEED_ADDR, 3, @T61_SPEED[0], 3);
     Pin('type 62 sprites', T62_TABLE_ADDR, 4, @T62_SPRITES[0][0], 4);
     Pin('type 62 speed', T62_SPEED_ADDR, 3, @T62_SPEED[0], 3);
+    Pin('type 63 sprites', T63_TABLE_ADDR, 8, @T63_SPRITES[0][0], 8);
+    Pin('type 63 shot speed', T63_SHOT_SPD_ADDR, 3, @T63_SHOT_SPD[0], 3);
+    Pin('type 63 fire at', T63_FIRE_AT_ADDR, 3, @T63_FIRE_AT[0], 3);
+    Pin('type 63 recover', T63_RECOVER_ADDR, 3, @T63_RECOVER[0], 3);
+    Pin('type 63 cooldown', T63_COOLDOWN_ADDR, 3, @T63_COOLDOWN[0], 3);
+    Pin('type 64 sprites', T64_TABLE_ADDR, 2, @T64_SPRITES[0], 2);
+    Pin('type 64 wait', T64_WAIT_ADDR, 3, @T64_WAIT[0], 3);
+    Pin('type 64 rest', T64_REST_ADDR, 3, @T64_REST[0], 3);
+    Pin('type 64 rise', T64_RISE_ADDR, 3, @T64_RISE[0], 3);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));

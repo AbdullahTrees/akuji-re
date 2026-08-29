@@ -83,6 +83,9 @@
       0x0045DA28  type 61  a critter that wakes and RUNS AWAY
       0x0045DC84  type 62  a walker whose vulnerability depends on which way it
                            is facing relative to you
+      0x0045DDF4  type 63  a walker that stops to shoot, then turns round
+      0x0045E030  type 64  a slammer that drops, sends a wave each way, and
+                           climbs back to the ceiling
 
   And the dispatcher they hang off:
 
@@ -1534,6 +1537,80 @@ const
   T62_VULN_AWAY = 1;
   T62_VULN_TOWARDS = 2;
 
+  { --- Types 63 and 64 --------------------------------------------------
+    TYPE 63 walks type 60's walk, with the same wall-and-ledge probe pair,
+    and stops to shoot when three things are true at once: its cooldown has
+    run out, the player is inside a 6x2 box, and it is already moving TOWARDS
+    the player. That last condition is the same expression type 62 uses to
+    pick its vulnerability - written out again rather than shared.
+
+    It fires exactly one shot, on an EQUALITY test against the fire frame
+    rather than a threshold, and what it fires is a type 57 with EF_VARIANT
+    set to 1 - the skimmer that falls when it meets a wall. So type 57's
+    second variant has an owner.
+
+    Then it TURNS ROUND. Leaving state 2 negates EF_VEL_X, so it always
+    walks back the way it came after shooting, and its cooldown is reloaded
+    from a separate table so it cannot shoot again immediately.
+
+    TYPE 64 hangs from the ceiling, drops, and climbs back:
+
+      1  wait. The threshold is WAIT[difficulty] * EF_VARIANT, so a row of
+         them with variants 1, 2, 3 drops in sequence - and a variant 0 has a
+         threshold of zero and drops at once
+      2  fall at gravity 4. On landing it plays a sound and spawns TWO type-3
+         entities, one 24 px left with EF_VEL_X -0x20 and one 24 px right
+         with +0x20 - a shockwave running each way along the floor
+      3  rest
+      4  climb at RISE[difficulty] * -0x10 until it meets the ceiling, then
+         back to waiting
+
+    Its animation ticks at the top of the handler, outside every state, so it
+    flaps at the same rate whatever it is doing. }
+  T63_FRAMES = 2;  T63_TICKS = 8;
+  T63_TABLE_ADDR = $0046C3A0;
+  T63_SPRITES: array[0..1, 0..3] of Integer =
+    ((184, 185, 186, 187),        { going left  }
+     (188, 189, 190, 191));       { going right }
+  T63_FIRE_AT_ADDR  = $0046C3CC;
+  T63_SHOT_SPD_ADDR = $0046C3C0;
+  T63_RECOVER_ADDR  = $0046C3D8;
+  T63_COOLDOWN_ADDR = $0046C3E4;
+  T63_FIRE_AT:  array[0..2] of Integer = (40, 40, 20);
+  T63_SHOT_SPD: array[0..2] of Integer = (2, 3, 3);
+  T63_RECOVER:  array[0..2] of Integer = (60, 60, 30);
+  T63_COOLDOWN: array[0..2] of Integer = (120, 120, 60);
+  T63_WALK_SPEED = $20;
+  T63_LEDGE_PROBE = $400;
+  T63_WAKE_X = 6;
+  T63_WAKE_Y = 2;
+  T63_AIM_FRAME = 2;
+  T63_FIRE_FRAME = 3;
+  T63_SHOT_TYPE = $39;      { 57 ... }
+  T63_SHOT_VARIANT = 1;     { ... variant 1, the skimmer }
+  T63_SHOT_AHEAD = $C;      { twelve times its own velocity }
+  T63_SHOT_DROP = $80;      { 4 px below }
+  T63_SND_FIRE = $2B;
+
+  T64_FRAMES = 2;  T64_TICKS = 2;
+  T64_TABLE_ADDR = $0046C3F0;
+  T64_SPRITES: array[0..T64_FRAMES - 1] of Integer = (420, 421);
+  T64_WAIT_ADDR = $0046C3F8;
+  T64_REST_ADDR = $0046C404;
+  T64_RISE_ADDR = $0046C410;
+  T64_WAIT: array[0..2] of Integer = (30, 20, 10);   { times EF_VARIANT }
+  T64_REST: array[0..2] of Integer = (60, 40, 20);
+  T64_RISE: array[0..2] of Integer = (2, 3, 4);
+  T64_NUDGE = $200;         { 16 px right, once, on its first frame }
+  T64_GRAVITY = 4;
+  T64_TERMINAL = $200;
+  T64_RISE_SCALE = -$10;
+  T64_WAVE_TYPE = 3;
+  T64_WAVE_OUT = $300;      { 24 px to each side ... }
+  T64_WAVE_DROP = $100;     { ... and 8 px down }
+  T64_WAVE_SPEED = $20;
+  T64_SND_SLAM = $2A;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -1821,6 +1898,16 @@ procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
 { 0x0045DC84. A walker that recomputes its own vulnerability every frame
   from which way it is heading relative to you. }
 procedure EntityUpdate_Type62(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045DDF4. Walks, stops to fire one type-57 skimmer, then turns round.
+  See the T63_ block. }
+procedure EntityUpdate_Type63(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0045E030. Drops from the ceiling, sends a wave each way along the
+  floor, rests, and climbs back. }
+procedure EntityUpdate_Type64(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -3332,6 +3419,185 @@ begin
     Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X])
   else
     Dec(E.Raw[EF_CHILD_A]);
+end;
+
+procedure EntityUpdate_Type63(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, PlayerX: Integer;
+  Player: PEntity;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame > High(T63_SPRITES[0])) then
+    Frame := 0;
+  if E.Raw[EF_VEL_X] < 0 then
+    E.Raw[EF_ANIM_ID] := T63_SPRITES[0][Frame];
+  if E.Raw[EF_VEL_X] > 0 then
+    E.Raw[EF_ANIM_ID] := T63_SPRITES[1][Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+  Player := World.Pool.Entity(SLOT_SINGLE_FIRST);
+  PlayerX := Player^.Raw[EF_POS_X];
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    E.Raw[EF_VEL_X] := T63_WALK_SPEED;
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Dec(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] < 1 then
+    begin
+      E.Raw[EF_BLOCK_B] := T63_TICKS;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T63_FRAMES;
+    end;
+
+    if (World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold)
+       or (World.TileAtX(E, E.Raw[EF_VEL_X], False, T63_LEDGE_PROBE)
+           < World.SolidThreshold) then
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    if E.Raw[EF_CHILD_A] > 0 then
+      Dec(E.Raw[EF_CHILD_A]);
+
+    { Off cooldown, in range, AND already heading your way. }
+    if (E.Raw[EF_CHILD_A] = 0)
+       and EntitiesOverlap(E, Player^, T63_WAKE_X, T63_WAKE_Y)
+       and (((PlayerX < E.Raw[EF_POS_X]) and (E.Raw[EF_VEL_X] < 0))
+            or ((E.Raw[EF_POS_X] < PlayerX) and (E.Raw[EF_VEL_X] > 0))) then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_FLAG1C] := T63_AIM_FRAME;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    { An equality, not a threshold - so exactly one shot. }
+    if T63_FIRE_AT[D] = E.Raw[EF_CHILD_A] then
+    begin
+      World.PlaySound(T63_SND_FIRE);
+      Slot := World.Spawn(EKIND_MINOR, T63_SHOT_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS
+                            + E.Raw[EF_VEL_X] * T63_SHOT_AHEAD,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS + T63_SHOT_DROP);
+      World.SetSpawnField(Slot, EF_VARIANT, T63_SHOT_VARIANT);
+      World.SetSpawnField(Slot, EF_VEL_X, T63_SHOT_SPD[D] * E.Raw[EF_VEL_X]);
+      E.Raw[EF_FLAG1C] := T63_FIRE_FRAME;
+    end;
+
+    if T63_RECOVER[D] < E.Raw[EF_CHILD_A] then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_CHILD_A] := T63_COOLDOWN[D];
+      E.Raw[EF_FLAG1C] := 0;
+      { And it always walks back the way it came. }
+      E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type64(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame, D, Slot, Rise: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if (Frame < 0) or (Frame >= T64_FRAMES) then
+    Frame := 0;
+  E.Raw[EF_ANIM_ID] := T64_SPRITES[Frame];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  D := World.PlayerDifficulty;
+  if (D < 0) or (D > 2) then
+    D := 0;
+
+  { Outside every state - it flaps at the same rate throughout. }
+  Inc(E.Raw[EF_BLOCK_B]);
+  if E.Raw[EF_BLOCK_B] > T64_TICKS then
+  begin
+    E.Raw[EF_BLOCK_B] := 0;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T64_FRAMES;
+  end;
+
+  if E.Raw[EF_STATE] = 0 then
+  begin
+    E.Raw[EF_STATE] := 1;
+    Inc(E.Raw[EF_POS_X], T64_NUDGE);
+  end;
+
+  if E.Raw[EF_STATE] = 1 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    { Scaled by the variant, so a row of them drops in sequence - and a
+      variant of 0 gives a threshold of 0 and drops at once. }
+    if E.Raw[EF_CHILD_A] > T64_WAIT[D] * E.Raw[EF_VARIANT] then
+    begin
+      E.Raw[EF_STATE] := 2;
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_VEL_Y] := 0;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 2 then
+  begin
+    Inc(E.Raw[EF_VEL_Y], T64_GRAVITY);
+    if E.Raw[EF_VEL_Y] > T64_TERMINAL then
+      E.Raw[EF_VEL_Y] := T64_TERMINAL;
+
+    if World.TileAtY(E, E.Raw[EF_VEL_Y], False) >= World.SolidThreshold then
+    begin
+      World.PlaySound(T64_SND_SLAM);
+      Slot := World.Spawn(EKIND_MINOR, T64_WAVE_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS - T64_WAVE_OUT,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS + T64_WAVE_DROP);
+      World.SetSpawnField(Slot, EF_VEL_X, -T64_WAVE_SPEED);
+      Slot := World.Spawn(EKIND_MINOR, T64_WAVE_TYPE,
+                          E.Raw[EF_POS_X] - POSITION_BIAS + T64_WAVE_OUT,
+                          E.Raw[EF_POS_Y] - POSITION_BIAS + T64_WAVE_DROP);
+      World.SetSpawnField(Slot, EF_VEL_X, T64_WAVE_SPEED);
+      E.Raw[EF_STATE] := 3;
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
+
+  if E.Raw[EF_STATE] = 3 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T64_REST[D] then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      E.Raw[EF_STATE] := 4;
+    end;
+  end;
+
+  if E.Raw[EF_STATE] = 4 then
+  begin
+    Rise := T64_RISE[D] * T64_RISE_SCALE;
+    E.Raw[EF_VEL_Y] := Rise;
+    if World.TileAtY(E, Rise, False) >= World.SolidThreshold then
+    begin
+      E.Raw[EF_STATE] := 1;
+      E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
+    end;
+    Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
+  end;
 end;
 
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
@@ -6020,11 +6286,13 @@ begin
       60: EntityUpdate_Type60(E^, AGameState, World);
       61: EntityUpdate_Type61(E^, AGameState, World);
       62: EntityUpdate_Type62(E^, AGameState, World);
+      63: EntityUpdate_Type63(E^, AGameState, World);
+      64: EntityUpdate_Type64(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 18 arms are in HANDLER_ADDR, untranslated }
+      { the other 16 arms are in HANDLER_ADDR, untranslated }
     end;
 
     { --- push the entity onto its sprite ---------------------------------
