@@ -1267,6 +1267,14 @@ var
   EntitiesLive:  Integer = 0;
   EntitiesDrawn: Integer = 0;
 
+  { NOT in the original. Entity_UpdateAll's switch is a jump table with an arm
+    for every type but 0, 18 and 20, so the original has no fall-through case
+    at all. This counts the reconstruction's, and exists so that "every arm in
+    the jump table has a Pascal case" can be a test rather than a comment:
+    --selftest-entities drives one entity of each armed type through
+    EntityUpdateAll and requires this to stay at zero. }
+  EntitiesUnhandled: Integer = 0;
+
 implementation
 
 

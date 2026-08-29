@@ -99,6 +99,9 @@
       0x0045F668  type 75  the door that lets type 73 out of state 3
       0x0045F744  type 76  a sweeper that turns a full circle by steps
       0x0045F85C  type 77  the final boss - six phases, each a six-step script
+      0x0046023C  type 78  the boss's other half, positioned off it every frame
+      0x004603B4  type 79  everything the boss emits, six variants of it
+      0x004607E8  type 80  two small effects sharing one counter
 
   And the dispatcher they hang off:
 
@@ -2164,6 +2167,120 @@ const
   T77_SND_SLAM = $30;
   T77_SND_LOB = $2E;
 
+  { --- Types 78, 79 and 80, the boss's furniture ------------------------
+    TYPE 78 is a second body that has no behaviour of its own at all: every
+    frame it reads the boss's state, frame and facing, and writes its own
+    position and sprite from offset tables. It never moves itself, never
+    animates on its own clock, and never decides anything.
+
+    What it does decide is whether it hurts you. It sets EF_TOUCH_KIND to 1
+    while the boss is idle, turning, dashing or recoiling AND during the
+    ground slam - and to 0 for the whole of the lob. So the lob's wind-up is
+    the one window where you can stand next to this half of the boss safely.
+
+    Its idle height is chosen by the boss's frame: -0x680 on frames 0, 3 and
+    5 and -0x6A0 otherwise. Those are the frames of two different animations,
+    which is why the list looks arbitrary.
+
+    It dies when the boss reaches PHASE 5 - `if owner's block A[1] = 5 then
+    my EF_HP := 0` - so the last phase is fought against the boss alone.
+
+    TYPE 79 is everything the boss emits, six variants deep, and three of
+    them are pure decoration that zero their own EF_TOUCH_KIND on their first
+    frame. The two that matter:
+
+      3  the lob's projectile. It stops dead on a wall and arms a 15-frame
+         death timer; if it has not hit anything in 120 frames it arms the
+         same timer anyway, and it dies when the timer reaches 1 rather than
+         0 - one frame early, and deliberate, because Entity_UpdateAll
+         decrements it after the handler runs.
+      5  the summoner, and the thing that frees the boss from state 8. It
+         cycles a six-frame animation and spawns a type 72 flyer aimed at the
+         player on each completion - THREE of them - and on the fourth pass
+         instead writes state 1 back into the boss and destroys itself. That
+         is the fifth parent-child arrangement in the game and the only one
+         where the child fires a burst before handing control back.
+
+    Variant 0 is the boss's other attached piece and dies at phase 1, so the
+    fight visibly sheds parts: piece 0 at phase 1, type 78 at phase 5.
+
+    TYPE 80 is two unrelated effects, and its two variants SHARE a counter
+    increment. EF_BLOCK_B is incremented once at the top for both, and then
+    AGAIN inside variant 1 - so variant 0 advances every nine frames and
+    variant 1 every two, from the same field, because one of them is counted
+    twice. Reproduced as written. }
+  T78_SLAM_X_ADDR = $0046CA28;
+  T78_SLAM_Y_ADDR = $0046CA48;
+  T78_SLAM_X: array[0..1, 0..3] of Integer =
+    ((0, 68, -16, -60), (0, -68, 16, 60));
+  T78_SLAM_Y: array[0..3] of Integer = (-54, 0, -54, 0);
+  T78_LOB_X_ADDR = $0046CA70;
+  T78_LOB_Y_ADDR = $0046CA88;
+  T78_LOB_X: array[0..1, 0..2] of Integer = ((60, -4, 8), (-60, 4, -8));
+  T78_LOB_Y: array[0..2] of Integer = (-22, 0, -72);
+  T78_IDLE_TABLE_ADDR = $0046C9F8;
+  T78_IDLE_SPRITES: array[0..1] of Integer = (600, 601);
+  T78_SLAM_TABLE_ADDR = $0046CA08;
+  T78_SLAM_SPRITES: array[0..1, 0..3] of Integer =
+    ((607, 602, 606, 603), (606, 604, 607, 605));
+  T78_LOB_TABLE_ADDR = $0046CA58;
+  T78_LOB_SPRITES: array[0..1, 0..2] of Integer =
+    ((608, 610, 607), (609, 611, 606));
+  T78_IDLE_X_ADDR = $0046CA00;
+  T78_IDLE_X: array[0..1] of Integer = (-7, 7);
+  T78_OFFSET_SCALE = $20;
+  T78_IDLE_HIGH = -$680;    { on the boss's frames 0, 3 and 5 ... }
+  T78_IDLE_LOW  = -$6A0;    { ... and on every other frame }
+  T78_LEAVES_AT_PHASE = 5;
+
+  T79_V0_TABLE_ADDR = $0046CA94;
+  T79_V0_SPRITES: array[0..1] of Integer = (532, 533);
+  T79_V1_TABLE_ADDR = $0046CAA4;
+  T79_V1_SPRITES: array[0..1] of Integer = (612, 613);
+  T79_V2_TABLE_ADDR = $0046CAB8;
+  T79_V2_SPRITES: array[0..1] of Integer = (613, 612);   { v1's, reversed }
+  T79_V3_TABLE_ADDR = $0046CACC;
+  T79_V3_SPRITES: array[0..1, 0..1] of Integer = ((614, 615), (616, 617));
+  T79_V4_TABLE_ADDR = $0046CAE8;
+  T79_V4_SPRITES: array[0..3] of Integer = (291, 292, 293, 294);
+  T79_V5_TABLE_ADDR = $0046CAF8;
+  T79_V5_SPRITES: array[0..5] of Integer = (471, 470, 469, 468, 467, 466);
+  T79_V0_X_ADDR = $0046CA9C;
+  T79_V1_X_ADDR = $0046CAAC;
+  T79_V1_Y_ADDR = $0046CAB4;
+  T79_V2_X_ADDR = $0046CAC0;
+  T79_V2_Y_ADDR = $0046CAC8;
+  T79_V0_X: array[0..1] of Integer = (1, -1);
+  T79_V1_X: array[0..1] of Integer = (-80, 80);
+  T79_V1_Y: array[0..0] of Integer = (-48);
+  T79_V2_X: array[0..1] of Integer = (80, -80);
+  T79_V2_Y: array[0..0] of Integer = (-48);
+  T79_V0_HIGH = -$160;      { on the boss's frames 1, 2 and 4 }
+  T79_V0_LOW  = -$180;
+  T79_V0_LEAVES_AT_PHASE = 1;
+  T79_V1_LIFE = 10;
+  T79_V2_LIFE = 2;
+  T79_LOB_SND_EVERY = $1E;
+  T79_LOB_FUSE = $F;        { armed on a wall, or on running out of time }
+  T79_LOB_LIFE = $78;
+  T79_V4_FRAMES = 4;
+  T79_SUMMON_WAIT = $1E;
+  T79_SUMMON_LAST = 5;
+  T79_SUMMONS = 4;          { three flyers, and the fourth pass hands back }
+  T79_FLYER_TYPE = $48;     { 72 ... }
+  T79_FLYER_VARIANT = 1;    { ... variant 1, the one that picks its sprite
+                              by heading }
+  T79_SND_LOB = $2E;
+  T79_SND_SUMMON = $34;
+
+  T80_V0_FRAMES = 3;  T80_V0_TICKS = 8;
+  T80_V0_TABLE_ADDR = $0046CB10;
+  T80_V0_SPRITES: array[0..T80_V0_FRAMES - 1] of Integer = (582, 583, 599);
+  T80_V1_FRAMES = 4;  T80_V1_TICKS = 2;
+  T80_V1_TABLE_ADDR = $0046CB1C;
+  T80_V1_SPRITES: array[0..T80_V1_FRAMES - 1] of Integer = (64, 65, 66, 65);
+  T80_V1_BLINK = 2;
+
   { --- Types 8 and 26, the two self-destructing effects -----------------
     Both are spawned by something else, play a short animation, and call
     Entity_Destroy on themselves. Between them they are why the screen filled
@@ -2526,6 +2643,20 @@ procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
 { 0x0045F85C. The final boss: six phases, each running a six-step script
   out of two tables. See the T77_ block. }
 procedure EntityUpdate_Type77(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x0046023C. The boss's second body. It has no behaviour: it reads the
+  boss's state every frame and writes its own position and sprite. }
+procedure EntityUpdate_Type78(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x004603B4. Everything type 77 emits. Variant 5 is what frees the boss
+  from state 8, after throwing three flyers. See the T79_ block. }
+procedure EntityUpdate_Type79(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+
+{ 0x004607E8. Two small effects that share one counter increment. }
+procedure EntityUpdate_Type80(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
@@ -5541,6 +5672,329 @@ begin
   end;
 end;
 
+procedure EntityUpdate_Type78(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Owner, Dir, OwnerState, OwnerFrame, F: Integer;
+
+  function Clamp(V, Hi: Integer): Integer;
+  begin
+    Result := V;
+    if (Result < 0) or (Result > Hi) then
+      Result := 0;
+  end;
+
+begin
+  if World.Pool = nil then
+    Exit;
+  Owner := E.Raw[EF_OWNER];
+  Dir := Ord(World.Pool.Field(Owner, EF_VEL_X) > 0);
+  OwnerState := World.Pool.Field(Owner, EF_STATE);
+  OwnerFrame := World.Pool.Field(Owner, EF_FLAG1C);
+
+  { The slam and the lob place it AND set its sprite, before the dying
+    check; the idle placement happens after. That order is the original's. }
+  if OwnerState = 4 then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 1;
+    E.Raw[EF_FLAG1C] := OwnerFrame - 6;
+    F := Clamp(E.Raw[EF_FLAG1C], 3);
+    E.Raw[EF_POS_X] := T78_SLAM_X[Dir][F] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    E.Raw[EF_POS_Y] := T78_SLAM_Y[F] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_Y);
+  end;
+  if OwnerState = 5 then
+  begin
+    { Harmless for the whole of the lob - the one safe window. }
+    E.Raw[EF_TOUCH_KIND] := 0;
+    E.Raw[EF_FLAG1C] := OwnerFrame - 10;
+    F := Clamp(E.Raw[EF_FLAG1C], 2);
+    E.Raw[EF_POS_X] := T78_LOB_X[Dir][F] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    E.Raw[EF_POS_Y] := T78_LOB_Y[F] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_Y);
+  end;
+
+  if (OwnerState >= 1) and (OwnerState <= 3) or (OwnerState = 6) then
+    E.Raw[EF_ANIM_ID] := T78_IDLE_SPRITES[Dir];
+  if OwnerState = 4 then
+    E.Raw[EF_ANIM_ID] := T78_SLAM_SPRITES[Dir][Clamp(E.Raw[EF_FLAG1C], 3)];
+  if OwnerState = 5 then
+    E.Raw[EF_ANIM_ID] := T78_LOB_SPRITES[Dir][Clamp(E.Raw[EF_FLAG1C], 2)];
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  if (OwnerState >= 1) and (OwnerState <= 3) or (OwnerState = 6) then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 1;
+    E.Raw[EF_POS_X] := T78_IDLE_X[Dir] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    { Frames 0, 3 and 5 sit higher. They belong to two different
+      animations, which is why the list is not a range. }
+    if (OwnerFrame = 0) or (OwnerFrame = 3) or (OwnerFrame = 5) then
+      E.Raw[EF_POS_Y] := World.Pool.Field(Owner, EF_POS_Y) + T78_IDLE_HIGH
+    else
+      E.Raw[EF_POS_Y] := World.Pool.Field(Owner, EF_POS_Y) + T78_IDLE_LOW;
+  end;
+
+  { The boss sheds this half when it reaches its last phase. }
+  if World.Pool.Field(Owner, EF_BLOCK_A + 1) = T78_LEAVES_AT_PHASE then
+    E.Raw[EF_HP] := 0;
+end;
+
+procedure EntityUpdate_Type79(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Owner, Dir, Frame, Slot, OwnerFrame: Integer;
+
+  function Clamp(V, Hi: Integer): Integer;
+  begin
+    Result := V;
+    if (Result < 0) or (Result > Hi) then
+      Result := 0;
+  end;
+
+begin
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+  if World.Pool = nil then
+    Exit;
+
+  Owner := E.Raw[EF_OWNER];
+  { Everything it emits dies with it. }
+  if World.Pool.Field(Owner, EF_HP) = 0 then
+    E.Raw[EF_HP] := 0;
+  Dir := Ord(World.Pool.Field(Owner, EF_VEL_X) > 0);
+  Frame := E.Raw[EF_FLAG1C];
+
+  if E.Raw[EF_VARIANT] = 0 then
+    E.Raw[EF_ANIM_ID] := T79_V0_SPRITES[Dir];
+  if E.Raw[EF_VARIANT] = 1 then
+    E.Raw[EF_ANIM_ID] := T79_V1_SPRITES[Dir];
+  if E.Raw[EF_VARIANT] = 2 then
+    E.Raw[EF_ANIM_ID] := T79_V2_SPRITES[Dir];
+  if (E.Raw[EF_VARIANT] = 3) and (E.Raw[EF_VEL_X] > 0) then
+    E.Raw[EF_ANIM_ID] := T79_V3_SPRITES[0][Clamp(Frame, 1)];
+  if (E.Raw[EF_VARIANT] = 3) and (E.Raw[EF_VEL_X] < 0) then
+    E.Raw[EF_ANIM_ID] := T79_V3_SPRITES[1][Clamp(Frame, 1)];
+  if E.Raw[EF_VARIANT] = 4 then
+    E.Raw[EF_ANIM_ID] := T79_V4_SPRITES[Clamp(Frame, T79_V4_FRAMES - 1)];
+  if E.Raw[EF_VARIANT] = 5 then
+    E.Raw[EF_ANIM_ID] := T79_V5_SPRITES[Clamp(Frame, T79_SUMMON_LAST)];
+
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    E.Raw[EF_POS_X] := T79_V0_X[Dir] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    OwnerFrame := World.Pool.Field(Owner, EF_FLAG1C);
+    if (OwnerFrame = 1) or (OwnerFrame = 2) or (OwnerFrame = 4) then
+      E.Raw[EF_POS_Y] := World.Pool.Field(Owner, EF_POS_Y) + T79_V0_HIGH
+    else
+      E.Raw[EF_POS_Y] := World.Pool.Field(Owner, EF_POS_Y) + T79_V0_LOW;
+    { and this piece goes four phases before type 78 does }
+    if World.Pool.Field(Owner, EF_BLOCK_A + 1) = T79_V0_LEAVES_AT_PHASE then
+      E.Raw[EF_HP] := 0;
+  end;
+
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 0;
+    if E.Raw[EF_DEATH_TIMER] = 0 then
+      E.Raw[EF_DEATH_TIMER] := 2;
+    E.Raw[EF_POS_X] := T79_V1_X[Dir] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    E.Raw[EF_POS_Y] := T79_V1_Y[0] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_Y);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T79_V1_LIFE then
+    begin
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 2 then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 0;
+    if E.Raw[EF_DEATH_TIMER] = 0 then
+      E.Raw[EF_DEATH_TIMER] := 2;
+    E.Raw[EF_POS_X] := T79_V2_X[Dir] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_X);
+    E.Raw[EF_POS_Y] := T79_V2_Y[0] * T78_OFFSET_SCALE
+                       + World.Pool.Field(Owner, EF_POS_Y);
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T79_V2_LIFE then
+    begin
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 3 then
+  begin
+    Inc(E.Raw[EF_CHILD_A]);
+    if E.Raw[EF_CHILD_A] > T79_LOB_SND_EVERY then
+    begin
+      E.Raw[EF_CHILD_A] := 0;
+      World.PlaySound(T79_SND_LOB);
+    end;
+
+    if World.TileAtX(E, E.Raw[EF_VEL_X], False) >= World.SolidThreshold then
+    begin
+      E.Raw[EF_VEL_X] := 0;
+      E.Raw[EF_DEATH_TIMER] := T79_LOB_FUSE;
+    end;
+    Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
+
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > 2 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod 2;
+    end;
+
+    Inc(E.Raw[EF_CHILD_B]);
+    if (E.Raw[EF_CHILD_B] > T79_LOB_LIFE) and (E.Raw[EF_DEATH_TIMER] = 0) then
+      E.Raw[EF_DEATH_TIMER] := T79_LOB_FUSE;
+    { At ONE, not zero: Entity_UpdateAll ticks the timer after this runs. }
+    if E.Raw[EF_DEATH_TIMER] = 1 then
+    begin
+      World.DestroyEntity(E, False);
+      Exit;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 4 then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 0;
+    E.Raw[EF_VULN_KIND] := 0;
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > 2 then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      Inc(E.Raw[EF_FLAG1C]);
+      if E.Raw[EF_FLAG1C] > T79_V4_FRAMES - 1 then
+      begin
+        World.DestroyEntity(E, False);
+        Exit;
+      end;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 5 then
+  begin
+    E.Raw[EF_TOUCH_KIND] := 0;
+
+    if E.Raw[EF_STATE] = 0 then
+    begin
+      Inc(E.Raw[EF_BLOCK_B]);
+      if E.Raw[EF_BLOCK_B] > 2 then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod 2;
+      end;
+      Inc(E.Raw[EF_CHILD_A]);
+      if E.Raw[EF_CHILD_A] > T79_SUMMON_WAIT then
+      begin
+        E.Raw[EF_STATE] := 1;
+        E.Raw[EF_CHILD_A] := 0;
+        E.Raw[EF_FLAG1C] := 0;
+      end;
+    end;
+
+    if E.Raw[EF_STATE] = 1 then
+    begin
+      Inc(E.Raw[EF_BLOCK_B]);
+      if E.Raw[EF_BLOCK_B] > 2 then
+      begin
+        E.Raw[EF_BLOCK_B] := 0;
+        Inc(E.Raw[EF_FLAG1C]);
+        if E.Raw[EF_FLAG1C] > T79_SUMMON_LAST then
+        begin
+          Inc(E.Raw[EF_CHILD_B]);
+          if E.Raw[EF_CHILD_B] < T79_SUMMONS then
+          begin
+            E.Raw[EF_STATE] := 0;
+            E.Raw[EF_FLAG1C] := 0;
+            Slot := World.Spawn(EKIND_MINOR, T79_FLYER_TYPE,
+                                E.Raw[EF_POS_X] - POSITION_BIAS
+                                  - World.Layer.DeltaX,
+                                E.Raw[EF_POS_Y] - POSITION_BIAS
+                                  - World.Layer.DeltaY);
+            World.SetSpawnField(Slot, EF_OWNER, E.Raw[EF_SLOT]);
+            World.SetSpawnField(Slot, EF_VARIANT, T79_FLYER_VARIANT);
+            World.SetSpawnField(Slot, EF_FACING,
+              AngleBetween(E.Raw[EF_POS_X], E.Raw[EF_POS_Y],
+                           World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X),
+                           World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_Y)));
+            World.PlaySound(T79_SND_SUMMON);
+          end
+          else
+          begin
+            { The fourth pass hands the boss back its idle state. }
+            World.Pool.SetField(Owner, EF_STATE, 1);
+            World.Pool.SetField(Owner, EF_BLOCK_B, 0);
+            World.Pool.SetField(Owner, EF_FLAG1C, 0);
+            World.DestroyEntity(E, False);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure EntityUpdate_Type80(var E: TEntity; AGameState: Integer;
+                              World: TEntityWorld);
+var
+  Frame: Integer;
+begin
+  Frame := E.Raw[EF_FLAG1C];
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    if (Frame < 0) or (Frame >= T80_V0_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T80_V0_SPRITES[Frame];
+  end;
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    if (Frame < 0) or (Frame >= T80_V1_FRAMES) then
+      Frame := 0;
+    E.Raw[EF_ANIM_ID] := T80_V1_SPRITES[Frame];
+  end;
+
+  if EntityUpdateDying(E, AGameState, World) then
+    Exit;
+
+  { Shared by both variants - and variant 1 adds a second one below, which
+    is why it runs at more than twice variant 0's rate. }
+  Inc(E.Raw[EF_BLOCK_B]);
+
+  if E.Raw[EF_VARIANT] = 0 then
+  begin
+    if E.Raw[EF_STATE] = 0 then
+      E.Raw[EF_STATE] := 1;
+    if E.Raw[EF_BLOCK_B] > T80_V0_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T80_V0_FRAMES;
+    end;
+  end;
+
+  if E.Raw[EF_VARIANT] = 1 then
+  begin
+    if E.Raw[EF_DEATH_TIMER] = 0 then
+      E.Raw[EF_DEATH_TIMER] := T80_V1_BLINK;
+    Inc(E.Raw[EF_BLOCK_B]);
+    if E.Raw[EF_BLOCK_B] > T80_V1_TICKS then
+    begin
+      E.Raw[EF_BLOCK_B] := 0;
+      E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T80_V1_FRAMES;
+    end;
+  end;
+end;
+
 procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
@@ -8242,11 +8696,18 @@ begin
       75: EntityUpdate_Type75(E^, AGameState, World);
       76: EntityUpdate_Type76(E^, AGameState, World);
       77: EntityUpdate_Type77(E^, AGameState, World);
+      78: EntityUpdate_Type78(E^, AGameState, World);
+      79: EntityUpdate_Type79(E^, AGameState, World);
+      80: EntityUpdate_Type80(E^, AGameState, World);
       16: EntityUpdate_Type16_Sign(E^);
       22: EntityUpdate_Type22(E^, AGameState, World);
       26: EntityUpdate_Type26(E^, AGameState, World);
       36: EntityUpdate_Type36_FallingItem(E^, AGameState, World);
-      { the other 3 arms are in HANDLER_ADDR, untranslated }
+      { Every arm in HANDLER_ADDR now has a case above. This else is not in
+        the original - the compiler emitted a jump table with no default -
+        and exists only so the claim can be checked; see EntitiesUnhandled. }
+    else
+      Inc(EntitiesUnhandled);
     end;
 
     { --- push the entity onto its sprite ---------------------------------

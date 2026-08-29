@@ -4374,6 +4374,28 @@ begin
     Pin('type 77 slam divisor', T77_SLAM_DIV_ADDR, 3, @T77_SLAM_DIV[0], 3);
     Pin('type 77 lob divisor', T77_SHOT_DIV_ADDR, 3, @T77_SHOT_DIV[0], 3);
     Pin('type 77 lob speed', T77_LOB_SPEED_ADDR, 3, @T77_LOB_SPEED[0], 3);
+    Pin('type 78 idle sprite', T78_IDLE_TABLE_ADDR, 2, @T78_IDLE_SPRITES[0], 2);
+    Pin('type 78 idle x', T78_IDLE_X_ADDR, 2, @T78_IDLE_X[0], 2);
+    Pin('type 78 slam sprites', T78_SLAM_TABLE_ADDR, 8,
+        @T78_SLAM_SPRITES[0][0], 8);
+    Pin('type 78 slam x', T78_SLAM_X_ADDR, 8, @T78_SLAM_X[0][0], 8);
+    Pin('type 78 slam y', T78_SLAM_Y_ADDR, 4, @T78_SLAM_Y[0], 4);
+    Pin('type 78 lob sprites', T78_LOB_TABLE_ADDR, 6, @T78_LOB_SPRITES[0][0], 6);
+    Pin('type 78 lob x', T78_LOB_X_ADDR, 6, @T78_LOB_X[0][0], 6);
+    Pin('type 78 lob y', T78_LOB_Y_ADDR, 3, @T78_LOB_Y[0], 3);
+    Pin('type 79 v0 sprites', T79_V0_TABLE_ADDR, 2, @T79_V0_SPRITES[0], 2);
+    Pin('type 79 v0 x', T79_V0_X_ADDR, 2, @T79_V0_X[0], 2);
+    Pin('type 79 v1 sprites', T79_V1_TABLE_ADDR, 2, @T79_V1_SPRITES[0], 2);
+    Pin('type 79 v1 x', T79_V1_X_ADDR, 2, @T79_V1_X[0], 2);
+    Pin('type 79 v1 y', T79_V1_Y_ADDR, 1, @T79_V1_Y[0], 1);
+    Pin('type 79 v2 sprites', T79_V2_TABLE_ADDR, 2, @T79_V2_SPRITES[0], 2);
+    Pin('type 79 v2 x', T79_V2_X_ADDR, 2, @T79_V2_X[0], 2);
+    Pin('type 79 v2 y', T79_V2_Y_ADDR, 1, @T79_V2_Y[0], 1);
+    Pin('type 79 v3 sprites', T79_V3_TABLE_ADDR, 4, @T79_V3_SPRITES[0][0], 4);
+    Pin('type 79 v4 sprites', T79_V4_TABLE_ADDR, 4, @T79_V4_SPRITES[0], 4);
+    Pin('type 79 v5 sprites', T79_V5_TABLE_ADDR, 6, @T79_V5_SPRITES[0], 6);
+    Pin('type 80 v0 sprites', T80_V0_TABLE_ADDR, 3, @T80_V0_SPRITES[0], 3);
+    Pin('type 80 v1 sprites', T80_V1_TABLE_ADDR, 4, @T80_V1_SPRITES[0], 4);
     Pin('hit sounds', HIT_SOUND_ADDR, 4, @HIT_SOUNDS[0], HIT_SOUND_COUNT);
     Log.Add(Format('the whole sweep - %d tables, extent and values: %d wrong',
       [Swept, Bad]));
@@ -5618,6 +5640,45 @@ begin
       Inc(Result);
     end;
     L.DeltaX := 0; L.DeltaY := 0;
+
+    { --- every arm in the jump table has a Pascal case --------------------
+      The comment in EntityHandlers.pas used to say "the other N arms are
+      untranslated" and was maintained by hand. Now that the count is zero
+      the claim is worth checking rather than writing down: drive ONE entity
+      of every armed type through EntityUpdateAll and require the
+      fall-through counter to stay at zero. Table[] came out of akuji.exe's
+      own jump table above, so the list of types being demanded is the
+      binary's, not ours.
+
+      The three types with no arm are demanded to fall through, which also
+      proves the counter is wired up and the check is not vacuous. }
+    Bad := 0;
+    for I := 0 to ENTITY_TYPE_COUNT - 1 do
+    begin
+      Pool.Clear;
+      Place($21, I, SPRITE_NONE, 160, 120);
+      EntitiesUnhandled := 0;
+      Run(GS_PLAY);
+      if (Table[I] <> HANDLER_NO_ARM_TARGET) and (EntitiesUnhandled <> 0) then
+      begin
+        Log.Add(Format('  type %d has an arm at 0x%.6X but no case',
+          [I, Table[I]]));
+        Inc(Bad);
+      end;
+      if (Table[I] = HANDLER_NO_ARM_TARGET) and (EntitiesUnhandled = 0) then
+      begin
+        Log.Add(Format('  type %d has no arm but the case handled it', [I]));
+        Inc(Bad);
+      end;
+    end;
+    Log.Add('');
+    if Bad = 0 then
+      Log.Add(Format('all %d armed types reach a case, and the %d unarmed '
+        + 'ones fall through', [ENTITY_TYPE_COUNT - NoArm, NoArm]))
+    else
+      Log.Add(Format('FAILED: %d types disagree with the jump table', [Bad]));
+    Inc(Result, Bad);
+    Pool.Clear;
 
     { The dispatcher's arms actually reach the handlers they name. Every other
       check of types 24 and 25 calls them DIRECTLY, so a case arm wired to the
