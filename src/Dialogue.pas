@@ -175,6 +175,13 @@ type
   { What the overlay needs to know about the world it interrupts. }
   TOverlayMode = (omBox, omPanel);
 
+  { What PowerUp_Show needs from the audio layer. Callbacks rather than direct
+    calls so this unit stays clear of the component layer, the same way
+    Title.pas and Ending.pas do. }
+  TOverlaySound = procedure(Id: Integer) of object;
+  TOverlayMusic = procedure(Track: Integer; Loop: Boolean) of object;
+  TOverlayStopMusic = procedure of object;
+
   { The message overlay as the interpreter's collaborator. It owns no drawing
     surface - the form hands it a canvas - and it advances the script itself,
     which is what the original does.
@@ -198,6 +205,9 @@ type
     FScript: TEventScript;
     FRunner: TEventRunner;
     FPlayer: PPlayerState;
+    FOnSound: TOverlaySound;
+    FOnMusic: TOverlayMusic;
+    FOnStopMusic: TOverlayStopMusic;
     procedure TakePage(const Text: string);
   public
     { Where the script and the state it answers into live. Set once. }
@@ -227,6 +237,10 @@ type
 
     property Active: Boolean read FActive;
     property Mode: TOverlayMode read FMode;
+    property OnSound: TOverlaySound read FOnSound write FOnSound;
+    property OnMusic: TOverlayMusic read FOnMusic write FOnMusic;
+    property OnStopMusic: TOverlayStopMusic read FOnStopMusic
+                                            write FOnStopMusic;
     { The panel stays up for as long as its fanfare plays - Overlay_Update
       asks the music player and closes when it stops. The form owns the
       player, so it answers. }
@@ -347,10 +361,21 @@ begin
     Exit;
 
   Variant := FPool.Field(Slot, EF_VARIANT);
-  PowerUpGrant(FPlayer^, Variant);
+
+  { The audio comes FIRST, before the panel is raised - that is the original's
+    order, and the fanfare is what dismisses the panel again. Without the stop
+    the looping stage music keeps IsPlaying true forever and the overlay never
+    closes; that was the softlock on the dash orb. }
+  if Assigned(FOnSound) then
+    FOnSound(POWERUP_SOUND);
+  if Assigned(FOnStopMusic) then
+    FOnStopMusic;
+  if Assigned(FOnMusic) then
+    FOnMusic(POWERUP_MIDI, False);
 
   FMode := omPanel;
   FActive := True;
+  PowerUpGrant(FPlayer^, Variant);
   FPanelText := POWERUP_PREFIX + PowerUpName(Variant) + POWERUP_SUFFIX;
 
   { PowerUp_Show destroys the entity it granted from. }

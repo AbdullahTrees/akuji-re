@@ -26,6 +26,28 @@ uses
   Entities, GameSession, SpritePool, Dialogue;
 
 type
+  { Forward, so the host below can hold one. }
+  TFrm_main = class;
+
+  { WHY THIS EXISTS. GameStartOrLoad asks its host `Opening` and returns
+    immediately while that is True - the cutscene gates the whole of starting a
+    game, exactly as Game_StartOrLoad does in the original, where Opening_Update
+    is called every frame the state is 40 and nothing else happens until it is
+    over.
+
+    GmMain was passing a bare TStartHost, whose Opening returns False
+    unconditionally. So the gate never closed, the cutscene never ran, and the
+    story section simply did not appear. Opening.pas was correct the whole time
+    - the trace confirms its slide timings frame for frame - and had nothing
+    calling it. }
+  TFormStartHost = class(TStartHost)
+  private
+    FForm: TFrm_main;
+  public
+    constructor Create(AForm: TFrm_main);
+    function Opening: Boolean; override;
+  end;
+
   TFrm_main = class(TForm)
     DDDD1: TDDDD;
     Joy: TDDIDEX;
@@ -69,6 +91,7 @@ type
     FDebugFps: Integer;
     FUseArchive: Boolean;     { p_UseArchive 0x0046CCB4 }
     FEndingBmp: TBitmap;      { the surface at 0x0046D1F0 }
+    FOpeningBmp: TBitmap;     { bmp\op%.3d.bmp, one slide at a time }
     FConfirmLatch: Boolean;
     { The running game. Everything that used to be inlined here - the player
       state, the camera, the entity pool, the events - lives in it now, so
@@ -96,6 +119,14 @@ type
     procedure DrawDebugOverlay;
     procedure SetFullScreen(Enable: Boolean);
     procedure DrawGameOver;
+    { The opening cutscene. Game_StartOrLoad calls Opening_Update every frame
+      while the state is 40, and does nothing else until it finishes - which is
+      why TStartHost.Opening gates the whole of GameStartOrLoad. }
+    function OpeningStep: Boolean;
+    procedure OpeningPicture(Id: Integer);
+    procedure OpeningMusic(Track: Integer; Loop: Boolean);
+    procedure OpeningStopMusic;
+    procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
     procedure EndingMusic(Track: Integer; Loop: Boolean);
     procedure EndingStopMusic;
@@ -225,7 +256,7 @@ begin
       which is right until Opening_Update and the playlist are translated -
       an opening that never runs is a cutscene that finishes instantly, and
       that is a truthful stub rather than a skipped step. }
-    FStartHost := TStartHost.Create;
+    FStartHost := TFormStartHost.Create(Self);
     FDialogue := TDialogueBox.Create;
     FPowerBmp := FArchive.LoadBitmapByName('power.bmp');
     FSession.EventHost := FDialogue;
@@ -268,6 +299,15 @@ begin
   FEnding.OnPicture := EndingPicture;
   FEnding.OnMusic := EndingMusic;
   FEnding.OnStopMusic := EndingStopMusic;
+  { PowerUp_Show's fanfare. The panel closes when this track ends, so without
+    it the overlay was waiting on the looping stage music - see Dialogue.pas. }
+  FDialogue.OnSound := TitleSound;
+  FDialogue.OnMusic := OpeningMusic;
+  FDialogue.OnStopMusic := OpeningStopMusic;
+  FOpening.OnPicture := OpeningPicture;
+  FOpening.OnMusic := OpeningMusic;
+  FOpening.OnStopMusic := OpeningStopMusic;
+  FOpening.OnFade := OpeningFade;
   FGameOver.OnRestart := GameOverRestart;
   FGameOver.OnFade := GameOverFade;
   FGameOver.OnMusic := GameOverMusic;
@@ -544,6 +584,55 @@ end;
 
   The original keeps the surface in a global at 0x0046D1F0 and frees it on
   the next call; holding one TBitmap is the same lifetime. }
+{ One frame of the cutscene. True while it is still running, which is what
+  holds GameStartOrLoad at the door.
+
+  The trace has this at 4726 frames for ten slides - 480 each for 1..7, 120 for
+  the short slide 8, 480 for 9, and 765 for slide 10, which waits on the music
+  rather than on its own timer. Opening.pas already modelled all of that
+  correctly; nothing was driving it. }
+function TFrm_main.OpeningStep: Boolean;
+begin
+  { No fader is modelled, so FadeBusy is always False - DIVERGENCE DIV-005.
+    The sequence is the same, it just has no dissolve. }
+  Result := FOpening.Update(ConfirmPressed(FSession.Input),
+                            KbgmPlayer1.IsPlaying, False);
+  FOpening.Draw(DDDD1.Canvas, FFont, FOpeningBmp);
+end;
+
+procedure TFrm_main.OpeningPicture(Id: Integer);
+begin
+  FreeAndNil(FOpeningBmp);
+  if FArchive <> nil then
+    FOpeningBmp := FArchive.LoadBitmapByName(Format(OPENING_PICTURE_FMT, [Id]));
+end;
+
+procedure TFrm_main.OpeningMusic(Track: Integer; Loop: Boolean);
+begin
+  KbgmPlayer1.Play(Track, Loop);
+end;
+
+procedure TFrm_main.OpeningStopMusic;
+begin
+  KbgmPlayer1.Stop;
+end;
+
+procedure TFrm_main.OpeningFade(FadeIn: Boolean);
+begin
+  { DIVERGENCE DIV-005 - no fader is modelled. }
+end;
+
+constructor TFormStartHost.Create(AForm: TFrm_main);
+begin
+  inherited Create;
+  FForm := AForm;
+end;
+
+function TFormStartHost.Opening: Boolean;
+begin
+  Result := FForm.OpeningStep;
+end;
+
 procedure TFrm_main.EndingPicture(Index: Integer);
 begin
   FreeAndNil(FEndingBmp);
@@ -993,6 +1082,7 @@ begin
   FSession.Free;
   FDialogue.Free;
   FPowerBmp.Free;
+  FreeAndNil(FOpeningBmp);
   FStartHost.Free;
   FMap.Free;
   FStages.Free;

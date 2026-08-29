@@ -270,6 +270,17 @@ const
   { The two literals the name is concatenated between, at 0x004568B0 and
     0x004568BC. The padding above is what puts the gap in the finished
     sentence. }
+  { PowerUp_Show @ 0x00456698 plays effect 0x10, STOPS the music, and starts
+    playlist entry 4 without looping. Overlay_Update then ends the panel when
+    that track finishes - which is the only thing that dismisses it.
+
+    Missing all three was a softlock. The panel's dismiss condition is "the
+    music has stopped", and with no fanfare ever started it was being asked of
+    the LOOPING stage BGM, which never stops. Collecting the dash orb put the
+    game in a state nothing could leave. }
+  POWERUP_SOUND = $10;
+  POWERUP_MIDI  = 4;      { AutoLoadMidis[4] }
+
   POWERUP_PREFIX = '  ';
   POWERUP_SUFFIX = ' was recovered! ';
 

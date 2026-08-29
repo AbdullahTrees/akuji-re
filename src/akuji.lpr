@@ -2287,6 +2287,98 @@ begin
     Log.Add('OK - a continue is a new game with a file read over the top');
 end;
 
+{ The opening cutscene's timing, against the frame counts the REAL GAME
+  produced. tools/make_trace.py captured a 20,304 frame session; the slide
+  counter changed at these frames:
+
+      slide 1..7   480 frames each     8 seconds
+      slide 8      120 frames          2 seconds
+      slide 9      480 frames          8 seconds
+      slide 10     765 frames          waits on the music, not the timer
+
+  This drives TOpeningScreen with the same inputs and requires the same counts.
+  It is the one test here whose expected values come from the original running
+  rather than from the original being read.
+
+  It exists because the cutscene was NOT RUNNING AT ALL. Opening.pas was correct
+  the whole time and nothing called it: GmMain passed GameStartOrLoad a bare
+  TStartHost, whose Opening returns False unconditionally, so the gate that is
+  supposed to hold the whole of starting a game never closed. }
+function TestOpeningTiming(Log: TStrings): Integer;
+var
+  Op: TOpeningScreen;
+  Frames, Slide, Held, I: Integer;
+  MusicOn, Running: Boolean;
+  Counts: array[1..OPENING_SLIDES] of Integer;
+begin
+  Result := 0;
+  for I := 1 to OPENING_SLIDES do
+    Counts[I] := 0;
+
+  Op := TOpeningScreen.Create;
+  try
+    Op.Reset;
+    Slide := 0;
+    Held := 0;
+    Frames := 0;
+    { The music runs under slides 9 and 10 and is what ends slide 10. Modelled
+      as "still playing for 765 frames after slide 10 begins", which is what the
+      trace measured. }
+    MusicOn := True;
+    Running := True;
+    while Running and (Frames < 20000) do
+    begin
+      if (Op.Slide = OPENING_SLIDES) and (Held >= 765) then
+        MusicOn := False;
+      Running := Op.Update(False, MusicOn, False);
+      Inc(Frames);
+      if Op.Slide <> Slide then
+      begin
+        if (Slide >= 1) and (Slide <= OPENING_SLIDES) then
+          Counts[Slide] := Held;
+        Slide := Op.Slide;
+        Held := 0;
+      end;
+      Inc(Held);
+    end;
+    if (Slide >= 1) and (Slide <= OPENING_SLIDES) and (Counts[Slide] = 0) then
+      Counts[Slide] := Held;
+
+    for I := 1 to OPENING_SLIDES do
+    begin
+      if I = 8 then
+      begin
+        if Counts[I] <> 120 then
+        begin
+          Log.Add(Format('FAILED: slide 8 held %d frames, the game held 120',
+                         [Counts[I]]));
+          Inc(Result);
+        end;
+      end
+      else if I = OPENING_SLIDES then
+      begin
+        if Counts[I] < 700 then
+        begin
+          Log.Add(Format('FAILED: slide 10 held %d frames - it should wait on '
+            + 'the music, which the trace had running for 765', [Counts[I]]));
+          Inc(Result);
+        end;
+      end
+      else if Counts[I] <> 480 then
+      begin
+        Log.Add(Format('FAILED: slide %d held %d frames, the game held 480',
+                       [I, Counts[I]]));
+        Inc(Result);
+      end;
+    end;
+    if Result = 0 then
+      Log.Add(Format('  opening: ten slides in %d frames, every hold matching '
+        + 'the traced game', [Frames]));
+  finally
+    Op.Free;
+  end;
+end;
+
 { PixelOf and OriginPixel across NEGATIVE inputs, which is where they were
   broken and where nothing tested them.
 
@@ -2682,6 +2774,7 @@ begin
   Inc(Result, TestGameStart(Log, GameDir));
   Inc(Result, TestStageBegin(Log));
   Inc(Result, TestPixelConversion(Log));
+  Inc(Result, TestOpeningTiming(Log));
 
   Log.Add('');
   if Result = 0 then

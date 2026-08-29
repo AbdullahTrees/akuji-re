@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the frame loop still has the shape the running game has.
+"""Check the frame loop, and the form wiring no behavioural test covers.
 
     python tools/frame_shape.py
 
@@ -96,14 +96,54 @@ def main():
         bad.append('there is an `if` between DispatchPre and DispatchPost - '
                    'the entity update runs in EVERY state, unconditionally')
 
+    # --- wiring that only a source check can see -------------------------
+    #
+    # Two real bugs lived here and no self-test could have caught either,
+    # because both are about what GmMain CONNECTS rather than what any unit
+    # computes. The units were correct and unreachable.
+    #
+    #   * GameStartOrLoad gates the whole of starting a game on Host.Opening,
+    #     and GmMain passed a bare TStartHost whose Opening returns False
+    #     unconditionally. The cutscene never ran; the story section simply did
+    #     not appear. Opening.pas was right the whole time - the trace confirms
+    #     its slide timings frame for frame.
+    #   * PowerUp_Show's panel is dismissed by its fanfare ENDING. With no
+    #     fanfare started, the dismiss test was applied to the looping stage
+    #     music, which never stops, so collecting the dash orb softlocked.
+    if 'TFormStartHost.Create(Self)' not in text:
+        bad.append('GmMain is not passing a TFormStartHost - a bare TStartHost '
+                   'returns False from Opening, so the cutscene never runs')
+    for cb in ('FDialogue.OnSound', 'FDialogue.OnMusic',
+               'FDialogue.OnStopMusic'):
+        if cb not in text:
+            bad.append('%s is not wired - without the fanfare the power-up '
+                       'panel has nothing to dismiss it' % cb)
+
+    dlg = open(os.path.join(REPO, 'src', 'Dialogue.pas'), encoding='utf-8').read()
+    seg = dlg[dlg.index('procedure TDialogueBox.SubMode'):]
+    seg = seg[:seg.index(chr(10) + 'end;')]
+    # Each is guarded by Assigned(X) and then CALLED, so the bare name appears
+    # twice. Testing for the name alone is not enough: deleting the call leaves
+    # the Assigned() guard behind and the check still passed - which it did,
+    # under mutation, before this was tightened.
+    for name, call in (('FOnSound', r'FOnSound\s*\('),
+                       ('FOnStopMusic', r'^\s*FOnStopMusic\s*;'),
+                       ('FOnMusic', r'FOnMusic\s*\(')):
+        if not re.search(r'Assigned\s*\(\s*%s\s*\)' % name, seg) or            not re.search(call, seg, re.M):
+            bad.append('TDialogueBox.SubMode does not guard AND call %s - '
+                       'PowerUp_Show plays effect $10, STOPS the music, then '
+                       'starts playlist entry 4, and the panel is dismissed by '
+                       'that track ending' % name)
+
     if bad:
         print('FAIL - the frame loop no longer matches the traced game:')
         for b in bad:
             print('  %s' % b)
         return 1
 
-    print('frame loop shape OK - %d pre arms, %d post arms, entity update '
-          'unconditional between them' % (len(got_pre), len(got_post)))
+    print('frame loop OK - %d pre arms, %d post arms, entity update '
+          'unconditional between them; opening and power-up audio wired'
+          % (len(got_pre), len(got_post)))
     return 0
 
 
