@@ -194,3 +194,36 @@ rather than a line, but it must then say what stands in for it.
   the table boundaries this project spent a long time establishing - but it is
   the faithful answer if these clamps ever turn out to be reachable.
 
+
+## DIV-012 - the spawn window reads the layer origin, not the tile component's scroll
+- category: B
+- sites: src/GameSession.pas
+- original: 0x00454790 Events_SpawnNearCamera, first two statements.
+- The original computes the camera tile from the TILE COMPONENT's own scroll
+  and the LAYER's tile size, mixing two objects:
+
+      camTileX = *(TileMaps + 0x6034) / *(LayerInfo + 0x10)
+      camTileY = *(TileMaps + 0x6038) / *(LayerInfo + 0x14)
+
+  0x6034/0x6038 are the component's ScrollX/ScrollY - the layout is pinned by
+  TileMap_DefineTile @ 0x0044DAE0, which puts TileW at Self+0x6028 and TileH at
+  Self+0x602C directly above them, above 1026 tile definitions of 0x18 bytes
+  from Self+4. This reconstruction uses PixelOf(Layer.OriginX) div Layer.TileW
+  for both.
+- The two agree in the steady state, because the component's scroll is set from
+  the layer while drawing. They differ in WHEN: the component's copy is written
+  during the draw at AppIdle step 8, and the spawn walk runs at step 5, so the
+  original spawns against the value the PREVIOUS frame's draw left behind. This
+  reconstruction uses the current frame's camera.
+  Stage_Begin @ 0x00462210 does not write the component scroll at all - it sets
+  only the layer origin - so on the first frame in a new room the original's
+  window is placed by whatever the last room's draw left there, and only the
+  second frame is correct.
+- behaviour: AFFECTING but small - a one-frame lag in when an entity enters or
+  leaves the spawn window, and a first frame in each room whose window sits
+  where the previous room's camera was.
+- exit: the presentation layer owning a real tile component with its own scroll
+  updated at draw time; then CamTileX/CamTileY read that field instead. It
+  cannot be reproduced honestly in game code, because the value it wants is the
+  component's, and faking the lag with a saved copy in the session would be
+  invented logic standing in for a component that does not exist yet.

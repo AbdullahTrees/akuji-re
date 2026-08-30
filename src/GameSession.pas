@@ -500,6 +500,14 @@ begin
   FWorld.Layer.OriginY := (PixelY shl POSITION_SHIFT) + POSITION_BIAS;
 end;
 
+{ DIVERGENCE DIV-012. The original divides the TILE COMPONENT's own scroll,
+  not the layer origin:
+
+      camTileX = *(TileMaps + 0x6034) / *(LayerInfo + 0x10)
+
+  and that field is written during the draw, a step AFTER the spawn walk that
+  reads it. The two agree in the steady state and differ by a frame at the
+  edges. There is no component to ask yet - see the ledger. }
 function TGameSession.CamTileX: Integer;
 begin
   if FWorld.Layer.TileW = 0 then
