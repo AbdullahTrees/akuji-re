@@ -1041,6 +1041,10 @@ begin
                        FSession.Pool, FSession.World);
         { Sub-op 14 writes a tile, and the original writes to p_TileMaps[0]. }
         FDialogue.Map := FMap;
+        { Stage_Begin hands the box drawer p_Surfaces[1] with its origin
+          at (0,0) - FUN_0044DE18. }
+        if FSurfaces <> nil then
+          FDialogue.FrameSheet := FSurfaces[BOX_SHEET_SLOT];
         FDialogue.SaveFileName := FDataDir + 'data' + PathDelim + 'save.dat';
       end;
     GS_PLAY,

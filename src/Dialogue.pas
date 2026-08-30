@@ -164,6 +164,28 @@ const
   BOX_LINE_STEP  = $10;     { 16 }
   BOX_W          = 224;
   BOX_H          = 72;
+
+  { THE BOX IS TILED, NOT FILLED. 0x0044DE3C draws a nine-slice out of an 8x8
+    sheet: four corners, four edges, and a tiled centre. The call is
+
+        FUN_0044DE3C(obj, 0x30, boxY + 0x10, 8, 0x1B)
+
+    so 27 tiles across and 8 down, which is where BOX_W 224 and BOX_H 72 come
+    from - (27+1)*8 and (8+1)*8. The size had been worked out correctly and
+    then drawn as a single Rectangle, which is why the panel came out a flat
+    slab in the wrong colours: the colours are the SHEET's, not ours to pick.
+
+    The sheet is set by Stage_Begin:
+
+        FUN_0044DE18(obj, p_Surfaces[1], 0, 0)
+
+    so it is surface slot 1 with its origin at (0,0) - the top-left 24x24
+    pixels, read as a 3x3 grid of 8x8 tiles. }
+  BOX_TILE       = 8;
+  BOX_COLS       = $1B;     { 27 }
+  BOX_ROWS       = 8;
+  BOX_FRAME_DY   = $10;     { boxY + 16, not + 8 }
+  BOX_SHEET_SLOT = 1;
   BOX_LINES      = 3;
 
   { Overlay_Update @ 0x004568D0 has two modes and this is the other one: the
@@ -256,12 +278,14 @@ type
     FOnFadeMusic: TOverlayMusic;
     FMap: TTileMap;
     FSaveFileName: string;
+    FFrameSheet: TBitmap;
     FOnSoulGetDone: TOverlaySoulGetDone;
     FOnMusicBusy: TOverlayMusicBusy;
     procedure TakePage(const Text: string);
     procedure PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY: Integer);
     function EventSlot(EventId: Integer): Integer;
     function MusicBusy: Boolean;
+    procedure DrawFrame(Dest: TCanvas; X, Y, Rows, Cols: Integer);
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -353,6 +377,8 @@ type
     { Where sub-op 13 writes. The original hard-codes data\save.dat relative
       to the working directory; this is given the resolved path. }
     property SaveFileName: string read FSaveFileName write FSaveFileName;
+    { p_Surfaces[1], the sheet the box frame is tiled from. }
+    property FrameSheet: TBitmap read FFrameSheet write FFrameSheet;
     { What phase 2 needs and this unit cannot reach: GameState_Reset, the
       title asset load and the font definition all live on the form. }
     property OnSoulGetDone: TOverlaySoulGetDone read FOnSoulGetDone
@@ -550,6 +576,50 @@ procedure TDialogueBox.SetTile(X, Y, Tile: Integer);
 begin
   if FMap <> nil then
     FMap.SetTileRaw(X, Y, Tile);
+end;
+
+{ The nine-slice, tile for tile as 0x0044DE3C draws it.
+
+  Source tiles come from a 3x3 grid at the sheet's origin: column 0 is the left
+  edge, 1 the middle, 2 the right; row 0 the top, 1 the middle, 2 the bottom.
+  The destination runs 0..Cols and 0..Rows INCLUSIVE - the original draws its
+  far corner at Cols*8, so a 27-column box is 28 tiles wide. }
+procedure TDialogueBox.DrawFrame(Dest: TCanvas; X, Y, Rows, Cols: Integer);
+var
+  Col, Row, SrcCol, SrcRow: Integer;
+
+  procedure Tile(DX, DY, SC, SR: Integer);
+  begin
+    FFrameSheet.Transparent := False;
+    Dest.CopyRect(
+      Rect(DX, DY, DX + BOX_TILE, DY + BOX_TILE),
+      FFrameSheet.Canvas,
+      Rect(SC * BOX_TILE, SR * BOX_TILE,
+           SC * BOX_TILE + BOX_TILE, SR * BOX_TILE + BOX_TILE));
+  end;
+
+begin
+  if FFrameSheet = nil then
+    Exit;
+  for Row := 0 to Rows do
+  begin
+    if Row = 0 then
+      SrcRow := 0
+    else if Row = Rows then
+      SrcRow := 2
+    else
+      SrcRow := 1;
+    for Col := 0 to Cols do
+    begin
+      if Col = 0 then
+        SrcCol := 0
+      else if Col = Cols then
+        SrcCol := 2
+      else
+        SrcCol := 1;
+      Tile(X + Col * BOX_TILE, Y + Row * BOX_TILE, SrcCol, SrcRow);
+    end;
+  end;
 end;
 
 procedure TDialogueBox.SaveGame(var P: TPlayerState);
@@ -797,9 +867,7 @@ begin
   else
     BoxY := BOX_HIGH_Y;
 
-  Dest.Brush.Color := TColor($200000);
-  Dest.Pen.Color := TColor($C0C0FF);
-  Dest.Rectangle(BOX_X, BoxY + 8, BOX_X + BOX_W, BoxY + 8 + BOX_H);
+  DrawFrame(Dest, BOX_X, BoxY + BOX_FRAME_DY, BOX_ROWS, BOX_COLS);
 
   for I := 0 to BOX_LINES - 1 do
     if FLines[I] <> '' then
