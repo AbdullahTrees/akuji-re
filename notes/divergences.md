@@ -89,23 +89,22 @@ rather than a line, but it must then say what stands in for it.
 - behaviour: NEUTRAL in practice - Update clamps Slide to 1..10 before anything
   reads it, so the guard never fires.
 
-## DIV-005 - the fade is timed but not dissolved
-- category: B
-- sites: src/DDDDComponent.pas
-- original: 0x0044DC48, called with the object at 0x0046CB6C, +0x10 set to 4.
-- RESOLVED IN PART. The fader itself is now implemented on the display
-  component, at the original's own offsets and counter: 0 to 0x78 in steps of
-  4, thirty frames each way, with FadeBusy on +0x0D. Every screen that waits
-  on it now waits the right number of frames, and the surface really is
-  darkened to black and back.
-- what remains: the original faded through DirectDraw - a palette ramp on an
-  8-bit surface, or a blended blit on a 16-bit one. This scales the surface's
-  colour bytes instead. The RESULT is the same black; the mechanism is not,
-  and a palette ramp would have quantised differently on the way down.
-- behaviour: the timing is now identical; only the intermediate frames' exact
-  colours differ.
-- exit: a real palette or blended blit once the presentation layer is more
-  than a TBitmap.
+## DIV-005 - RETIRED. The fade is reproduced.
+- category: C
+- sites: none - kept as a record; the divergence no longer exists.
+- original: 0x0044DC48 sets it up, 0x0044DC70 ticks and draws it.
+- This entry said the fade was timed but not dissolved, and before that that no
+  fader existed at all. Both are now wrong, and the entry is kept rather than
+  deleted because what it got wrong is instructive.
+- The original does NOT dissolve. It draws four black rectangles closing in
+  from the edges, and the fill is a DirectDraw Blt with DDBLT_COLORFILL and
+  colour 0 - `FUN_004488A0` builds a DDBLTFX with dwFillColor 0 and passes
+  0x1000400, which is COLORFILL or WAIT. A black FillRect is the same
+  operation.
+- So the reproduction now matches on all four counts: the same four
+  rectangles, the same colour, the same counter from 0 to 0x78 in steps of 4,
+  and the same strictly-outside test that makes a fade 31 ticks rather than 30.
+- behaviour: NONE remaining that has been identified.
 
 ## DIV-006 - the entity dispatcher has an else arm
 - category: C
