@@ -243,8 +243,16 @@ def main():
                   encoding='utf-8').read()
     k = runner.index('TEventHost = class')
     hostdecl = runner[k:runner.index('end;', k)]
-    hosts = ''.join(open(os.path.join(REPO, 'src', f), encoding='utf-8').read()
-                    for f in ('Dialogue.pas', 'GameSession.pas', 'GmMain.pas'))
+    # IN THE HOST CLASS, not merely somewhere in three files. This used to
+    # concatenate Dialogue.pas, GameSession.pas and GmMain.pas and match the
+    # method NAME anywhere in the result - so TGameWorld's override of
+    # TEntityWorld.PlaySound, an unrelated class with a same-named method,
+    # satisfied the check for TEventHost.PlaySound. The real override was
+    # missing and every scripted sound was silent: the gallery books play
+    # theirs through sub-op 9, and collected without a sound.
+    dlg = open(os.path.join(REPO, 'src', 'Dialogue.pas'), encoding='utf-8').read()
+    d = dlg.index('TDialogueBox = class(TEventHost)')
+    hosts = dlg[d:dlg.index(chr(10) + '  end;', d)]
     for m in sorted(set(re.findall(r'(?:procedure|function)\s+(\w+)', hostdecl))):
         # The parameter list can contain ';', so match through to `override`
         # rather than stopping at the first semicolon.

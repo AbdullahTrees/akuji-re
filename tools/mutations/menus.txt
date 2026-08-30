@@ -1,5 +1,10 @@
 # selftest: --selftest-session
 #
+# TDialogueBox.PlaySound is likewise not mutated here. Removing the override
+# is caught by frame_shape.py's "every TEventHost virtual is overridden" check,
+# which --selftest-session cannot see. Verified by hand: it reports
+# "TEventHost.PlaySound is never overridden".
+#
 # The SCREEN SHAKE is deliberately not mutated here. Its wiring lives in
 # AppIdle and is guarded by tools/frame_shape.py, a source-shape check that
 # --selftest-session cannot see - removing the ShiftY call survives this suite

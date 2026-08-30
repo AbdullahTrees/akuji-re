@@ -377,6 +377,12 @@ type
       through it. }
     procedure PlayMusic(Track: Integer; Loop: Boolean); override;
     { Sub-op 14 @ 0x00455Exx: TileMap_Set on layer 0. }
+    { Sub-op 9. Every gallery book is `0000-04-118N/0000-09-0016/0000-08` -
+      set the flag, play effect 16 (SND_GET01), destroy the entity - so the
+      pickup sound is the script's, not the touch handler's. This override was
+      missing, so Host.PlaySound reached TEventHost's empty default and the
+      books were collected in silence. }
+    procedure PlaySound(Id: Integer); override;
     procedure SetTile(X, Y, Tile: Integer); override;
     { Sub-op 13 @ 0x00455Dxx. Writes the RESUME POINT into the record first -
       the stage, the player's live position and the camera - and only then
@@ -671,6 +677,11 @@ procedure TDialogueBox.PlayMusic(Track: Integer; Loop: Boolean);
 begin
   if Assigned(FOnFadeMusic) then
     FOnFadeMusic(Track, Loop);
+end;
+
+procedure TDialogueBox.PlaySound(Id: Integer);
+begin
+  PlayBoxSound(Id);
 end;
 
 procedure TDialogueBox.SetTile(X, Y, Tile: Integer);
