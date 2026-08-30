@@ -141,6 +141,8 @@ type
     { Stage_Begin's reconstructible half: configure the terrain, load the
       stage's events, place the camera and spawn the player. The ASSETS are
       the caller's business - the form has the surfaces. }
+    { Load_Stage_Assets' share - see the body. }
+    procedure LoadStageAssets(StageIndex: Integer);
     procedure BeginStage(StageIndex: Integer; var AGameState: Integer);
 
     { One frame of logic. }
@@ -559,44 +561,25 @@ begin
   Result := PixelOf(FWorld.Layer.OriginY) div FWorld.Layer.TileH;
 end;
 
-procedure TGameSession.BeginStage(StageIndex: Integer;
-                                  var AGameState: Integer);
+procedure TGameSession.LoadStageAssets(StageIndex: Integer);
 var
-  Slot, Terrain, Thr, Kill: Integer;
+  Terrain, Thr, Kill: Integer;
   Anim: TTerrainAnim;
 begin
-  { --- Stage_Begin @ 0x00462210, statement by statement -------------------
-    The original is THIRTEEN statements and this had four of them. What was
-    missing, and what each cost:
-
-      1-2  fader step 4, then StartFade(0, fade-IN). No room transition ever
-           dissolved - reported as "the transition between stage 01 and 02
-           doesn't occur". FADE_STEP is already 4, so statement 1 is implicit.
-      3    GameState_Reset(form, 1). This is the one that hid the monsters:
-           the reset wipes Progress[4000..4500], the scratch flags, and every
-           type-29 monster uses that range as its BlockedBy. Kill one and the
-           flag stays set forever, so Events_SpawnNearCamera disables the
-           event permanently and it never comes back.
-      4    ScreenPhase := 0.
-
-    ORDERING NOTE. Statements 7-9 - the asset load, the font and the box sheet
-    - are Load_Stage_Assets and live in the form, which calls them BEFORE this.
-    The original resets first and loads second. The two are independent: the
-    reset touches the entity pool, the layer and the progress flags, and the
-    load touches surfaces, sprite frames and the map. Nothing the load writes
-    is read or cleared by the reset. }
-
-  if Assigned(FOnStartFade) then
-    FOnStartFade;                       { 1-2 }
-  ResetState(1);                        { 3 }
-  ScreenPhase := 0;                     { 4 }
-  AGameState := GS_PLAY;                { 5, 0x3C }
-
+  { Load_Stage_Assets' share, which used to sit inside BeginStage. It does not
+    belong there: the xrefs put Terrain_Configure at 0x004645B0 and
+    Load_Event_Scripts at 0x00465B50 with exactly ONE caller each, and it is
+    Load_Stage_Assets - never Stage_Begin. Keeping them in BeginStage made that
+    function do work the original does elsewhere, which is the failure
+    CLAUDE.md 3a-1 now names: a row can hold every statement of the original
+    and still not be equivalent to it. }
   FStageIndex := StageIndex;
 
-  { Terrain_Configure. The threshold and the kill tile are what every
-    collision query in the frame reads, so they have to be set before
-    anything is spawned. }
+  { Terrain_Configure. The threshold and the kill tile are what every collision
+    query and every vertical move read, so they are set before anything spawns.
+    Both globals are written together - 0x00484EF4 and 0x00484EF8, adjacent -
+    and the kill tile was being computed here and thrown away, which is why
+    water was not lethal. }
   Terrain := 0;
   if (FStages <> nil) and (StageIndex >= 0) and (StageIndex < FStages.Count) then
     Terrain := FStages.TerrainId[StageIndex];
@@ -604,6 +587,7 @@ begin
   Kill := KILL_TILE;
   TerrainConfigure(Terrain, Thr, Kill, Anim);
   FWorld.SolidThreshold := Thr;
+  FWorld.KillTile := Kill;
   FWorld.TerrainId := Terrain;
 
   { Terrain_Configure builds the animator for terrains 1..4 and nothing for
@@ -611,13 +595,6 @@ begin
   FreeAndNil(FBgAnime);
   if Anim.TrackCount > 0 then
     FBgAnime := TBgAnime.Create(Map, Anim);
-
-  { Stage_Begin @ 0x00462210 clears the title sub-mode explicitly, right after
-    it sets the state to 0x3C. That is not housekeeping: TSM_OPTIONS is 1 and
-    so is the CONTINUE sub-mode, one variable carrying both meanings at
-    different times, so a continue that does not clear it leaves the title
-    screen rendering its OPTIONS page the next time it is entered. }
-  TitleSubMode := 0;
 
   FEvents.Load(FGameDir, StageIndex);
 
@@ -629,19 +606,37 @@ begin
     FWorld.Layer.MapTilesX := Map.MapWidth;
     FWorld.Layer.MapTilesY := Map.MapHeight;
   end;
+end;
 
-  { Stage_Begin's own three steps. }
-  SetCamera(Player.ScrollX, Player.ScrollY);
-  FWorld.Layer.DeltaX := 0;
-  FWorld.Layer.DeltaY := 0;
+{ --- Stage_Begin @ 0x00462210, and NOTHING ELSE -------------------------
+  Thirteen statements, and after the backward pass, thirteen statements here.
+  What was removed rather than added: the terrain configuration, the
+  background animator, the event load and the tilemap wiring, all of which are
+  Load_Stage_Assets' and now live in LoadStageAssets above; and the pool,
+  sprite and layer-delta clears, which ResetState(1) - statement 3 - already
+  does, so they were redundant rather than misplaced.
 
-  FPool.Clear;
-  FSprites.Clear;
-  Slot := FPool.Spawn(PLAYER_SPAWN_KIND, PLAYER_SPAWN_TYPE,
+  Statements 7-9 (Load_Stage_Assets, Font_Define, the box sheet) are the
+  form's and run before this, which is the original's order. }
+procedure TGameSession.BeginStage(StageIndex: Integer;
+                                  var AGameState: Integer);
+var
+  Slot: Integer;
+begin
+  if Assigned(FOnStartFade) then
+    FOnStartFade;                       { 1-2  fader step 4, StartFade in }
+  ResetState(1);                        { 3    GameState_Reset(form, 1) }
+  ScreenPhase := 0;                     { 4 }
+  AGameState := GS_PLAY;                { 5    0x3C }
+  TitleSubMode := 0;                    { 6 }
+
+  SetCamera(Player.ScrollX, Player.ScrollY);            { 10, 11 }
+
+  Slot := FPool.Spawn(PLAYER_SPAWN_KIND, PLAYER_SPAWN_TYPE,   { 12 }
                       Player.SpawnX shl POSITION_SHIFT,
                       Player.SpawnY shl POSITION_SHIFT);
   if Slot <> SLOT_NONE then
-    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);   { 13 }
+    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);      { 13 }
 end;
 
 procedure TGameSession.TickBackground;

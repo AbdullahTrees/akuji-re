@@ -8043,6 +8043,101 @@ begin
   Result := Bad;
 end;
 
+type
+  { Every tile is the kill tile, so a single vertical move must be lethal. }
+  TAllKillTiles = class(TTileSource)
+  public
+    function TileAt(TileX, TileY: Integer): Integer; override;
+  end;
+
+function TAllKillTiles.TileAt(TileX, TileY: Integer): Integer;
+begin
+  Result := 29;
+end;
+
+{ The kill tile, from Terrain_Configure and Camera_ApplyMoveY.
+
+  Terrain_Configure writes it beside the solid threshold - 0x1D for terrains
+  1..8, 1000 for terrain 9 - and Camera_ApplyMoveY ends with
+  Entity_CheckKillTiles, the xref at 0x00459E73. The check was implemented and
+  called from NOWHERE, so the surf could be walked into and fallen through.
+  The value was also computed by the terrain setup and thrown away. }
+function TestKillTileWiring(Log: TStrings): Integer;
+var
+  Bad, Slot: Integer;
+  Pool: TEntityPool;
+  World: TEntityWorld;
+  Killer: TAllKillTiles;
+  L: TLayerInfo;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the kill tile kills on a vertical move ---');
+
+  Pool := TEntityPool.Create;
+  World := TEntityWorld.Create;
+  Killer := TAllKillTiles.Create;
+  try
+    FillChar(L, SizeOf(L), 0);
+    L.TileW := 32;  L.TileH := 32;
+    L.OriginX := POSITION_BIAS;  L.OriginY := POSITION_BIAS;
+    World.Tiles := Killer;
+    World.Layer := L;
+
+    Slot := Pool.Spawn(EKIND_MINOR, 1, 0, 0);
+    Want(Slot <> SLOT_NONE, 'could not spawn a test entity');
+    if Slot <> SLOT_NONE then
+    begin
+      { A BOX WITH AREA. Spawn copies the type row, whose insets and tile
+        offsets can leave the sweep empty - Top past Bottom - and then nothing
+        is examined and the test proves nothing whichever way the code goes.
+        Set the geometry the check actually reads. }
+      Pool.SetField(Slot, EF_POS_X, POSITION_BIAS);
+      Pool.SetField(Slot, EF_POS_Y, POSITION_BIAS);
+      Pool.SetField(Slot, EF_EXTENT_X, 32);
+      Pool.SetField(Slot, EF_EXTENT_Y, 32);
+      Pool.SetField(Slot, EF_BOX_OFS_X, 0);
+      Pool.SetField(Slot, EF_BOX_OFS_Y, 0);
+      Pool.SetField(Slot, EF_TILE_OFS_X, 0);
+      Pool.SetField(Slot, EF_TILE_OFS_Y, 0);
+      World.KillTile := 29;                { every tile reads 29 }
+      Pool.SetField(Slot, EF_STATE, 0);
+      ApplyMoveY(L, Pool.Entity(Slot)^.Raw[EF_POS_Y],
+                 Pool.Entity(Slot)^.Raw[EF_VEL_Y], False, False,
+                 Pool.Entity(Slot), World);
+      Want(Pool.Field(Slot, EF_STATE) = KILL_TILE_STATE,
+           Format('a vertical move onto the kill tile left EF_STATE at %d, '
+             + 'want %d - Camera_ApplyMoveY ends with Entity_CheckKillTiles, '
+             + 'and without it the player falls through the water',
+             [Pool.Field(Slot, EF_STATE), KILL_TILE_STATE]));
+
+      World.KillTile := 30;                { now nothing matches }
+      Pool.SetField(Slot, EF_STATE, 0);
+      ApplyMoveY(L, Pool.Entity(Slot)^.Raw[EF_POS_Y],
+                 Pool.Entity(Slot)^.Raw[EF_VEL_Y], False, False,
+                 Pool.Entity(Slot), World);
+      Want(Pool.Field(Slot, EF_STATE) = 0,
+           'an ordinary tile killed the entity');
+      Log.Add('kill tile: lethal at 29, harmless at 30');
+    end;
+  finally
+    Killer.Free;
+    World.Free;
+    Pool.Free;
+  end;
+  Result := Bad;
+end;
+
 { Unlocking a door must DESTROY its entity, not merely kill it.
 
   Reported: after unlocking a door, the closed-door sprite followed the player
@@ -8131,6 +8226,12 @@ begin
     Want(Slot <> SLOT_NONE,
          'no shipped record with a forbidding flag placed anything - this '
          + 'test exercised nothing');
+
+    { --- and the kill tile actually kills ------------------------------
+      Camera_ApplyMoveY ends with Entity_CheckKillTiles - the xref at
+      0x00459E73 - so a vertical move onto the stage's kill tile puts the
+      entity into EF_STATE 10. The check was implemented and called from
+      nowhere, which is why the surf could be fallen through. }
     if Slot <> SLOT_NONE then
     begin
       Want(not Pool.Alive[Slot], 'the disabled event left its entity alive');
@@ -8864,6 +8965,7 @@ type
     procedure Fade;
   end;
 
+
 procedure TResetSpy.Fade;
 begin
   FadeFired := True;
@@ -9129,6 +9231,9 @@ begin
       that does not clear it sends the next visit to the title screen straight
       to the OPTIONS page. Seeded with TSM_OPTIONS so the clear is observable;
       a test that starts at 0 cannot tell a clear from a no-op. }
+    { Load_Stage_Assets runs first, as the form runs it - the terrain, the
+      background animator and the events are its work, not Stage_Begin's. }
+    S.LoadStageAssets(1);
     TitleSubMode := TSM_OPTIONS;
 
     { --- Stage_Begin's first four statements --------------------------
@@ -9148,6 +9253,14 @@ begin
     S.OnStartFade := FadeSpy.Fade;
 
     S.BeginStage(1, GS);
+
+    { WATER KILLS. Terrain_Configure writes the kill tile beside the solid
+      threshold - 29 for terrains 1..8, 1000 for terrain 9 - and
+      Camera_ApplyMoveY ends with Entity_CheckKillTiles, which puts the
+      entity into EF_STATE 10 on contact. The value was computed and thrown
+      away, so the player fell through the surf instead of dying. }
+    Want(S.World.KillTile = 29,
+         Format('stage 1 gave kill tile %d, want 29 - the value Terrain_Configure returns was discarded', [S.World.KillTile]));
 
     Want(TitleSubMode = TSM_MENU,
          Format('BeginStage left the title sub-mode at %d - the title screen '
@@ -9477,6 +9590,7 @@ begin
       InitNewGame(S.Player, 0);
       ApplySessionFlags(S.Player, 0);
       GS := GS_STAGE_BEGIN;
+      S.LoadStageAssets(Stage);
       S.BeginStage(Stage, GS);
 
       Types := '';
@@ -9607,6 +9721,7 @@ begin
   Inc(Bad, TestSpriteOrder(Log));
   Inc(Bad, TestOptionTables(Log, GameDir));
   Inc(Bad, TestDisableDestroys(Log, GameDir));
+  Inc(Bad, TestKillTileWiring(Log));
   Inc(Bad, TestMessageLoop(Log, GameDir));
 
   Result := Bad;

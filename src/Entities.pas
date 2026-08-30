@@ -821,6 +821,10 @@ type
     PushX, PushY: Integer;       { 0x00484FAC / 0x00484FB0 }
     OnTopOfSolid: Boolean;       { 0x00484FB4 }
     SolidThreshold: Integer;     { 0x00484EF4, set per terrain }
+    { 0x00484EF8, the tile index that kills on contact - the water in the
+      surf rooms. Terrain_Configure writes it directly beside the threshold,
+      which is what "adjacent in BSS" means literally. }
+    KillTile: Integer;
     Fading: Boolean;             { suppresses the soft landing sound }
 
     { The layer the entities live on, and the stage's terrain id. Both are

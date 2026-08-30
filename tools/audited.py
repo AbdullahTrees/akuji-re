@@ -168,6 +168,18 @@ def main():
                 if len(r['why']) < 40:
                     bad.append('%s is %s but does not say what was compared'
                                % (r['addr'], r['status']))
+                # THE BACKWARD PASS. MATCHES means one-to-one, and the
+                # direction that gets skipped is 'does the Pascal do anything
+                # the original does not'. Stage_Begin was marked FIXED with
+                # all thirteen of its statements present AND three of
+                # Load_Stage_Assets' as well. A row must SAY what the
+                # backward pass found, so skipping it is a visible omission.
+                if (r['status'] in ('MATCHES', 'FIXED')
+                        and 'EXTRAS:' not in r['why']):
+                    bad.append('%s is %s but carries no EXTRAS: clause - see'
+                               ' CLAUDE.md 3a-1. Walk the PASCAL, account for'
+                               ' every statement, then say so or write'
+                               ' "EXTRAS: none"' % (r['addr'], r['status']))
                 if r['impl']:
                     p = r['impl'].split()
                     if len(p) != 2:
@@ -197,6 +209,11 @@ def main():
             if len(r['why']) < 40:
                 bad.append('%s is %s but does not say what was compared'
                            % (r['rec'], r['status']))
+            if (r['status'] in ('MATCHES', 'FIXED')
+                    and 'EXTRAS:' not in r['why']):
+                bad.append('%s is %s but carries no EXTRAS: clause - a layout'
+                           ' must also declare it holds no field the original'
+                           ' does not' % (r['rec'], r['status']))
             b = record_body(r['unit'], r['rec'])
             k = 'layout %s %s' % (r['unit'], r['rec'])
             now[k] = (hashlib.sha256(b.encode()).hexdigest()[:16]

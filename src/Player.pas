@@ -256,7 +256,8 @@ begin
     E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
     BlockedY := True;
   end;
-  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY);
+  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY,
+             @E, World);
 
   HitX := BlockedX;
   HitY := BlockedY;
@@ -402,7 +403,8 @@ begin
   BlockedY := World.TileAtY(E, E.Raw[EF_VEL_Y], ScrollY) >= World.SolidThreshold;
   if BlockedY then
     E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
-  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY);
+  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY,
+             @E, World);
 
   if not Landed then
     Exit;
@@ -838,7 +840,8 @@ begin
     E.Raw[EF_VEL_Y] := World.EdgeDistY(E, E.Raw[EF_VEL_Y]);
     BlockedY := True;
   end;
-  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY);
+  ApplyMoveY(L, E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y], ScrollY, BlockedY,
+             @E, World);
 
   { --- attacking ---------------------------------------------------------- }
   W := P.Weapon;

@@ -85,7 +85,8 @@ function ShouldScrollY(const L: TLayerInfo; PixelY, Vel: Integer): Boolean;
 procedure ApplyMoveX(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
-                     Scroll, Blocked: Boolean);
+                     Scroll, Blocked: Boolean;
+                     E: PEntity = nil; World: TEntityWorld = nil);
 
 implementation
 
@@ -171,7 +172,8 @@ end;
 
 { Camera_ApplyMoveY @ 0x00459E08. }
 procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
-                     Scroll, Blocked: Boolean);
+                     Scroll, Blocked: Boolean;
+                     E: PEntity; World: TEntityWorld);
 var
   Before: Integer;
 begin
@@ -185,9 +187,20 @@ begin
   end;
   if Blocked then
     Vel := 0;
-  { The original also calls 0x004576B4(entity, 0) here, which recomputes the
-    entity's tile-grid indices after the move. Not reproduced until it is read;
-    callers of this unit must not assume those are up to date. }
+
+  { 0x00459E08 ends with Entity_CheckKillTiles(entity, 0), unconditionally -
+    the xref at 0x00459E73 - and that is what makes water lethal. The comment
+    that stood here guessed it "recomputes the entity's tile-grid indices" and
+    said it was not reproduced until it had been read. Read now: 0x004576B4
+    sweeps the entity's box over the tile grid and, on the stage's kill tile,
+    sets EF_STATE to 10 and clears +0x48. Without it the player fell through
+    the water instead of dying.
+
+    It lives HERE rather than at the call sites because the original puts it
+    here: all four of its callers are player states, and a check that has to be
+    remembered four times is one that gets forgotten once. }
+  if (E <> nil) and (World <> nil) then
+    EntityCheckKillTiles(E^, L, World.Tiles, World.KillTile);
 end;
 
 end.

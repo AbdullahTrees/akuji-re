@@ -1196,6 +1196,10 @@ begin
           the map and the frames the load has just replaced. }
         LoadStage(Settings.CurrentStage);
         FSession.SetFrames(FSprites);
+        { The rest of Load_Stage_Assets - terrain, the background animator and
+          the event scripts. Both are its callers in the original; neither is
+          Stage_Begin's. }
+        FSession.LoadStageAssets(Settings.CurrentStage);
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
         FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
                        FSession.Pool, FSession.World);

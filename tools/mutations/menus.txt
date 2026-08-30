@@ -116,7 +116,7 @@ src/SpritePool.pas
 Stage_Begin stops clearing the scratch progress flags
 src/GameSession.pas
 ---
-  ResetState(1);                        { 3 }
+  ResetState(1);                        { 3    GameState_Reset(form, 1) }
 --->
   { 3 removed }
 ===
@@ -124,7 +124,7 @@ Stage_Begin stops starting the room fade
 src/GameSession.pas
 ---
   if Assigned(FOnStartFade) then
-    FOnStartFade;                       { 1-2 }
+    FOnStartFade;                       { 1-2  fader step 4, StartFade in }
 --->
   { 1-2 removed }
 ===
@@ -222,4 +222,19 @@ src/EventRunner.pas
         ScreenPhase := 1;
         Host.ShowLine(StepArg(Step, Op, 0));
       end;
+===
+water does not kill: the kill tile is computed and discarded
+src/GameSession.pas
+---
+  FWorld.KillTile := Kill;
+--->
+  { discarded }
+===
+the kill-tile check is not called after a vertical move
+src/Camera.pas
+---
+  if (E <> nil) and (World <> nil) then
+    EntityCheckKillTiles(E^, L, World.Tiles, World.KillTile);
+--->
+  ;
 ===

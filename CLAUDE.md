@@ -179,6 +179,38 @@ swallowed the entry byte of the function at `0x464D30`.
 To fix one: `G` → address, `C` (clear), `D` (disassemble), `F` (create function).
 Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
+## 3a-1. MATCHES MEANS ONE-TO-ONE. BOTH DIRECTIONS.
+
+**A function is only MATCHES or FIXED when its behaviour and the binary's are
+equivalent - everything the original does is implemented, AND nothing the
+original does not do is present.** Never mark a row without having checked both
+directions.
+
+The second half is the one that gets skipped, and it is not hypothetical.
+`Stage_Begin` was marked FIXED on the strength of "all thirteen statements
+accounted for" - which was true, and still wrong, because the Pascal ALSO
+configured the terrain, rebuilt the background animator and loaded the event
+scripts. None of those is one of Stage_Begin's statements; all three belong to
+`Load_Stage_Assets`, and the xrefs say so plainly. The row claimed equivalence
+and had only established containment.
+
+So an audit is two passes, and a row states both:
+
+* **forward** - walk the original's statements and find each one in the Pascal.
+  Say how many there are, so the count can be checked.
+* **backward** - walk the PASCAL and account for every statement in it. Each
+  one is either a statement of the original, a declared divergence, or
+  scaffolding that has no effect. Anything else means the row is not MATCHES.
+
+Extra behaviour is as much a defect as missing behaviour. It is worse in one
+way: missing behaviour shows up as something not happening, which someone
+eventually notices, while extra behaviour hides inside a function that looks
+correct and is marked verified.
+
+`tools/audited.py` requires every frozen row to carry an explicit `EXTRAS:`
+clause naming what the backward pass found, or `EXTRAS: none`. A row that has
+not made that statement cannot be frozen.
+
 ## 3a. AN AUDITED FUNCTION IS FROZEN
 
 **`notes/audited.md` has one row for every game-layer function - all 149 - and
