@@ -300,6 +300,8 @@ const
     ((47, 48, 49, 48), (44, 45, 46, 45));
   SPR_AIRDASH: array[0..1, 0..1] of Integer =
     ((116, 117), (114, 115));
+  { 0x0046D180, indexed by facing shr 5 - Player_UpdateKnockback's only
+    sprite choice; the state has no animation at all. }
   SPR_KNOCKBACK: array[0..1] of Integer = (13, 3);
   SPR_DEATH: array[0..1] of Integer = (18, 8);
 

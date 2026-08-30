@@ -304,6 +304,18 @@ begin
   end;
 end;
 
+{ Input_ConfirmPressed @ 0x00466E4C. The whole body is one disjunction:
+
+      (in[0x1c] = 1 and in[0x20] = 0) or (in[0x1d] = 1 and in[0x21] = 0)
+
+  Button sits at +0x1C and ButtonLatch at +0x20, so those four bytes are
+  Button[0]/Latch[0] and Button[1]/Latch[1]. It is an EDGE, on EITHER of two
+  buttons - both halves were once wrong at the same time, a level instead of an
+  edge and only one button.
+
+  IT WRITES NOTHING. No latch is consumed, which is what lets GameOver_Update
+  take the answer as an eagerly-evaluated argument without differing from the
+  original, which calls this lazily as the second half of a C or-else. }
 function ConfirmPressed(const Inp: TInputState): Boolean;
 begin
   Result := (Inp.Button[0] and not Inp.ButtonLatch[0])

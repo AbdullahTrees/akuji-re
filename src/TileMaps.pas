@@ -219,7 +219,21 @@ end;
 
 { 0x0044DAE0. Note the argument order - SrcY before SrcX - which is the
   original's, and the reason it is kept is that every caller writes them that
-  way round. See the unit header. }
+  way round. See the unit header.
+
+  THE ORIGINAL MAKES THREE WRITES per tile, into a 0x18-byte record at
+  Self+4+id*0x18: the surface at +0, the rect at +4, and a byte at +0x14. This
+  writes only the rect, and the rect is exact. Both omissions are safe and the
+  callers are why - FUN_0044E2C0 (the anim tick) and Load_Tile_Data both pass a
+  LITERAL 1 for the byte, and the surface is fixed per tilemap, chosen once by
+  the loader and merely handed back by the animator, which is why BgAnime notes
+  that this map already knows which sheet it draws from.
+
+  THE BOUNDS CHECK IS OURS. The original masks the id with 0xffff and writes
+  regardless, so an id past the 1026 records corrupts memory. Refusing to
+  reproduce that is deliberate, and the guard cannot fire for either caller -
+  both derive the id from the sheet dimensions. DIV-012 corroborates the layout
+  from the other side. }
 procedure TTileMap.DefineTile(TileId, SrcY, SrcX: Integer);
 begin
   if (TileId < 0) or (TileId >= Length(FTileDefs)) then
