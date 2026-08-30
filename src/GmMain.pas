@@ -86,7 +86,6 @@ type
     procedure TitleSound(Index: Integer);
   private
     FLastFrame: DWord;     // p_LastFrameTime 0x0046D1E0
-    FLimitFrames: Boolean; // flag at 0x0046CE60
     FArchive: TQdaArchive;
     FTitle: TBitmap;
     FTitleScreen: TTitleScreen;
@@ -371,7 +370,6 @@ begin
   FTitleScreen.OnResetState := TitleResetState;
   FTitleScreen.OnResetOpening := TitleResetOpening;
   FTitleScreen.OnGallery := TitleGallery;
-  FLimitFrames := True;
   { Raise the multimedia timer period before the first frame: without it
     the Sleep(1) below takes about 15.6 ms and caps the rate anyway. }
   BeginFrameClock;
@@ -411,7 +409,12 @@ begin
   Now_ := FrameClockMs;
   Elapsed := Now_ - FLastFrame;
 
-  if FLimitFrames and (Elapsed < FRAME_MS) then
+  { SoftwareVsync, the global at 0x0046CE60 - not a field of this form. The
+    options screen toggles that global (Title_MainMenu's case 6 does
+    `*p_SoftwareVsync ^= 1`) and DDDD1Init loads it from system.dat +0x18, so a
+    private copy set to True once made the option inert: every frame was
+    limited whatever the setting said. }
+  if SoftwareVsync and (Elapsed < FRAME_MS) then
   begin
     Sleep(1);        { yield instead of spinning }
     Done := False;   { but come straight back }

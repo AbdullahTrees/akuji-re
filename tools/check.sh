@@ -202,6 +202,19 @@ printf '  %-22s exit=%d  %s
 [ $rc -ne 0 ] && { fail=1; sed -n '/^FAIL/,$p' "$SCRATCH/div.log" | head -12; }
 
 note ""
+note "=== no address is claimed by two different variables ==="
+# One of the original's globals declared twice - once properly and once as a
+# private field whose comment names the same address - has shipped three times,
+# and each one reached the player: the two menus keeping separate cursors, and
+# a CONTINUE leaving the title screen on its options page. Both halves have
+# code, so neither the coverage counter nor any behavioural test can see it.
+python "$REPO/tools/shadow_globals.py" > "$SCRATCH/shadow.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "shadow_globals" "$rc"  "$(tail -1 "$SCRATCH/shadow.log")"
+[ $rc -ne 0 ] && { fail=1; sed -n '/CLAIMED BY MORE/,$p' "$SCRATCH/shadow.log" | head -14; }
+
+note ""
 note "=== negative control: a wrong directory must FAIL ==="
 rm -f "$REPO/src/selftest.log"
 "$EXE" --selftest-script "$SCRATCH/definitely-not-here" > /dev/null 2>&1
