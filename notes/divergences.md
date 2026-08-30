@@ -134,14 +134,26 @@ rather than a line, but it must then say what stands in for it.
 - behaviour: AFFECTING - everything visual.
 - exit: the SDL2 presentation layer.
 
-## DIV-009 - title screen backgrounds and editing are absent
+## DIV-009 - the options screen cannot rebind keys
 - category: B
 - sites: src/Title.pas
-- original: 0x00462xxx Title_MainMenu and the options rows.
-- Option value editing and key rebinding are stubbed, and the menu backgrounds
-  p_Surfaces[1] and [2] are not loaded.
-- behaviour: AFFECTING - the options screen cannot change anything.
-- exit: surface loading in the SDL2 layer, plus raw button polling for rebinding.
+- original: 0x00462330 Title_MainMenu, the `MenuIndex - 2U < 3` block.
+- Rows 2, 3 and 4 are the three key bindings. The original polls the input
+  device for any of 16 raw buttons - FUN_004546C4(Joy, i) for i in 0..15 - and
+  on a hit SWAPS that button with whichever row is selected, so two rows can
+  never hold the same key. This reconstruction displays the three bindings and
+  cannot change them.
+- behaviour: AFFECTING - the keys cannot be reassigned.
+- exit: raw button polling in the input layer, which is what the swap needs.
+
+  NARROWED 2026-08-30. This entry used to also claim that option VALUE editing
+  was stubbed and that the menu backgrounds were not loaded. Both had since
+  been implemented and the entry was never updated - the ledger had rotted in
+  the one direction nothing checks, describing the reconstruction as worse than
+  it is. AdjustValue covers all six editable rows, and GmMain hands Draw
+  p_Surfaces[1] and [2], which LoadStage(0) loads. The per-row confirmation
+  sounds and the immediate 57-channel volume sweep were the parts genuinely
+  missing, and those are now implemented rather than declared.
 
 ## DIV-010 - type 25 clamps EF_VARIANT instead of running off its table
 - category: D

@@ -7853,6 +7853,77 @@ begin
       + 'runs its three phases');
 end;
 
+{ Pause > RESET must reach the TITLE, and must not carry the confirm with it.
+
+  Reported symptom: "Pause > Reset brought me back to the last saved location,
+  equivalent to being on the menu and selecting Continue - the game thought the
+  pause menu was the main menu." Both menus index the SAME cursor global
+  (0x0046CF88) and RESET is row 1 in the pause menu while CONTINUE is row 1 in
+  the title menu, so a cursor that survives the transition, or a confirm that
+  does, lands on Continue and loads the save.
+
+  Every step is checked separately, because the end state alone cannot say
+  WHICH of the three carried over. }
+function TestPauseFlow(Log: TStrings): Integer;
+var
+  Bad: Integer;
+  Inp: TInputState;
+  Pause: TPauseMenu;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- pause > reset goes to the title, not to Continue ---');
+
+  Pause := TPauseMenu.Create;
+  try
+    { Enter pause from play, with the cursor somewhere that is not 0 so the
+      stash is observable. }
+    GameStateValue := GS_PLAY;
+    MenuIndex := 3;
+    EnterPause;
+    Want(GameStateValue = GS_PAUSE, 'ESC did not enter the pause state');
+    Want(SavedGameState = GS_PLAY, 'the paused state was not stashed');
+    Want(SavedMenuIndex = 3, 'the cursor was not stashed');
+    Want(MenuIndex = 0, 'the pause cursor did not start at 0');
+
+    { Select RESET and confirm on button 0. }
+    FillChar(Inp, SizeOf(Inp), 0);
+    ScreenPhase := 1;          { past the one-shot init }
+    MenuIndex := PAUSE_RESTART;
+    Inp.Button[0] := True;
+    Pause.Update(Inp, GameStateValue);
+
+    Want(GameStateValue = GS_TITLE_INIT,
+         Format('pause RESET left the state at %d, want GS_TITLE_INIT %d - '
+           + 'anything else is a different screen entirely',
+           [GameStateValue, GS_TITLE_INIT]));
+
+    { THE LEAK. The button is still physically down on the next frame, so if
+      the latch did not go up the title menu sees a fresh confirm and acts on
+      whatever row the cursor is on. }
+    Want(not ConfirmPressed(Inp),
+         'the confirm was not latched - it survives into the title screen and '
+         + 'fires there, which is how RESET turns into CONTINUE');
+    Want(Inp.ButtonLatch[0], 'ButtonLatch[0] was not set by the pause confirm');
+
+    Log.Add(Format('pause: reset -> state %d, confirm latched %s',
+                   [GameStateValue, BoolToStr(Inp.ButtonLatch[0], True)]));
+  finally
+    Pause.Free;
+  end;
+  Result := Bad;
+end;
+
 { The reset callback is what makes this test real. GameState_Reset zeroes the
   shared MenuIndex, so a confirm that reads the index AFTER the reset always
   sees NEW GAME. The first version of this test left OnResetState unassigned
@@ -8560,6 +8631,7 @@ begin
   Inc(Bad, TestConfirmAndGameOver(Log));
   Inc(Bad, TestEnding(Log));
   Inc(Bad, TestContinueLoadsSave(Log, GetTempDir));
+  Inc(Bad, TestPauseFlow(Log));
 
   Result := Bad;
   Log.Add('');

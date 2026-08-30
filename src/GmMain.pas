@@ -173,6 +173,7 @@ type
     procedure EndingPicture(Index: Integer);
     procedure EndingMusic(Track: Integer; Loop: Boolean);
     procedure EndingStopMusic;
+    procedure TitleVolume;
     procedure TitleResetState;
     procedure TitleResetOpening;
     procedure TitleGallery(Slot: Integer);
@@ -370,6 +371,7 @@ begin
   FTitleScreen.OnResetState := TitleResetState;
   FTitleScreen.OnResetOpening := TitleResetOpening;
   FTitleScreen.OnGallery := TitleGallery;
+  FTitleScreen.OnVolume := TitleVolume;
   { Raise the multimedia timer period before the first frame: without it
     the Sleep(1) below takes about 15.6 ms and caps the rate anyway. }
   BeginFrameClock;
@@ -449,6 +451,25 @@ begin
   DispatchPre;
   FSession.TickEntities(GameStateValue);
   DispatchPost;
+  { DIVERGENCE DIV-002. These three stand in for a Joy poll the original does
+    every frame, so they have to LAST one frame - and they were being cleared
+    inside the GS_TITLE_MENU arm instead, which meant any state that did not
+    clear them handed them to whatever ran next.
+
+    That is not theoretical: pressing Down then Z in the PAUSE menu left
+    FMoveY = 1 and FConfirm = True, and pause RESET goes to the title screen.
+    The title menu's first Update then moved its cursor 0 -> 1 and confirmed
+    it in the same call - and row 1 of the title menu is CONTINUE, so Reset
+    loaded the last save. Both menus index the same cursor global and the two
+    rows happen to line up, which is why it looked like the pause menu WAS the
+    main menu.
+
+    Cleared here, after every dispatch, because a real poll would have
+    overwritten them by now regardless of which state ran. }
+  FMoveY := 0;
+  FMoveX := 0;
+  FConfirm := False;
+
   { Step 7. Must come after the dispatch: the handlers read Moving and the
     button latches expecting the PREVIOUS frame's values. }
   InputStep7;
@@ -870,6 +891,13 @@ end;
 
 { What Title_MainMenu reaches out for on NEW GAME / CONTINUE, and for the
   gallery. Callbacks so Title.pas stays off the session and the archive. }
+{ The options screen's volume row, which the original follows with the same
+  57-channel sweep Title_Init ends on. }
+procedure TFrm_main.TitleVolume;
+begin
+  DDSD1.Volume := Settings.Volume;
+end;
+
 procedure TFrm_main.TitleResetState;
 begin
   FSession.ResetState(0);
@@ -1081,9 +1109,6 @@ begin
     GS_TITLE_MENU:
       begin
         FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
-        FMoveY := 0;
-        FMoveX := 0;
-        FConfirm := False;
         FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
       end;
     GS_PLAYER_INIT:

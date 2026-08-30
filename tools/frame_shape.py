@@ -77,6 +77,32 @@ def main():
         for missing in sorted(want - got):
             bad.append('%s has no arm for %s' % (label, missing))
 
+    # The DIV-002 keyboard stand-ins must be one-frame values.
+    #
+    # FMoveX / FMoveY / FConfirm replace a Joy poll the original runs every
+    # frame, so they have to be cleared every frame. They were cleared inside
+    # the GS_TITLE_MENU arm instead, which handed them to whatever ran next:
+    # Down-then-Z in the PAUSE menu left FMoveY = 1 and FConfirm = True, pause
+    # RESET goes to the title, and the title menu's first Update moved its
+    # cursor 0 -> 1 and confirmed CONTINUE in the same call. Reset loaded the
+    # save. No behavioural test can see this - both units are correct on their
+    # own and the leak lives in the form.
+    idle_for_flags = text[text.index('procedure TFrm_main.AppIdle'):]
+    idle_for_flags = idle_for_flags[:idle_for_flags.index('\nprocedure ')]
+    idle_for_flags = re.sub(r'[{][^}]*[}]', ' ', idle_for_flags)
+    for flag in ('FMoveY', 'FMoveX', 'FConfirm'):
+        if not re.search(r'(?<![A-Za-z0-9_])%s\s*:=\s*(0|False)\s*;' % flag,
+                         idle_for_flags):
+            bad.append('AppIdle never clears %s - a keypress in one state '
+                       'survives into the next, and pause RESET turns into '
+                       'title CONTINUE' % flag)
+    post_body = re.sub(r'[{][^}]*[}]', ' ', body_of(text, 'DispatchPost'))
+    for flag in ('FMoveY', 'FMoveX', 'FConfirm'):
+        if re.search(r'(?<![A-Za-z0-9_])%s\s*:=\s*(0|False)\s*;' % flag, post_body):
+            bad.append('DispatchPost clears %s inside a state arm - it must be '
+                       'cleared once per FRAME, or the states that do not '
+                       'clear it inherit it' % flag)
+
     # And the ordering in AppIdle: pre, then the entity update, then post.
     idle = text[text.index('procedure TFrm_main.AppIdle'):]
     idle = idle[:idle.index('\nprocedure ')]

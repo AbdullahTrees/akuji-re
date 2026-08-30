@@ -95,6 +95,7 @@ type
     FOnSound: TSoundEvent;
     FOnResetState: TNotifyProc;
     FOnResetOpening: TNotifyProc;
+    FOnVolume: TNotifyProc;
     FOnGallery: TGalleryEvent;
     procedure PlaySound(Index: Integer);
     procedure MenuConfirm;
@@ -126,6 +127,9 @@ type
     property OnResetOpening: TNotifyProc read FOnResetOpening
                                          write FOnResetOpening;
     property OnGallery: TGalleryEvent read FOnGallery write FOnGallery;
+    { The 57-channel volume sweep, which belongs to the sound device rather
+      than to this unit. }
+    property OnVolume: TNotifyProc read FOnVolume write FOnVolume;
   end;
 
   { --- GameOver_Update @ 0x00461A44 --------------------------------------
@@ -502,6 +506,23 @@ begin
   Val(8, IntToStr(Settings.GallerySel), 2);
 end;
 
+{ 0x004629A0, the options arm's switch. Two things here were missing and both
+  are audible or visible to the player.
+
+  EVERY ROW ACKNOWLEDGES A CHANGE, and the sound is not the same on all of
+  them. The original plays SND_OK on the level, the three toggles and the
+  volume, and SND_PI - the quieter cursor blip - on the gallery row. It sounds
+  only when the value actually MOVED: the clamp works by zeroing the delta
+  first and then testing it, so a press against either end of a range is
+  silent. The toggles have no range, so they always sound.
+
+  THE VOLUME TAKES EFFECT IMMEDIATELY. The original follows the volume write
+  with the same 57-channel sweep Title_Init does -
+
+      for i := 0 to $38 do SetVolume(chan[i], (10 - vol) * -0x1C2)
+
+  so the next sound you hear is at the new level. Storing the number and
+  waiting for the next Title_Init meant the slider moved and nothing changed. }
 procedure TTitleScreen.AdjustValue(Delta: Integer);
 begin
   if Delta = 0 then Exit;
@@ -511,18 +532,43 @@ begin
     orLevel:
       if (Settings.GameLevel + Delta >= LEVEL_MIN) and
          (Settings.GameLevel + Delta <= LEVEL_MAX) then
+      begin
+        PlaySound(SND_OK);
         Inc(Settings.GameLevel, Delta);
-    orToggle1:    FullScreenOn := not FullScreenOn;
-    orToggle2:    WaitOn := not WaitOn;
-    orFrameLimit: SoftwareVsync := not SoftwareVsync;
+      end;
+    orToggle1:
+      begin
+        PlaySound(SND_OK);
+        FullScreenOn := not FullScreenOn;
+      end;
+    orToggle2:
+      begin
+        PlaySound(SND_OK);
+        WaitOn := not WaitOn;
+      end;
+    orFrameLimit:
+      begin
+        PlaySound(SND_OK);
+        SoftwareVsync := not SoftwareVsync;
+      end;
     orVolume:
       if (Settings.Volume + Delta >= VOLUME_MIN) and
          (Settings.Volume + Delta <= VOLUME_MAX) then
+      begin
+        PlaySound(SND_OK);
         Inc(Settings.Volume, Delta);
+        { The sweep, immediately - see the header. }
+        if Assigned(FOnVolume) then
+          FOnVolume;
+      end;
     orOmake:
       if (Settings.GallerySel + Delta >= OMAKE_MIN) and
          (Settings.GallerySel + Delta <= OMAKE_MAX) then
+      begin
+        { SND_PI here, not SND_OK - the gallery row is the one exception. }
+        PlaySound(SND_PI);
         Inc(Settings.GallerySel, Delta);
+      end;
   end;
 end;
 
