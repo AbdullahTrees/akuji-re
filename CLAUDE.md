@@ -8,8 +8,9 @@ Read sections 1–4 before touching anything.
 
 > ## BEFORE YOU EDIT ANY PASCAL FUNCTION
 >
-> **Check `notes/audited.md` first.** It has one row per game-layer function
-> and the STATUS column is the answer:
+> **Check `notes/audited.md` first.** It has three tables - game-layer
+> functions, the component layer, and binary layouts (records whose offsets
+> must match) - and the STATUS column is the answer:
 >
 >     grep -i '<address or name>' notes/audited.md
 >
@@ -18,8 +19,14 @@ Read sections 1–4 before touching anything.
 >   required before the edit**, per change. See section 3a.
 > * `EMUDIFF` — an entity handler. Edit it, then re-run
 >   `python tools/emudiff.py handler_live`.
+> * `PARTIAL` — part of it was compared and the row says which. The
+>   compared part is frozen; ask before changing it.
 > * `UNVERIFIED` — free to change. This is most of them, and it is not a
 >   defect list.
+>
+> The component layer counts. It is code we replace wholesale, so its behaviour
+> is ours to get right - the sprite draw order was inverted there for weeks and
+> no game-layer function could have explained it.
 >
 > This check comes BEFORE the edit, not after. `tools/audited.py` will catch a
 > frozen function that changed, but by then the work is done and has to be

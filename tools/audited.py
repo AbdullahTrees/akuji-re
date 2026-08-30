@@ -3,30 +3,29 @@
 
     python tools/audited.py            check
     python tools/audited.py --list     list by status (--unverified default;
-                                       also --matches --fixed --emudiff)
+                                       also --matches --fixed --partial
+                                       --emudiff)
     python tools/audited.py --bless    rewrite notes/audited.lock
 
-notes/audited.md is ONE row per game-layer function, and the STATUS says what
-evidence exists and therefore whether the function may be edited:
+THREE TABLES, because there are three kinds of thing this project reimplements:
 
-    MATCHES / FIXED   read against a fresh decompile. FROZEN
-    EMUDIFF           an entity handler, verified by running the original's own
-                      machine code. Changeable, but re-run emudiff after
-    UNVERIFIED        no evidence. Free to change
+  1. game-layer functions - population is notes/game_functions.txt, all 149,
+     and every one must have a row
+  2. the component layer - the DirectX and audio suite we replace wholesale.
+     NOT a complete population; there is no authority file, only the addresses
+     our own source cites
+  3. binary layouts - records whose offsets or size must match the original's
+     memory
 
-THE FREEZE, CLAUDE.md section 3a. A MATCHES or FIXED function went through two
-passes: a first that too often wrote the SPECIFICATION into Pascal - a comment
-describing the binary beside code that did something else - and a second that
-read the disassembly, implemented the behaviour, and tested it. That second
-pass is the only reason the row can be trusted, and an edit made in passing
-throws it away silently.
+THE FREEZE, CLAUDE.md section 3a. A MATCHES, FIXED or PARTIAL row has been read
+against a fresh decompile, and that pass is expensive enough that an edit made
+in passing to fix something else silently destroys it - leaving a row that says
+verified beside code it no longer describes. So each frozen row names the Pascal
+implementing it and is fingerprinted into notes/audited.lock with COMMENTS
+STRIPPED and whitespace normalised: prose and layout stay free, a changed
+statement does not. `--bless` rewrites the lock and IS the approval gesture.
 
-Each frozen row names the Pascal implementing it, fingerprinted into
-notes/audited.lock with COMMENTS STRIPPED and whitespace normalised - prose and
-layout stay free, a changed statement does not. `--bless` rewrites the lock and
-IS the approval gesture.
-
-It cannot prove an audit was thorough. It only stops the table describing a
+It cannot prove an audit was thorough. It only stops the tables describing a
 repository that no longer exists.
 """
 
@@ -40,14 +39,16 @@ LEDGER = os.path.join(REPO, 'notes', 'audited.md')
 LOCK = os.path.join(REPO, 'notes', 'audited.lock')
 AUTHORITY = os.path.join(REPO, 'notes', 'game_functions.txt')
 
-FROZEN_STATES = ('MATCHES', 'FIXED')
+FROZEN_STATES = ('MATCHES', 'FIXED', 'PARTIAL')
 ALL_STATES = FROZEN_STATES + ('EMUDIFF', 'UNVERIFIED')
+
+SEC_GAME = '## 1. Game-layer functions'
+SEC_COMP = '## 2. The component layer'
+SEC_LAY = '## 3. Binary layouts'
+SEC_END = '## Supporting routines'
 
 
 def authority():
-    """The population. A hand-written list of what is left drifts away from
-    this the moment one is audited - this file used to carry one that said
-    eight when the truth was fifty-nine."""
     out = []
     for line in open(AUTHORITY, encoding='utf-8'):
         line = line.strip()
@@ -59,11 +60,18 @@ def authority():
     return out
 
 
-def rows():
-    """The one table. Five columns; the three-column supporting table below it
-    is skipped by the length check rather than by position."""
+def section(text, start, end):
+    i = text.find(start)
+    j = text.find(end, i + 1) if i >= 0 else -1
+    if i < 0:
+        return ''
+    return text[i:j] if j > i else text[i:]
+
+
+def fn_rows(block):
+    """addr | name | status | impl | why"""
     out = []
-    for line in open(LEDGER, encoding='utf-8'):
+    for line in block.split('\n'):
         if not line.startswith('| 0x'):
             continue
         c = [x.strip() for x in line.strip().strip('|').split('|')]
@@ -75,10 +83,28 @@ def rows():
     return out
 
 
+def lay_rows(block):
+    """record | unit | status | why"""
+    out = []
+    for line in block.split('\n'):
+        if not line.startswith('| `T'):
+            continue
+        c = [x.strip() for x in line.strip().strip('|').split('|')]
+        if len(c) != 4:
+            continue
+        out.append({'rec': c[0].strip('`'), 'unit': c[1], 'status': c[2],
+                    'why': c[3]})
+    return out
+
+
+def normalise(body):
+    body = re.sub(r'\{(?!\$)[^}]*\}', ' ', body, flags=re.S)
+    body = re.sub(r'\(\*.*?\*\)', ' ', body, flags=re.S)
+    body = re.sub(r'//[^\n]*', ' ', body)
+    return re.sub(r'\s+', ' ', body).strip()
+
+
 def routine_body(unit, name):
-    """One routine's implementation, comments stripped and whitespace
-    normalised. None if it cannot be found - a frozen function that no longer
-    exists is exactly what this catches."""
     path = os.path.join(REPO, 'src', unit)
     if not os.path.exists(path):
         return None
@@ -90,77 +116,116 @@ def routine_body(unit, name):
         return None
     after = text[starts[-1]:]
     m = re.compile(r'\n(?:procedure|function)\s+[A-Za-z_]', re.M).search(after, 1)
-    body = after[:m.start()] if m else after
-    body = re.sub(r'\{(?!\$)[^}]*\}', ' ', body, flags=re.S)
-    body = re.sub(r'\(\*.*?\*\)', ' ', body, flags=re.S)
-    body = re.sub(r'//[^\n]*', ' ', body)
-    return re.sub(r'\s+', ' ', body).strip()
+    return normalise(after[:m.start()] if m else after)
+
+
+def record_body(unit, name):
+    """A record declaration, from `TName = record` to its matching end. Depth
+    counted on the words, because a variant part nests another `record`."""
+    path = os.path.join(REPO, 'src', unit)
+    if not os.path.exists(path):
+        return None
+    text = open(path, encoding='utf-8', errors='replace').read()
+    m = re.search(r'(?<![A-Za-z0-9_])' + re.escape(name)
+                  + r'\s*=\s*(?:packed\s+)?record(?![A-Za-z0-9_])', text)
+    if not m:
+        return None
+    stripped = normalise(text[m.start():])
+    depth = 0
+    for t in re.finditer(r'(?<![A-Za-z0-9_])(record|end)(?![A-Za-z0-9_])',
+                         stripped):
+        if t.group(1) == 'record':
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                return stripped[:t.end()]
+    return None
 
 
 def main():
-    table = rows()
+    text = open(LEDGER, encoding='utf-8').read()
+    game = fn_rows(section(text, SEC_GAME, SEC_COMP))
+    comp = fn_rows(section(text, SEC_COMP, SEC_LAY))
+    lays = lay_rows(section(text, SEC_LAY, SEC_END))
     inv = authority()
     known = {a for a, _ in inv}
     bad = []
-    seen = {}
-
-    for r in table:
-        if r['addr'] in seen:
-            bad.append('%s appears twice in the table' % r['addr'])
-        seen[r['addr']] = r
-        if r['status'] not in ALL_STATES:
-            bad.append('%s has status %r, not one of %s'
-                       % (r['addr'], r['status'], ', '.join(ALL_STATES)))
-        if r['addr'] not in known:
-            bad.append('%s is in the table but not in game_functions.txt'
-                       % r['addr'])
-        if r['status'] in FROZEN_STATES:
-            if not r['impl']:
-                bad.append('%s is %s but names no implementation, so it cannot '
-                           'be frozen' % (r['addr'], r['status']))
-            elif len(r['why']) < 40:
-                bad.append('%s is %s but does not say what was compared'
-                           % (r['addr'], r['status']))
-
-    for addr, name in inv:
-        if addr not in seen:
-            bad.append('%s %s is in the authority and missing from the table'
-                       % (addr, name))
-
     now = {}
-    for r in table:
-        if r['status'] not in FROZEN_STATES or not r['impl']:
-            continue
-        parts = r['impl'].split()
-        if len(parts) != 2:
-            bad.append('%s has an unreadable implementation %r - want '
-                       '"Unit.pas Routine"' % (r['addr'], r['impl']))
-            continue
-        unit, rout = parts
-        body = routine_body(unit, rout)
-        key = '%s %s %s' % (r['addr'], unit, rout)
-        now[key] = (hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]
-                    if body is not None else 'MISSING')
-        if body is None:
-            bad.append('%s is frozen and its Pascal cannot be found' % key)
+
+    def check(rows, checked_against_authority, label):
+        seen = set()
+        for r in rows:
+            if r['addr'] in seen:
+                bad.append('%s appears twice in %s' % (r['addr'], label))
+            seen.add(r['addr'])
+            if r['status'] not in ALL_STATES:
+                bad.append('%s has status %r' % (r['addr'], r['status']))
+            if checked_against_authority and r['addr'] not in known:
+                bad.append('%s is in %s but not in game_functions.txt'
+                           % (r['addr'], label))
+            if r['status'] in FROZEN_STATES:
+                if len(r['why']) < 40:
+                    bad.append('%s is %s but does not say what was compared'
+                               % (r['addr'], r['status']))
+                if r['impl']:
+                    p = r['impl'].split()
+                    if len(p) != 2:
+                        bad.append('%s has an unreadable implementation %r'
+                                   % (r['addr'], r['impl']))
+                    else:
+                        b = routine_body(p[0], p[1])
+                        k = '%s %s %s' % (r['addr'], p[0], p[1])
+                        now[k] = (hashlib.sha256(b.encode()).hexdigest()[:16]
+                                  if b is not None else 'MISSING')
+                        if b is None:
+                            bad.append('%s is frozen and its Pascal cannot be '
+                                       'found' % k)
+        return seen
+
+    seen_game = check(game, True, 'the game table')
+    check(comp, False, 'the component table')
+    for addr, name in inv:
+        if addr not in seen_game:
+            bad.append('%s %s is in the authority and missing from the game '
+                       'table' % (addr, name))
+
+    for r in lays:
+        if r['status'] not in ALL_STATES:
+            bad.append('%s has status %r' % (r['rec'], r['status']))
+        if r['status'] in FROZEN_STATES:
+            if len(r['why']) < 40:
+                bad.append('%s is %s but does not say what was compared'
+                           % (r['rec'], r['status']))
+            b = record_body(r['unit'], r['rec'])
+            k = 'layout %s %s' % (r['unit'], r['rec'])
+            now[k] = (hashlib.sha256(b.encode()).hexdigest()[:16]
+                      if b is not None else 'MISSING')
+            if b is None:
+                bad.append('%s is frozen and its record cannot be found' % k)
 
     if '--list' in sys.argv:
         want = 'UNVERIFIED'
         for st in ALL_STATES:
             if '--' + st.lower() in sys.argv:
                 want = st
-        for addr, name in inv:
-            if seen.get(addr, {}).get('status') == want:
-                print('  %s  %s' % (addr, name))
-        print('%d %s' % (sum(1 for r in table if r['status'] == want), want))
+        n = 0
+        for r in game + comp:
+            if r['status'] == want:
+                print('  %s  %s' % (r['addr'], r['name']))
+                n += 1
+        for r in lays:
+            if r['status'] == want:
+                print('  layout    %s' % r['rec'])
+                n += 1
+        print('%d %s' % (n, want))
         return 0
 
     if '--bless' in sys.argv:
         with open(LOCK, 'w', encoding='utf-8', newline='\n') as fh:
-            fh.write('# Fingerprints of the frozen rows in notes/audited.md -\n'
-                     '# every function whose status is MATCHES or FIXED.\n'
+            fh.write('# Fingerprints of every frozen row in notes/audited.md.\n'
                      '# Comments and whitespace are excluded, so only a change\n'
-                     '# of BEHAVIOUR moves a hash.\n#\n'
+                     '# of BEHAVIOUR or LAYOUT moves a hash.\n#\n'
                      '# Rewritten only by --bless, which is the approval\n'
                      '# gesture CLAUDE.md section 3a requires. Never run it to\n'
                      '# make the gate go quiet.\n')
@@ -170,10 +235,8 @@ def main():
         return 0
 
     if not os.path.exists(LOCK):
-        print('FAIL: notes/audited.lock is missing. Create it once with '
-              '--bless.')
+        print('FAIL: notes/audited.lock is missing. Create it with --bless.')
         return 1
-
     old = {}
     for line in open(LOCK, encoding='utf-8'):
         line = line.strip()
@@ -185,8 +248,8 @@ def main():
         if k not in old:
             bad.append('%s is newly frozen and has no fingerprint' % k)
         elif old[k] != v:
-            bad.append('FROZEN FUNCTION CHANGED: %s\n'
-                       '      Audited against the disassembly; not to be '
+            bad.append('FROZEN AND CHANGED: %s\n'
+                       '      Verified against the disassembly; not to be '
                        'edited as collateral.\n'
                        '      If it really is wrong: say so, quote the '
                        'disassembly, and ASK - CLAUDE.md 3a\n'
@@ -202,10 +265,17 @@ def main():
             print('  ' + b)
         return 1
 
-    c = {st: sum(1 for r in table if r['status'] == st) for st in ALL_STATES}
-    print('%d game functions: %d matched, %d fixed (%d frozen), %d by emudiff, '
-          '%d unverified' % (len(table), c['MATCHES'], c['FIXED'], len(now),
-                             c['EMUDIFF'], c['UNVERIFIED']))
+    def tally(rows):
+        return {s: sum(1 for r in rows if r['status'] == s) for s in ALL_STATES}
+    g, c, l = tally(game), tally(comp), tally(lays)
+    print('game %d: %d matched, %d fixed, %d emudiff, %d unverified'
+          % (len(game), g['MATCHES'], g['FIXED'], g['EMUDIFF'],
+             g['UNVERIFIED']))
+    print('component %d: %d matched, %d unverified   layouts %d: %d matched, '
+          '%d partial, %d unverified'
+          % (len(comp), c['MATCHES'], c['UNVERIFIED'], len(lays),
+             l['MATCHES'], l['PARTIAL'], l['UNVERIFIED']))
+    print('%d frozen' % len(now))
     return 0
 
 

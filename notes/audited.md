@@ -1,29 +1,29 @@
-# Every game-layer function, and what is known about it
+# What is verified, and what may be changed
 
-One row per function, and the STATUS is the whole answer: it says what evidence
-exists, and therefore whether the function may be edited.
+Three tables, because there are three kinds of thing we reimplement and each
+has a different population. In all of them the STATUS is the whole answer: it
+says what evidence exists, and therefore whether the thing may be edited.
 
 | status | evidence | may I change it? |
 |---|---|---|
 | `MATCHES` | read line by line against a fresh decompile; no difference found | **No.** Frozen - CLAUDE.md section 3a. Name it, quote the disassembly, ask first |
 | `FIXED` | read the same way; a difference was found and corrected | **No.** Frozen, same rule |
-| `EMUDIFF` | an entity handler, verified by RUNNING the original's own machine code under Ghidra's emulator - 296 cases, 0 disagree | Yes, but re-run `python tools/emudiff.py handler_live` afterwards |
-| `UNVERIFIED` | none. Nobody has established what it does | Yes, freely |
+| `PARTIAL` | some of it compared, and the row says which | The compared part is frozen; ask before changing it |
+| `EMUDIFF` | an entity handler, verified by RUNNING the original's own machine code - 296 cases, 0 disagree | Yes, then re-run `python tools/emudiff.py handler_live` |
+| `UNVERIFIED` | none | Yes, freely |
 
-**UNVERIFIED is not a defect list.** The game is broadly playable, so most of
-those are probably fine. They are unproven rather than suspect. The point of
-listing them is that when a bug points at one, nobody wastes time assuming it
-was already verified.
+**UNVERIFIED is not a defect list.** The game is broadly playable, so most of it
+is probably fine. It is unproven rather than suspect. The point of listing it is
+that when a bug points at one, nobody wastes time assuming it was checked.
 
-`EMUDIFF` is not a weaker `MATCHES`. For arithmetic it is the stronger evidence,
-because it runs the original instead of reading it. The two answer different
-questions, which is why the entity layer and the flow layer are checked
-differently.
+`tools/audited.py` reads these tables, fingerprints every frozen implementation
+into `notes/audited.lock` with comments stripped, and fails the gate if one
+changes. `--list` filters by status.
 
-The population is `notes/game_functions.txt`, the address authority - 149
-functions between 0x454790 and 0x4671FF. `tools/audited.py` reads THIS table,
-fingerprints every frozen implementation into `notes/audited.lock`, and fails
-the gate if one changes. `python tools/audited.py --list` filters by status.
+## 1. Game-layer functions
+
+The population is `notes/game_functions.txt` - all 149 between 0x454790 and
+0x4671FF - and every one has a row. "It is not in the list" is never an answer.
 
 | addr | function | status | implementation | what was compared |
 |---|---|---|---|---|
@@ -177,23 +177,93 @@ the gate if one changes. `python tools/audited.py --list` filters by status.
 | 0x00466e4c | `Input_ConfirmPressed` | MATCHES | `GameState.pas ConfirmPressed` | button 0 unlatched OR button 1 unlatched - exactly our ConfirmPressed, including the asymmetry that only button 0 is latched by the pause menu's confirm |
 | 0x0046716c | `entry` | UNVERIFIED |  |  |
 
+## 2. The component layer
+
+The third-party DirectX and audio suite, which this project replaces wholesale
+rather than skipping - so its behaviour is ours to get right, and the sprite
+draw order proved it can be wrong in ways the game layer cannot explain.
+
+**This population is NOT complete.** There is no authority file for it; these
+are the addresses our own source cites, which is a lower bound on what we
+depend on and not a census of the suite. A component function absent from this
+table means nobody has needed it yet, not that it does not exist.
+
+| addr | function | status | implementation | what was compared |
+|---|---|---|---|---|
+| 0x00448918 | `FUN_00448918` | UNVERIFIED |  |  |
+| 0x00449d00 | `TDDDD_Present` | UNVERIFIED |  |  |
+| 0x00449e78 | `TDDDD begin frame` | UNVERIFIED |  |  |
+| 0x0044cf1c | `FUN_0044CF1C` | UNVERIFIED |  |  |
+| 0x0044cf68 | `FUN_0044CF68` | UNVERIFIED |  |  |
+| 0x0044d1e0 | `sprite depth sort` | MATCHES | `SpritePool.pas TSpritePool.DrawOrder` | buckets every VISIBLE sprite by depth (+0x34), walking the pool from the LAST slot down; AppIdle then draws buckets 1..7 ascending, so low depth ends up behind, and bucket 0 is never drawn |
+| 0x0044d31c | `draw one depth bucket` | MATCHES |  | walks a bucket FORWARDS for its stored count, so combined with the backwards fill the LOWEST slot number is drawn last and appears in front |
+| 0x0044dae0 | `TileMap_DefineTile` | MATCHES |  | argument order is (Self, TileIndex, Surface, Transparent, SrcY, SrcX) - Y BEFORE X - and it pins the object layout: TileW at +0x6028, TileH at +0x602C, so +0x6034/+0x6038 are ScrollX/ScrollY |
+| 0x0044db3c | `FUN_0044DB3C` | UNVERIFIED |  |  |
+| 0x0044db5c | `TileMap_Get` | UNVERIFIED |  |  |
+| 0x0044dc48 | `fader start` | MATCHES | `DDDDComponent.pas TDDDD.StartFade` | writes +4/+0xC/+0xD and sets the level +8 to 0x78 only when BOTH arguments are 0, which is the fade-IN asymmetry StartFade reproduces |
+| 0x0044dc70 | `fader tick` | UNVERIFIED |  |  |
+| 0x0044de3c | `box frame draw` | UNVERIFIED |  |  |
+| 0x0044e1aa | `FUN_0044E1AA` | UNVERIFIED |  |  |
+| 0x0044e1b8 | `FUN_0044E1B8` | UNVERIFIED |  |  |
+| 0x0044e224 | `FUN_0044E224` | UNVERIFIED |  |  |
+| 0x0044e25c | `FUN_0044E25C` | UNVERIFIED |  |  |
+| 0x0044e2c0 | `FUN_0044E2C0` | UNVERIFIED |  |  |
+| 0x00450cbc | `music stop with fade` | UNVERIFIED |  |  |
+| 0x00450edc | `kbgm remember` | UNVERIFIED |  |  |
+| 0x00450ef0 | `kbgm resume` | UNVERIFIED |  |  |
+| 0x00450f14 | `kbgm play, hard stop` | UNVERIFIED |  |  |
+| 0x00450f74 | `kbgm play, fade` | UNVERIFIED |  |  |
+| 0x00450fd0 | `kbgm IsPlaying` | UNVERIFIED |  |  |
+| 0x00450fd8 | `TDDSD_Play` | UNVERIFIED |  |  |
+| 0x00451004 | `FUN_00451004` | UNVERIFIED |  |  |
+| 0x00451028 | `FUN_00451028` | UNVERIFIED |  |  |
+| 0x0045114c | `FUN_0045114C` | UNVERIFIED |  |  |
+| 0x00451164 | `FUN_00451164` | UNVERIFIED |  |  |
+| 0x0045117c | `FUN_0045117C` | UNVERIFIED |  |  |
+| 0x004511a0 | `FUN_004511A0` | UNVERIFIED |  |  |
+| 0x004511ec | `FUN_004511EC` | UNVERIFIED |  |  |
+| 0x00451354 | `FUN_00451354` | UNVERIFIED |  |  |
+| 0x004513e0 | `FUN_004513E0` | UNVERIFIED |  |  |
+| 0x00452543 | `FUN_00452543` | UNVERIFIED |  |  |
+| 0x00453bdc | `FUN_00453BDC` | UNVERIFIED |  |  |
+
+## 3. Binary layouts
+
+Records whose field offsets or size must match the original's memory. These rot
+silently and expensively: `TPlayerState` once sat a byte short for several
+commits and every integer in `save.dat` read a byte early, because the
+`Assert` that would have caught it was in an `initialization` section and FPC
+compiles assertions out without `-Sa`.
+
+`PARTIAL` is honest here rather than aspirational - a 65-int entity record is
+not placed field by field in one sitting, and the row says which parts were.
+
+| record | unit | status | what was compared |
+|---|---|---|---|
+| `TPlayerState` | PlayerState.pas | PARTIAL | the fields Game_StartOrLoad and HUD_Draw touch: Head[4..7] abilities, Progress from +10, SavedStage +0x11A0, SpawnX/Y +0x11A4/+0x11A8, Lives +0x11B4, MaxLives +0x11B8, ElapsedSec +0x11BC, Counter +0x11C4, Weapon +0x11CC, JumpStrength +0x11D0, MusicTrack +0x11D4, TargetIndex +0x11DC, Difficulty +0x11E0. The SIZE is pinned independently: save.dat is exactly 0x11E4 bytes and startup checks it |
+| `TInputState` | GameState.pas | MATCHES | every offset read out of AppIdle: AxisX +0, AxisY +4, HeldX/Y +8/+0xC, Moving +0x10, RepeatTimer +0x14, HoldTimer +0x18, buttons +0x1C..0x1F, latches +0x20..0x23, repeats +0x24, AnyPressed +0x34 |
+| `TGameSettings` | GameState.pas | MATCHES | 56 bytes, and every field placed from DDDD1Init and FormDestroy: stage +0, level +4, keymap +8..+0x14, the four flag bytes +0x18..+0x1B, volume +0x24, gallery +0x28, unlocks +0x2C..0x32, device +0x34. Round-tripped byte-exact by --selftest-settings |
+| `TEntity` | Entities.pas | PARTIAL | stride 0x104 and the fields the audited functions touch - EF_SPRITE +0x10, EF_VARIANT +0x18, EF_STATE +0x20, EF_DEPTH, EF_EVENT_ID +0xB8. Not every one of the 65 ints has been placed |
+| `TEventRecord` | EventScripts.pas | UNVERIFIED |  |
+| `TEntityType` | Entities.pas | UNVERIFIED |  |
+| `TLayerInfo` | Entities.pas | UNVERIFIED |  |
+| `TQdaEntry` | QdaArchive.pas | UNVERIFIED |  |
+| `TWeapon` | Player.pas | UNVERIFIED |  |
+
 ## Supporting routines identified while auditing
 
-Not part of the 149 - these are RTL and component routines below 0x454790,
-identified because an audited function called them and the answer mattered.
+RTL routines below the component layer, identified because an audited function
+called them and the answer mattered. We do not reimplement these - FPC's own
+RTL provides them - so they carry no status.
 
 | addr | what it is | how it was settled |
 |---|---|---|
 | 0x00407D44 | `Trim` | skips bytes < 0x21 from the front, drops them from the back, Copies the middle |
-| 0x0044DC48 | the fader's start | writes +4/+0xC/+0xD and sets +8 to 0x78 only when both arguments are 0 - the fade-IN asymmetry `TDDDD.StartFade` reproduces |
-| 0x0044D1E0 | the sprite depth sort | buckets every VISIBLE sprite by its depth (+0x34), walking the pool from the LAST slot down. 0x00464D30 then draws buckets 1..7 ascending and bucket 8 after the HUD - so low depth is drawn first and ends up behind, and bucket 0 is never drawn at all |
-| 0x0044D31C | draws one depth bucket | walks the bucket FORWARDS (`local_8 = local_8 + 1`) for its stored count. Since 0x0044D1E0 fills the bucket walking slots from last to first, the bucket holds highest-slot-first and is drawn in that order - so the LOWEST slot number is drawn last and appears in front |
-| 0x0044DAE0 | `TileMap_DefineTile` | pins the tile component's layout: TileW at +0x6028, TileH at +0x602C, so +0x6034/+0x6038 are its ScrollX/ScrollY |
 
 ## Audited before this table existed
 
 Recorded in CLAUDE.md section 14a rather than here, and listed so the gap is
 visible: `Player_Update` (3 defects found) and `Entities.pas`'s `Entity_Spawn`,
 `Entity_TileEdgeDistX/Y` and `Entity_UpdateDying`. They are not marked frozen
-above because that audit predates this table and its detail was never written
-down in the form the other rows use.
+because that audit predates this table and its detail was never written down in
+the form these rows use.
