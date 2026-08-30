@@ -268,8 +268,9 @@ def main():
     def tally(rows):
         return {s: sum(1 for r in rows if r['status'] == s) for s in ALL_STATES}
     g, c, l = tally(game), tally(comp), tally(lays)
-    print('game %d: %d matched, %d fixed, %d emudiff, %d unverified'
-          % (len(game), g['MATCHES'], g['FIXED'], g['EMUDIFF'],
+    print('game %d: %d matched, %d fixed, %d partial, %d emudiff, '
+          '%d unverified'
+          % (len(game), g['MATCHES'], g['FIXED'], g['PARTIAL'], g['EMUDIFF'],
              g['UNVERIFIED']))
     print('component %d: %d matched, %d unverified   layouts %d: %d matched, '
           '%d partial, %d unverified'

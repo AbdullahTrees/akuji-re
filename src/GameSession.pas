@@ -62,6 +62,8 @@ type
     function TileAt(TileX, TileY: Integer): Integer; override;
   end;
 
+  TSessionNotify = procedure of object;
+
   TGameSession = class;
 
   { The world the entity handlers see. Its abstract members - Spawn,
@@ -120,6 +122,8 @@ type
     FStageIndex: Integer;
     FSprites: TSpritePool;
     FBgAnime: TBgAnime;
+    FOnStartFade: TSessionNotify;
+    FOnResetHost: TSessionNotify;
     function GetLayer: TLayerInfo;
   public
     { Borrowed, not owned. }
@@ -204,6 +208,13 @@ type
       terrains 5..9, which is a configuration and not a missing piece -
       Terrain_Configure builds one only for 1..4. }
     property BgAnim: TBgAnime read FBgAnime;
+    { Stage_Begin's first two statements are the fader's, and the component
+      belongs to the form - so the session asks rather than reaching for it.
+      Bound to DDDD1.StartFade(0, False). }
+    property OnStartFade: TSessionNotify read FOnStartFade write FOnStartFade;
+    { GameState_Reset also clears the message box and the overlay, which the
+      form owns. }
+    property OnResetHost: TSessionNotify read FOnResetHost write FOnResetHost;
 
     property Sprites: TSpritePool read FSprites;
     procedure SetFrames(AFrames: TSpriteSet);
@@ -476,12 +487,38 @@ begin
       FEvents.SetActive(I, False);
     end;
 
-  { Not reproduced, because the reconstruction has no counterpart yet:
-    0x0046CE7C, 0x0046D334 (the save slot cursor), 0x0046D028, 0x0046D218,
-    0x0046CC98 and 0x0046CF24 (the message box's line cursors), 0x0046CF28
-    (its mode), 0x0046CD00 (the overlay's dispatch flag) and 0x0046CDA0; and
-    two objects freed through 0x0046D1F0 and 0x0046CEA4, which belong to the
-    opening sequence. }
+  { The interpreter's own three, which DID gain counterparts since the note
+    below was written: 0x0046CE7C is EventId, 0x0046D028 is Arg - the delay
+    that re-fires the opcode-4 checkers - and 0x0046D218 is Cursor. Leaving
+    the delay set across a reset meant a countdown armed in one room could
+    fire in the next. }
+  if FRunner <> nil then
+  begin
+    FRunner.EventId := 0;
+    FRunner.Arg := 0;
+    FRunner.Cursor := 0;
+  end;
+
+  { The message box and the overlay - 0x0046CC98 and 0x0046CF24 (the page
+    start and the reveal cursor), 0x0046CF28 (the mode), 0x0046CD00 and
+    0x0046CDA0 (the overlay's flag and mode). They live on the form, so it is
+    asked rather than reached for. }
+  if Assigned(FOnResetHost) then
+    FOnResetHost;
+
+  { Still not reproduced, and now the whole of the list:
+
+    0x0046D29C and 0x0046D334, the save slot cursor - no counterpart exists.
+
+    The mode<>2 clear above walks THREE layers in the original and zeroes each
+    tile component's scroll at +0x6034/+0x6038 as well as the layer record.
+    This engine models ONE layer, and no shipped stage row uses layers 1 or 2 -
+    every one of the 66 has -1 in csv 3 and 4 - so the other two are never
+    populated and clearing them is unobservable.
+
+    The two objects freed through 0x0046D1F0 and 0x0046CEA4: the first is the
+    power-up panel surface, which this build loads once at startup instead of
+    per-use (see PowerUp_Show), so there is nothing to free. }
 end;
 
 procedure TGameSession.SetFrames(AFrames: TSpriteSet);
@@ -528,6 +565,33 @@ var
   Slot, Terrain, Thr, Kill: Integer;
   Anim: TTerrainAnim;
 begin
+  { --- Stage_Begin @ 0x00462210, statement by statement -------------------
+    The original is THIRTEEN statements and this had four of them. What was
+    missing, and what each cost:
+
+      1-2  fader step 4, then StartFade(0, fade-IN). No room transition ever
+           dissolved - reported as "the transition between stage 01 and 02
+           doesn't occur". FADE_STEP is already 4, so statement 1 is implicit.
+      3    GameState_Reset(form, 1). This is the one that hid the monsters:
+           the reset wipes Progress[4000..4500], the scratch flags, and every
+           type-29 monster uses that range as its BlockedBy. Kill one and the
+           flag stays set forever, so Events_SpawnNearCamera disables the
+           event permanently and it never comes back.
+      4    ScreenPhase := 0.
+
+    ORDERING NOTE. Statements 7-9 - the asset load, the font and the box sheet
+    - are Load_Stage_Assets and live in the form, which calls them BEFORE this.
+    The original resets first and loads second. The two are independent: the
+    reset touches the entity pool, the layer and the progress flags, and the
+    load touches surfaces, sprite frames and the map. Nothing the load writes
+    is read or cleared by the reset. }
+
+  if Assigned(FOnStartFade) then
+    FOnStartFade;                       { 1-2 }
+  ResetState(1);                        { 3 }
+  ScreenPhase := 0;                     { 4 }
+  AGameState := GS_PLAY;                { 5, 0x3C }
+
   FStageIndex := StageIndex;
 
   { Terrain_Configure. The threshold and the kill tile are what every
@@ -577,9 +641,7 @@ begin
                       Player.SpawnX shl POSITION_SHIFT,
                       Player.SpawnY shl POSITION_SHIFT);
   if Slot <> SLOT_NONE then
-    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);
-
-  AGameState := GS_PLAY;
+    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);   { 13 }
 end;
 
 procedure TGameSession.TickBackground;

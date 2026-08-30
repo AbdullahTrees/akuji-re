@@ -8342,8 +8342,15 @@ end;
 type
   TResetSpy = class
     Fired: Boolean;
+    FadeFired: Boolean;
     procedure Reset;
+    procedure Fade;
   end;
+
+procedure TResetSpy.Fade;
+begin
+  FadeFired := True;
+end;
 
 procedure TResetSpy.Reset;
 begin
@@ -8549,6 +8556,7 @@ var
   S: TGameSession;
   GS, I, Bad, StartY, Fell, Moved, StartX, Slot: Integer;
   Placed, LiveAfter, Stage, T, J, NoSprite, EvI, K: Integer;
+  FadeSpy: TResetSpy;
   Types, Blind, Surv: string;
   PlacedIn, SurvivedIn: array[0..ENTITY_TYPE_COUNT - 1] of Integer;
 
@@ -8599,10 +8607,39 @@ begin
       to the OPTIONS page. Seeded with TSM_OPTIONS so the clear is observable;
       a test that starts at 0 cannot tell a clear from a no-op. }
     TitleSubMode := TSM_OPTIONS;
+
+    { --- Stage_Begin's first four statements --------------------------
+      Seeded so each clear is OBSERVABLE: a test that starts at zero cannot
+      tell a clear from a no-op.
+
+      The scratch flag is the monster bug. GameState_Reset wipes
+      Progress[4000..4500], and every type-29 monster in rooms 3 and 4 uses
+      that range as its BlockedBy - so a flag left set makes
+      Events_SpawnNearCamera disable the event forever and the monster never
+      returns. Stage_Begin called no reset at all. }
+    ScreenPhase := 9;
+    S.Player.Progress[PROGRESS_SCRATCH_FIRST] := 1;
+    S.Player.Progress[PROGRESS_LENGTH - 1] := 1;
+    S.Player.Progress[PROGRESS_SCRATCH_FIRST - 1] := 1;   { must SURVIVE }
+    FadeSpy := TResetSpy.Create;
+    S.OnStartFade := FadeSpy.Fade;
+
     S.BeginStage(1, GS);
+
     Want(TitleSubMode = TSM_MENU,
          Format('BeginStage left the title sub-mode at %d - the title screen '
            + 'will come back up on its options page', [TitleSubMode]));
+    Want(S.Player.Progress[PROGRESS_SCRATCH_FIRST] = 0,
+         'BeginStage did not clear the scratch progress flags - a killed '
+         + 'monster stays blocked forever and never respawns');
+    Want(S.Player.Progress[PROGRESS_LENGTH - 1] = 0,
+         'the scratch clear stops short of the end of the block');
+    Want(S.Player.Progress[PROGRESS_SCRATCH_FIRST - 1] = 1,
+         'the scratch clear ran BELOW 4000 and wiped real progress');
+    Want(ScreenPhase = 0, 'BeginStage did not clear ScreenPhase');
+    Want(FadeSpy.FadeFired,
+         'BeginStage did not start the fade - room transitions never '
+         + 'dissolve, which is statements 1 and 2');
 
     Log.Add(Format('stage 1: terrain %d, solid threshold %d, %d events, '
       + 'map %dx%d tiles of %dx%d',

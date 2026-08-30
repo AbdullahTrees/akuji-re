@@ -173,6 +173,8 @@ type
     procedure EndingPicture(Index: Integer);
     procedure EndingMusic(Track: Integer; Loop: Boolean);
     procedure EndingStopMusic;
+    procedure SessionResetHost;
+    procedure StageBeginFade;
     procedure TitleVolume;
     procedure TitleResetState;
     procedure TitleResetOpening;
@@ -372,6 +374,8 @@ begin
   FTitleScreen.OnResetOpening := TitleResetOpening;
   FTitleScreen.OnGallery := TitleGallery;
   FTitleScreen.OnVolume := TitleVolume;
+  FSession.OnStartFade := StageBeginFade;
+  FSession.OnResetHost := SessionResetHost;
   { Raise the multimedia timer period before the first frame: without it
     the Sleep(1) below takes about 15.6 ms and caps the rate anyway. }
   BeginFrameClock;
@@ -961,6 +965,20 @@ end;
   gallery. Callbacks so Title.pas stays off the session and the archive. }
 { The options screen's volume row, which the original follows with the same
   57-channel sweep Title_Init ends on. }
+{ Stage_Begin's first two statements: the fader's step is 4 - which FADE_STEP
+  already is - and then FUN_0044DC48(fader, 0, 0), a fade IN. }
+{ GameState_Reset also clears the message box and the overlay, which live
+  here rather than on the session. }
+procedure TFrm_main.SessionResetHost;
+begin
+  FDialogue.Reset;
+end;
+
+procedure TFrm_main.StageBeginFade;
+begin
+  DDDD1.StartFade(0, False);
+end;
+
 procedure TFrm_main.TitleVolume;
 begin
   DDSD1.Volume := Settings.Volume;

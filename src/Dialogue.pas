@@ -335,6 +335,8 @@ type
     procedure DrawIcon(Dest: TCanvas; X, Y, SrcX, SrcY: Integer);
   public
     { Where the script and the state it answers into live. Set once. }
+    { GameState_Reset's share of this object - see the body. }
+    procedure Reset;
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
                    APlayer: PPlayerState; APool: TEntityPool;
                    AWorld: TEntityWorld = nil);
@@ -1027,6 +1029,32 @@ begin
         end;
       end;
   end;
+end;
+
+{ What GameState_Reset @ 0x004653C8 zeroes on this side: the message box's
+  page start and reveal cursor (0x0046CC98, 0x0046CF24), its mode
+  (0x0046CF28), and the overlay's flag and mode (0x0046CD00, 0x0046CDA0).
+  Called through TGameSession.OnResetHost, because the reset belongs to the
+  session and this object belongs to the form.
+
+  Placed ABOVE Draw deliberately: Draw is the last routine in this unit, so
+  its frozen fingerprint runs to end-of-file and anything appended after it
+  would move the hash without changing a statement. }
+procedure TDialogueBox.Reset;
+begin
+  FActive := False;
+  FMode := omBox;
+  FBoxMode := MB_MODE_TYPING;
+  FPageText := '';
+  FRest := '';
+  FPanelText := '';
+  FReveal := 0;
+  FRevealTimer := 0;
+  FAnimFrame := 0;
+  FAnimTimer := 0;
+  FChoice := 0;
+  FPrompt := False;
+  BuildLines;
 end;
 
 procedure TDialogueBox.Draw(Dest: TCanvas; Font: TGameFont;

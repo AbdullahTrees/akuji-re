@@ -1,4 +1,10 @@
 # selftest: --selftest-session
+# NOT MUTATED, and the reason is worth keeping: "Stage_Begin stops clearing
+# ScreenPhase" and "...the title sub-mode" both SURVIVE, correctly. Those are
+# statements 4 and 6 of Stage_Begin, and GameState_Reset - statement 3 - has
+# already cleared both by the time they run. The original does exactly the same
+# thing twice, so removing either changes no behaviour and no test can kill it.
+# A mutation that cannot fail is noise in the suite, not coverage.
 #
 # The menus, the title sub-mode and the message box. NOT --selftest-entities,
 # which is the harness default and touches none of them - under it every
@@ -15,15 +21,6 @@ src/Title.pas
         if Assigned(FOnResetState) then
           FOnResetState;
         Chosen := MenuIndex;
-===
-Stage_Begin stops clearing the title sub-mode
-src/GameSession.pas
----
-  TitleSubMode := 0;
-
-  FEvents.Load(FGameDir, StageIndex);
---->
-  FEvents.Load(FGameDir, StageIndex);
 ===
 the message box reveals a character every frame instead of every third
 src/Dialogue.pas
@@ -104,4 +101,33 @@ src/SpritePool.pas
       if FSlots[I].Used and FSlots[I].Visible
          and (FSlots[I].Depth = Depth) then
       begin
+===
+Stage_Begin stops clearing the scratch progress flags
+src/GameSession.pas
+---
+  ResetState(1);                        { 3 }
+--->
+  { 3 removed }
+===
+Stage_Begin stops starting the room fade
+src/GameSession.pas
+---
+  if Assigned(FOnStartFade) then
+    FOnStartFade;                       { 1-2 }
+--->
+  { 1-2 removed }
+===
+the scratch wipe starts one flag too high
+src/GameSession.pas
+---
+  for I := PROGRESS_SCRATCH_FIRST to PROGRESS_LENGTH - 1 do
+--->
+  for I := PROGRESS_SCRATCH_FIRST + 1 to PROGRESS_LENGTH - 1 do
+===
+the scratch wipe runs below 4000 into real progress
+src/GameSession.pas
+---
+  for I := PROGRESS_SCRATCH_FIRST to PROGRESS_LENGTH - 1 do
+--->
+  for I := PROGRESS_SCRATCH_FIRST - 1 to PROGRESS_LENGTH - 1 do
 ===
