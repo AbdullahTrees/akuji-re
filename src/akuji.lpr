@@ -7946,8 +7946,8 @@ var
   Frames: TSpriteSet;
   S: TGameSession;
   GS, I, Bad, StartY, Fell, Moved, StartX, Slot: Integer;
-  Placed, LiveAfter, Stage, T, J: Integer;
-  Types: string;
+  Placed, LiveAfter, Stage, T, J, NoSprite: Integer;
+  Types, Blind: string;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -8286,7 +8286,9 @@ begin
       a door does it: map, sprite frames, then BeginStage. What each room
       places is logged by type, because "nothing spawned" and "the wrong
       thing spawned" look identical from a count. }
-    for Stage := 1 to 8 do
+    NoSprite := 0;
+    Blind := '';
+    for Stage := 1 to Stages.Count - 1 do
     begin
       if (Stage >= Stages.Count) or (Stages.Layer[Stage, 0] = LAYER_NONE) then
         Continue;
@@ -8321,6 +8323,16 @@ begin
             T := S.Pool.Field(Slot, EF_TYPE);
             if Pos(Format(' %d ', [T]), Types) = 0 then
               Types := Types + Format(' %d ', [T]);
+            { The gap between "it exists" and "you can see it". An entity with
+              no sprite handle updates, collides and is never drawn - which is
+              precisely what a missing monster looks like from the player's
+              side, and no placement count can see it. }
+            if S.Pool.Field(Slot, EF_SPRITE) = SPRITE_NONE then
+            begin
+              Inc(NoSprite);
+              if Pos(Format('t%d ', [T]), Blind) = 0 then
+                Blind := Blind + Format('t%d ', [T]);
+            end;
           end;
       end;
       Log.Add(Format('room %d: %d events, %d placements, types%s',
@@ -8330,6 +8342,20 @@ begin
              + 'with events that places nothing is the missing-monster bug',
              [Stage, S.Events.Count, Placed]));
     end;
+    Log.Add(Format('all %d rooms swept; %d placements held no sprite%s',
+      [Stages.Count - 1, NoSprite,
+       Copy(' (types ' + Blind + ')', 1, 200 * Ord(NoSprite > 0))]));
+    { Not every blind entity is a bug: types 18, 20 and 32 are the inert
+      markers - two have no handler arm at all and the third updates while
+      drawing nothing. Anything ELSE coming up blind is a monster nobody can
+      see, so the assertion is on the type list, not on the count. }
+    for T := 0 to ENTITY_TYPE_COUNT - 1 do
+      if (Pos(Format('t%d ', [T]), Blind) > 0)
+         and (T <> 18) and (T <> 20) and (T <> 32) then
+        Want(False,
+             Format('type %d is placed by the shipped data and holds no '
+               + 'sprite handle - it updates, collides, and is never drawn',
+               [T]));
   finally
     S.Free;
     Frames.Free;
