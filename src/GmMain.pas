@@ -565,6 +565,22 @@ begin
   FSession.Input.Button[1] := Joy.IsDown(abAction2);
   FSession.Input.Button[2] := Joy.IsDown(abAction3);
   FSession.Input.Button[3] := Joy.IsDown(abAux1);
+
+  { p_InputState[0x34], computed here in 0x00464D30 immediately after the same
+    four-button poll and never anywhere else:
+
+        p_InputState[0x34] = 0;
+        if ((btn0 && !latch0) || (btn1 && !latch1) || (btn2 && !latch2))
+            p_InputState[0x34] = 1;
+
+    THREE buttons, not the two Input_ConfirmPressed tests - button 2, the
+    pause/cancel button, counts here as well. The field existed in
+    TInputState with its offset and was never written, so anything reading it
+    saw False for the whole run. }
+  FSession.Input.AnyPressed :=
+       (FSession.Input.Button[0] and not FSession.Input.ButtonLatch[0])
+    or (FSession.Input.Button[1] and not FSession.Input.ButtonLatch[1])
+    or (FSession.Input.Button[2] and not FSession.Input.ButtonLatch[2]);
 end;
 
 { Step 7, which had been a TODO: the edge detection and the repeat timers, and
@@ -1202,11 +1218,11 @@ begin
             Entity_PlayerTouch, which the log finds in state 60 and nowhere
             else. That gating belongs to the handlers, not to us. }
           if FDialogue.Mode = omPanel then
-            FDialogue.Update(not KbgmPlayer1.IsPlaying, False, False,
+            FDialogue.Update(not KbgmPlayer1.IsPlaying, 0, False,
                              GameStateValue)
           else
             FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
-                             FSession.Input.AxisY < 0, FSession.Input.AxisY > 0,
+                             FSession.Input.AxisX, FSession.Input.Moving,
                              GameStateValue);
         end;
         DrawScene;

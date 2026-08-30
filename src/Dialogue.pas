@@ -86,7 +86,7 @@ interface
 uses
   Classes, SysUtils, Graphics, GameFont, PlayerState, EventRunner, EventScripts,
   TileMaps,
-  GameState, Entities;
+  GameState, Entities, SoundTable;
 
 const
 
@@ -355,7 +355,9 @@ type
       IS that function - the whole unit was written from it, and it sat in
       the backlog as "described, not implemented" purely because nothing
       carried the address where the coverage tool looks. }
-    function Update(Confirm, Up, Down: Boolean; var AGameState: Integer): Boolean;
+    procedure PlayBoxSound(Index: Integer);
+    function Update(Confirm: Boolean; MoveX: Integer; Moving: Boolean;
+                    var AGameState: Integer): Boolean;
 
     procedure Draw(Dest: TCanvas; Font: TGameFont; PlayerScreenY: Integer);
 
@@ -453,6 +455,13 @@ begin
     have lost its second page. }
   Src := Text;
   Page := SplitPage(Src, FRest, FPrompt);
+  { Sound 0xD - kakunin, "confirmation" - the moment a \w prompt comes up.
+    0x00456038 plays it on mode 4's first frame, which is this moment. }
+  if FPrompt then
+  begin
+    FChoice := 0;
+    PlayBoxSound(SND_KAKUNIN);
+  end;
   for N := 0 to BOX_LINES - 1 do
     FLines[N] := '';
 
@@ -780,7 +789,14 @@ begin
   TakePage(FScript.Lines[Index]);
 end;
 
-function TDialogueBox.Update(Confirm, Up, Down: Boolean;
+procedure TDialogueBox.PlayBoxSound(Index: Integer);
+begin
+  if Assigned(FOnSound) then
+    FOnSound(Index);
+end;
+
+function TDialogueBox.Update(Confirm: Boolean; MoveX: Integer;
+                             Moving: Boolean;
                              var AGameState: Integer): Boolean;
 begin
   Result := FActive;
@@ -806,10 +822,25 @@ begin
     Exit;
   end;
 
-  if FPrompt then
+  { THE PROMPT IS HORIZONTAL. 0x00456038's mode 4 draws "Yes       No  " as one
+    string at x 0x70 and puts the cursor at choice * 0x34 + 0x60 - side by
+    side - and moves it on AxisX:
+
+        if ((*(int *)p_InputState != 0) && (p_InputState[0x10] == 0)) {
+            PlaySound(0);
+            *PTR_DAT_0046cf70 += *(int *)p_InputState;
+            clamp to 0..1
+
+    p_InputState + 0 is AxisX and +0x10 is Moving, so it is a fresh press of
+    left or right, and the delta is ADDED and then clamped rather than each
+    direction selecting a fixed side. This took Up and Down, which is the one
+    axis the original does not read here. }
+  if FPrompt and (MoveX <> 0) and not Moving then
   begin
-    if Up then FChoice := 0;
-    if Down then FChoice := 1;
+    PlayBoxSound(SND_PI);
+    Inc(FChoice, MoveX);
+    if FChoice < 0 then FChoice := 0;
+    if FChoice > 1 then FChoice := 1;
   end;
 
   if not Confirm then
@@ -817,6 +848,8 @@ begin
 
   if FPrompt then
   begin
+    { Sound 1 on choosing, which the original plays before it writes. }
+    PlayBoxSound(SND_OK);
     { BOTH flags, which is what 0x00456038 writes - see the header. Writing
       only Progress[3] left every script that guards on "No" unable to see
       the answer at all. }
