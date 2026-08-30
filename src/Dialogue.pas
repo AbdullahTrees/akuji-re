@@ -382,6 +382,7 @@ type
       pickup sound is the script's, not the touch handler's. This override was
       missing, so Host.PlaySound reached TEventHost's empty default and the
       books were collected in silence. }
+    function MessageBusy: Boolean; override;
     procedure PlaySound(Id: Integer); override;
     procedure SetTile(X, Y, Tile: Integer); override;
     { Sub-op 13 @ 0x00455Dxx. Writes the RESUME POINT into the record first -
@@ -677,6 +678,13 @@ procedure TDialogueBox.PlayMusic(Track: Integer; Loop: Boolean);
 begin
   if Assigned(FOnFadeMusic) then
     FOnFadeMusic(Track, Loop);
+end;
+
+{ 0x0046CF28 non-zero: a three-line box is up. The panel is the overlay's
+  flag (0x0046CD00) and is guarded separately, by SubMode. }
+function TDialogueBox.MessageBusy: Boolean;
+begin
+  Result := FActive and (FMode = omBox);
 end;
 
 procedure TDialogueBox.PlaySound(Id: Integer);

@@ -6495,11 +6495,16 @@ type
   TTraceHost = class(TEventHost)
   public
     Trace: TStringList;
+    { Whether a box is up. The real host answers this from FActive, and
+      sub-op 3 guards on it exactly as 0x00455210 guards on 0x0046CF28 - so a
+      stub that always says "no box" makes the arm re-raise every frame. }
+    MsgUp: Boolean;
     Saves: Integer;
     Fading: Boolean;      { what FadeBusy answers }
     constructor Create;
     destructor Destroy; override;
     procedure ShowLine(Index: Integer); override;
+    function MessageBusy: Boolean; override;
     procedure PlaySound(Id: Integer); override;
     procedure PlayMusic(Track: Integer; Loop: Boolean); override;
     procedure SetTile(X, Y, Tile: Integer); override;
@@ -6529,7 +6534,9 @@ begin
 end;
 
 procedure TTraceHost.ShowLine(Index: Integer);
-begin Trace.Add(Format('line %d', [Index])); end;
+begin Trace.Add(Format('line %d', [Index])); MsgUp := True; end;
+function TTraceHost.MessageBusy: Boolean;
+begin Result := MsgUp; end;
 procedure TTraceHost.PlaySound(Id: Integer);
 begin Trace.Add(Format('sound %d', [Id])); end;
 procedure TTraceHost.PlayMusic(Track: Integer; Loop: Boolean);
@@ -6618,7 +6625,14 @@ begin
     if (R.StepIndex = Was)
        and ((R.CurrentSubOp = SUBOP_DIALOGUE)
             or (R.CurrentSubOp = SUBOP_SUBMODE)) then
+    begin
+      { The box or the panel is what advances a script, and closing it is also
+        what lets the next sub-op 3 raise one - the arm guards on the message
+        mode, as 0x00455210 does. Standing in for the player dismissing it. }
+      if Host is TTraceHost then
+        TTraceHost(Host).MsgUp := False;
       R.AdvanceStep(P, GS);
+    end;
   end;
   if GS = GS_STATE_140 then
     Result := -1
@@ -6690,7 +6704,9 @@ begin
     R.Execute(H, S, P, GS);
     Want(H.Trace.Count = 1, 'the prompt was shown twice: ' + H.Trace.CommaText);
 
-    { The box closes on NO, so flag 3 stays clear; the box is what advances. }
+    { The box closes on NO, so flag 3 stays clear; the box is what advances -
+      and closing it is what lets a later sub-op 3 raise one again. }
+    H.MsgUp := False;
     R.AdvanceStep(P, GS);
     Want(R.StepIndex = 1, 'the dialogue did not advance to step 1');
     Want(R.CurrentStep = '', 'step 1 ran with flag 3 clear: ' + R.CurrentStep);
@@ -6703,7 +6719,7 @@ begin
          'the no branch did more than show the prompt: ' + H.Trace.CommaText);
 
     { --- the answer is YES -------------------------------------------- }
-    H.Trace.Clear;
+    H.Trace.Clear;  H.MsgUp := False;   { a fresh scenario: no box up }
     H.Saves := 0;
     FreshPlayer(P);
     GS := GS_PLAY;
@@ -6713,6 +6729,7 @@ begin
     { The prompt's answer. It is the only thing that differs between the two
       runs, and it is one byte. }
     P.Progress[3] := 1;
+    H.MsgUp := False;   { the box closing is what advances }
     R.AdvanceStep(P, GS);
 
     Want(R.CurrentStep = '0003-13', 'the yes branch chose ' + R.CurrentStep);
@@ -6853,7 +6870,7 @@ begin
     R.Execute(H, S, P, GS);
     Want(H.Trace.CommaText = '"line 1"', 'showed ' + H.Trace.CommaText);
 
-    H.Trace.Clear;
+    H.Trace.Clear;  H.MsgUp := False;   { a fresh scenario: no box up }
     FreshPlayer(P);
     P.Progress[1006] := 1;
     GS := GS_PLAY;
@@ -6874,7 +6891,7 @@ begin
     R.StartEvent(S, Idx, 0, P, GS);
     Want(R.CurrentStep = '',
          'a step with no satisfied guard chose ' + R.CurrentStep);
-    H.Trace.Clear;
+    H.Trace.Clear;  H.MsgUp := False;   { a fresh scenario: no box up }
     Want(DriveToEnd(R, H, S, P, GS, 16) >= 0, 'an empty step did not advance');
     Want(H.Trace.Count = 0, 'an empty step did something: ' + H.Trace.CommaText);
     Want(GS = GS_PLAY, 'an all-empty program did not return to GS_PLAY');
@@ -6948,7 +6965,7 @@ begin
     end;
 
     { --- sub-op 0: the fade gates the load ---------------------------- }
-    H.Trace.Clear;
+    H.Trace.Clear;  H.MsgUp := False;   { a fresh scenario: no box up }
     S.Load(GameDir, 2);
     Idx := -1;
     for I := 0 to S.Count - 1 do
@@ -7165,7 +7182,7 @@ begin
         if ClassifyParamB(S[J].ParamB) <> pbProgram then
           Continue;
         Inc(Programs);
-        H.Trace.Clear;
+        H.Trace.Clear;  H.MsgUp := False;   { a fresh scenario: no box up }
         FreshPlayer(P);
         GS := GS_PLAY;
         R.StartEvent(S, J, 0, P, GS);
@@ -7904,6 +7921,128 @@ begin
       + 'runs its three phases');
 end;
 
+{ A two-page message driven the way the FRAME LOOP drives it.
+
+  There was already a test for the box's paging and it passed while the game
+  looped forever, because it drove TDialogueBox alone. The loop needed the
+  other half: EventScript_Execute runs EVERY FRAME while the state is 140, so
+  a sub-op 3 arm whose one-shot guard gets cleared re-raises page 1 for ever.
+  That is what ScreenPhase did once the \k page turn started clearing it, and
+  no box-only test could see it.
+
+  So this drives both, in the frame loop's order, and requires the whole
+  message to finish. }
+function TestMessageLoop(Log: TStrings; const GameDir: string): Integer;
+var
+  Bad, I, Ev, Frames: Integer;
+  Sc: TEventScript;
+  R: TEventRunner;
+  D: TDialogueBox;
+  Pool: TEntityPool;
+  Inp: TInputState;
+  P: TPlayerState;
+  GS: Integer;
+  Seen1, Seen2: string;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+  { one frame, in AppIdle's order: the script first, then the box }
+  procedure Frame(Confirm: Boolean);
+  begin
+    if GS = GS_STATE_140 then
+      R.Execute(D, Sc, P, GS);
+    if D.Active then
+      D.Update(Confirm, Inp, GS);
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- a two-page message finishes, driven as the frame loop does ---');
+
+  Sc := TEventScript.Create;
+  R := TEventRunner.Create;
+  D := TDialogueBox.Create;
+  Pool := TEntityPool.Create;
+  try
+    Sc.Load(GameDir, 13);
+    D.Bind(Sc, R, @P, Pool, nil);
+    FillChar(Inp, SizeOf(Inp), 0);
+    FillChar(P, SizeOf(P), 0);
+    P.Progress[0] := 1;
+
+    { stage 13's sign: one step, 0000-03-0002, which is the two-page line }
+    Ev := -1;
+    for I := 0 to Sc.Count - 1 do
+      if Pos('03-0002', Sc[I].ParamB) > 0 then
+      begin
+        Ev := I;
+        Break;
+      end;
+    Want(Ev >= 0, 'stage 13 has no 0000-03-0002 record - nothing exercised');
+
+    if Ev >= 0 then
+    begin
+      GS := GS_PLAY;
+      R.StartEvent(Sc, Ev, 0, P, GS);
+      Want(GS = GS_STATE_140, 'the script did not enter state 140');
+
+      { Type page 1 out. The box is not up until Execute has run a frame, so
+        the wait is "not up yet OR still typing" - checking only for TYPING
+        exits immediately, before the first frame, and tests nothing. }
+      Frames := 0;
+      while ((not D.Active) or (D.BoxMode = MB_MODE_TYPING))
+            and (Frames < 2000) do
+      begin
+        Frame(False);
+        Inc(Frames);
+      end;
+      Seen1 := D.VisibleLine[0];
+      Want(D.BoxMode = MB_MODE_WAITKEY,
+           Format('page 1 ended in mode %d, want %d', [D.BoxMode,
+                  MB_MODE_WAITKEY]));
+
+      { one confirm, then let it type page 2 - WITH Execute running each frame,
+        which is what re-raised page 1 }
+      Frame(True);
+      Frames := 0;
+      while ((not D.Active) or (D.BoxMode = MB_MODE_TYPING))
+            and (Frames < 2000) do
+      begin
+        Frame(False);
+        Inc(Frames);
+      end;
+      Seen2 := D.VisibleLine[0];
+      Want(Seen2 <> Seen1,
+           Format('after the page turn the box still reads %s - sub-op 3 '
+             + 're-raised page 1, which is the reported infinite loop',
+             [Seen2]));
+
+      { and it must be escapable }
+      Frame(True);
+      Want(not D.Active, 'the box would not close');
+      Want(GS = GS_PLAY,
+           Format('the script left the state at %d, want GS_PLAY - the '
+                  + 'player is stuck in the message', [GS]));
+      Log.Add(Format('two-page message: %s -> %s -> closed',
+                     [Copy(Seen1, 1, 12), Copy(Seen2, 1, 12)]));
+    end;
+  finally
+    Pool.Free;
+    D.Free;
+    R.Free;
+    Sc.Free;
+  end;
+  Result := Bad;
+end;
+
 { Unlocking a door must DESTROY its entity, not merely kill it.
 
   Reported: after unlocking a door, the closed-door sprite followed the player
@@ -8558,6 +8697,46 @@ begin
     Log.Add(Format('typewriter: two bytes every three frames; \k icon cycles '
       + '%d steps, hand %d; both icons exercised',
       [MB_KEY_FRAMES, MB_HAND_FRAMES]));
+
+    { --- a MULTI-PAGE message must reach its last page ------------------
+      Reported: 'Your Fire has increased!' looped forever and the rest of the
+      message was never reachable. That line is tk013's third, and it is two
+      pages joined by \k. Driven here the way a player does it: type the page
+      out, press confirm once, and the SECOND page must appear and differ. }
+    Sc.Load(GameDir, 13);
+    if Sc.LineCount > 2 then
+    begin
+      D.ShowLine(2);
+      Seen := 0;
+      Inp.Button[0] := True;
+      while (D.BoxMode = MB_MODE_TYPING) and (Seen < 4000) do
+      begin
+        D.Update(False, Inp, GS);
+        Inc(Seen);
+      end;
+      Inp.Button[0] := False;
+      L := D.VisibleLine[0];
+      Want(D.BoxMode = MB_MODE_WAITKEY,
+           Format('page 1 of the two-page message ended in mode %d, want %d',
+                  [D.BoxMode, MB_MODE_WAITKEY]));
+
+      { one confirm, exactly as a player gives it }
+      D.Update(True, Inp, GS);
+      Seen := 0;
+      Inp.Button[0] := True;
+      while (D.BoxMode = MB_MODE_TYPING) and (Seen < 4000) do
+      begin
+        D.Update(False, Inp, GS);
+        Inc(Seen);
+      end;
+      Inp.Button[0] := False;
+      Want(D.VisibleLine[0] <> L,
+           Format('after the confirm the box still reads %s - it looped back '
+             + 'to page 1 instead of advancing', [D.VisibleLine[0]]));
+      Want(D.BoxMode = MB_MODE_END,
+           Format('page 2 ended in mode %d, want %d - the message must be '
+             + 'escapable', [D.BoxMode, MB_MODE_END]));
+    end;
   finally
     D.Free;
     Sc.Free;
@@ -9428,6 +9607,7 @@ begin
   Inc(Bad, TestSpriteOrder(Log));
   Inc(Bad, TestOptionTables(Log, GameDir));
   Inc(Bad, TestDisableDestroys(Log, GameDir));
+  Inc(Bad, TestMessageLoop(Log, GameDir));
 
   Result := Bad;
   Log.Add('');

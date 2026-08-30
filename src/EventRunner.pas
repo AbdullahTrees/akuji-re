@@ -70,6 +70,9 @@ type
   public
     { sub-op 3 - a line from the stage's tk file }
     procedure ShowLine(Index: Integer); virtual;
+    { Is a message box already up? 0x00455210's sub-op 3 guards on the MESSAGE
+      MODE at 0x0046CF28, not on ScreenPhase - see the arm below. }
+    function MessageBusy: Boolean; virtual;
     { sub-op 9 / 12 }
     procedure PlaySound(Id: Integer); virtual;
     procedure PlayMusic(Track: Integer; Loop: Boolean); virtual;
@@ -220,6 +223,7 @@ begin
 end;
 
 procedure TEventHost.ShowLine(Index: Integer); begin end;
+function TEventHost.MessageBusy: Boolean; begin Result := False; end;
 procedure TEventHost.PlaySound(Id: Integer); begin end;
 procedure TEventHost.PlayMusic(Track: Integer; Loop: Boolean); begin end;
 procedure TEventHost.SetTile(X, Y, Tile: Integer); begin end;
@@ -444,13 +448,27 @@ begin
       end;
 
     SUBOP_DIALOGUE:
-      { Shown once; the dialogue box itself decides when it is done, and it
-        is what calls AdvanceStep afterwards. }
-      if ScreenPhase = 0 then
-      begin
-        ScreenPhase := 1;
+      { RAISE IT ONCE, and the guard is the MESSAGE MODE - not ScreenPhase.
+        0x00455210's arm is
+
+            case 3:
+              if (*PTR_DAT_0046cf28 == 0)          <- the message mode
+                  *PTR_DAT_0046cf28 = 1;
+                  *PTR_DAT_0046cc98 = 1;           page start
+                  *PTR_DAT_0046cf24 = 1;           reveal cursor
+                  ...set the text...
+
+        This used ScreenPhase as its one-shot, and ScreenPhase is shared with
+        the pause menu, the game-over screen and - fatally - the message box's
+        own \k page turn, which clears it exactly as the original does. So
+        turning a page re-armed the guard, and EventScript_Execute runs EVERY
+        FRAME in state 140: page 1 was re-raised forever and the rest of the
+        message was unreachable. Reported on tk013's two-page 'Your Fire has
+        increased!'.
+
+        The box itself decides when it is done and calls AdvanceStep. }
+      if not Host.MessageBusy then
         Host.ShowLine(StepArg(Step, Op, 0));
-      end;
 
     SUBOP_SET_FLAG:
       begin

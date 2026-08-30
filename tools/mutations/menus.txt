@@ -211,3 +211,15 @@ src/EventRunner.pas
 --->
         Pool.Kill(Rec.EntitySlot);
 ===
+sub-op 3 guards on ScreenPhase again, which the page turn clears
+src/EventRunner.pas
+---
+      if not Host.MessageBusy then
+        Host.ShowLine(StepArg(Step, Op, 0));
+--->
+      if ScreenPhase = 0 then
+      begin
+        ScreenPhase := 1;
+        Host.ShowLine(StepArg(Step, Op, 0));
+      end;
+===
