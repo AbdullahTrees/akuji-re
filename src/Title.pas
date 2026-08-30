@@ -71,7 +71,48 @@ const
   TEXT_OFF  = 'OFF';
   KEY_SUFFIX = ' KEY';
 
+  { The three BUTTON ASSIGN rows draw a key NAME, not the index. 0x00462330
+    indexes the table at 0x00468E44 through the cell at 0x0046D214 by
+    KeyMap[n], and appends ' KEY'. Twelve entries, and they are the keys
+    DirectInput_Init binds. }
+  KEY_NAMES: array[0..11] of string =
+    ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '6');
+
+  { The GALLERY row draws a name from the table at 0x0046906C - through the
+    cell at 0x0046D010, indexed by Settings+0x28 - in variant 2, and then a
+    SECOND string at x 0x108 saying whether that slot is unlocked:
+
+        if (p_Settings[sel + 0x2C] == 1)  DrawText(0x108, 0xB8, variant 0, 'ON')
+        else                              DrawText(0x108, 0xB8, variant 2, 'OFF')
+
+    so the marker's colour carries the state as much as the word does. }
+  OMAKE_NAMES: array[0..6] of string =
+    ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO7');
+  OMAKE_MARK_X = $108;
+
+  { The POINTER CELLS the four tables are reached through - see the test that
+    diffs the constants above against the image. }
+  OPT_LEVEL_NAME_CELL    = $0046D1A0;
+  OPT_LEVEL_VARIANT_CELL = $0046D348;
+  OPT_KEY_NAME_CELL      = $0046D214;
+  OPT_OMAKE_NAME_CELL    = $0046D010;
+
   { Ranges the original clamps to }
+  { The GAME LEVEL row draws a NAME, not a number, and its colour changes with
+    the level. 0x00462330 indexes two tables by Settings+4:
+
+        Game_DrawText(0, 0xE8, 0x38, 0,
+                      *(PTR_DAT_0046D348 + level * 4),    <- the variant
+                      *(PTR_PTR_0046D1A0 + level * 4));   <- the string
+
+    The string table is at 0x00469054 and holds pointers to 'EASY', 'NORMAL'
+    and 'HARD' at 0x00452308, 0x00452318 and 0x00452328. The variant table is
+    at 0x00469060 and holds 0, 0, 1 - so HARD is drawn in a different colour
+    from the other two, which is a detail a number could not carry. This row
+    used to draw IntToStr(level) in variant 2, which was wrong twice over. }
+  LEVEL_NAMES: array[0..2] of string = ('EASY', 'NORMAL', 'HARD');
+  LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 1);
+
   LEVEL_MIN = 0;  LEVEL_MAX = 2;    // p_Settings+0x04
   VOLUME_MIN = 0; VOLUME_MAX = 10;  // p_Settings+0x24
   OMAKE_MIN = 0;  OMAKE_MAX = 6;    // p_Settings+0x28
@@ -499,21 +540,41 @@ procedure TTitleScreen.DrawValues(C: TCanvas; F: TGameFont);
     F.TextOut(C, OPT_VALUE_X, $38 + Row * $10, S, Variant_);
   end;
 
+  { Out-of-range is drawn as the raw index rather than crashing - the settings
+    file is a 56-byte blob the player can corrupt. }
+  function KeyName(Index: Integer): string;
+  begin
+    if (Index >= Low(KEY_NAMES)) and (Index <= High(KEY_NAMES)) then
+      Result := KEY_NAMES[Index] + KEY_SUFFIX
+    else
+      Result := IntToStr(Index) + KEY_SUFFIX;
+  end;
+
   function OnOff(B: Boolean): string;
   begin
     if B then Result := TEXT_ON else Result := TEXT_OFF;
   end;
 
 begin
-  Val(0, IntToStr(Settings.GameLevel), 2);
+  if (Settings.GameLevel >= LEVEL_MIN) and (Settings.GameLevel <= LEVEL_MAX) then
+    Val(0, LEVEL_NAMES[Settings.GameLevel],
+        LEVEL_VARIANTS[Settings.GameLevel]);
   Val(1, OnOff(FullScreenOn));
-  Val(2, IntToStr(Settings.KeyMap[0]) + KEY_SUFFIX);
-  Val(3, IntToStr(Settings.KeyMap[1]) + KEY_SUFFIX);
-  Val(4, IntToStr(Settings.KeyMap[2]) + KEY_SUFFIX);
+  Val(2, KeyName(Settings.KeyMap[0]));
+  Val(3, KeyName(Settings.KeyMap[1]));
+  Val(4, KeyName(Settings.KeyMap[2]));
   Val(5, OnOff(WaitOn));
   Val(6, OnOff(SoftwareVsync));
   Val(7, Format('%3d%%', [Settings.Volume * 10]));
-  Val(8, IntToStr(Settings.GallerySel), 2);
+  if (Settings.GallerySel >= OMAKE_MIN) and (Settings.GallerySel <= OMAKE_MAX) then
+  begin
+    Val(8, OMAKE_NAMES[Settings.GallerySel], 2);
+    { The unlock marker, at its own x and with its own variant. }
+    if Settings.Unknown2C[Settings.GallerySel] = 1 then
+      F.TextOut(C, OMAKE_MARK_X, $38 + 8 * $10, TEXT_ON, 0)
+    else
+      F.TextOut(C, OMAKE_MARK_X, $38 + 8 * $10, TEXT_OFF, 2);
+  end;
 end;
 
 { 0x004629A0, the options arm's switch. Two things here were missing and both

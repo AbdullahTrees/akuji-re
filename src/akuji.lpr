@@ -7904,6 +7904,110 @@ begin
       + 'runs its three phases');
 end;
 
+{ The options screen's four string tables, read back out of akuji.exe.
+
+  Every one of these rows used to draw a NUMBER where the original draws a
+  word - GAME LEVEL as 0/1/2, the three BUTTON ASSIGN rows as the raw key
+  index, GALLERY as the slot number - and a constant list transcribed by hand
+  is exactly the kind of thing that rots. So the lists are diffed against the
+  image rather than trusted.
+
+  The tables are reached through POINTER CELLS in DATA, and the strings they
+  point at live in CODE, so the two biases differ - 0x00401A00 and 0x00400C00.
+  Getting that wrong is what made the first read of these come back empty. }
+function TestOptionTables(Log: TStrings; const GameDir: string): Integer;
+var
+  Bad, I: Integer;
+  F: TFileStream;
+  Exe: string;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+  function Dword(VA, Bias: Integer): Integer;
+  begin
+    F.Position := VA - Bias;
+    F.ReadBuffer(Result, 4);
+  end;
+
+  { A Delphi AnsiString literal: the length sits in the four bytes before it. }
+  function Str(VA: Integer): string;
+  var
+    N: Integer;
+  begin
+    Result := '';
+    N := Dword(VA - 4, DATA_VA_BIAS);
+    if (N <= 0) or (N > 40) then
+    begin
+      N := Dword(VA - 4, CODE_VA_BIAS);
+      if (N <= 0) or (N > 40) then
+        Exit;
+      F.Position := VA - CODE_VA_BIAS;
+    end
+    else
+      F.Position := VA - DATA_VA_BIAS;
+    SetLength(Result, N);
+    F.ReadBuffer(Result[1], N);
+  end;
+
+  { cell -> table base -> the Index'th pointer -> the string it names }
+  function Entry(Cell, Index: Integer): string;
+  begin
+    Result := Str(Dword(Dword(Cell, DATA_VA_BIAS) + Index * 4, DATA_VA_BIAS));
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the options screen''s tables, read out of akuji.exe ---');
+
+  Exe := OriginalExe(GameDir);
+  if Exe = '' then
+  begin
+    Log.Add('  FAIL: no original akuji.exe in the game directory');
+    Result := 1;
+    Exit;
+  end;
+
+  F := TFileStream.Create(Exe, fmOpenRead or fmShareDenyNone);
+  try
+    for I := Low(LEVEL_NAMES) to High(LEVEL_NAMES) do
+      Want(Entry(OPT_LEVEL_NAME_CELL, I) = LEVEL_NAMES[I],
+           Format('GAME LEVEL %d is %s in the image and %s here',
+                  [I, Entry(OPT_LEVEL_NAME_CELL, I), LEVEL_NAMES[I]]));
+
+    for I := Low(LEVEL_VARIANTS) to High(LEVEL_VARIANTS) do
+      Want(Dword(Dword(OPT_LEVEL_VARIANT_CELL, DATA_VA_BIAS) + I * 4,
+                 DATA_VA_BIAS) = LEVEL_VARIANTS[I],
+           Format('GAME LEVEL %d draws in variant %d in the image and %d here',
+                  [I, Dword(Dword(OPT_LEVEL_VARIANT_CELL, DATA_VA_BIAS)
+                            + I * 4, DATA_VA_BIAS), LEVEL_VARIANTS[I]]));
+
+    for I := Low(KEY_NAMES) to High(KEY_NAMES) do
+      Want(Entry(OPT_KEY_NAME_CELL, I) = KEY_NAMES[I],
+           Format('key %d is %s in the image and %s here',
+                  [I, Entry(OPT_KEY_NAME_CELL, I), KEY_NAMES[I]]));
+
+    for I := Low(OMAKE_NAMES) to High(OMAKE_NAMES) do
+      Want(Entry(OPT_OMAKE_NAME_CELL, I) = OMAKE_NAMES[I],
+           Format('gallery %d is %s in the image and %s here',
+                  [I, Entry(OPT_OMAKE_NAME_CELL, I), OMAKE_NAMES[I]]));
+
+    Log.Add(Format('options tables: %d levels, %d keys, %d gallery slots, '
+      + 'all matching the image',
+      [Length(LEVEL_NAMES), Length(KEY_NAMES), Length(OMAKE_NAMES)]));
+  finally
+    F.Free;
+  end;
+  Result := Bad;
+end;
+
 { Sprite draw ORDER, from 0x0044D1E0 and 0x00464D30.
 
   The buckets are drawn in ASCENDING depth - low first, so low ends up BEHIND -
@@ -9214,6 +9318,7 @@ begin
   Inc(Bad, TestTypewriter(Log, GameDir));
   Inc(Bad, TestEventDelay(Log, GameDir));
   Inc(Bad, TestSpriteOrder(Log));
+  Inc(Bad, TestOptionTables(Log, GameDir));
 
   Result := Bad;
   Log.Add('');

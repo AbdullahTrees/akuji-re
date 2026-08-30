@@ -168,3 +168,31 @@ src/Title.pas
   if TitleSubMode = TSM_OMAKE then
     Exit;
 ===
+the game level draws a number instead of its name
+src/Title.pas
+---
+  LEVEL_NAMES: array[0..2] of string = ('EASY', 'NORMAL', 'HARD');
+--->
+  LEVEL_NAMES: array[0..2] of string = ('0', '1', '2');
+===
+HARD loses its distinct colour
+src/Title.pas
+---
+  LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 1);
+--->
+  LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 0);
+===
+a key name is wrong
+src/Title.pas
+---
+    ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '6');
+--->
+    ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '7');
+===
+a gallery slot name is wrong
+src/Title.pas
+---
+    ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO7');
+--->
+    ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO8');
+===
