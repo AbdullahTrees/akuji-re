@@ -184,6 +184,7 @@ type
     procedure GameOverRestart;
     procedure GameOverFade(FadeIn: Boolean);
     procedure GameOverMusic(Track: Integer);
+    function  GameOverMusicPlaying: Boolean;
   end;
 
 var
@@ -368,6 +369,7 @@ begin
   FGameOver.OnRestart := GameOverRestart;
   FGameOver.OnFade := GameOverFade;
   FGameOver.OnMusic := GameOverMusic;
+  FGameOver.OnMusicPlaying := GameOverMusicPlaying;
   { The original calls MainForm.DDSD1.Play straight from the title function;
     routing it through a callback keeps Title.pas off the component layer. }
   FTitleScreen.OnSound := TitleSound;
@@ -1039,6 +1041,13 @@ begin
   LoadStage(0);
 end;
 
+{ FUN_00450FD0, which GameOver_Update calls from inside its phase-2 block
+  rather than being handed the answer. }
+function TFrm_main.GameOverMusicPlaying: Boolean;
+begin
+  Result := KbgmPlayer1.IsPlaying;
+end;
+
 procedure TFrm_main.GameOverFade(FadeIn: Boolean);
 begin
   { The original sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48
@@ -1271,7 +1280,7 @@ begin
           the fader was implemented. With FadeBusy permanently False phase 0
           fell straight into phase 1 in the same frame and BOTH dissolves were
           invisible. +0x0D is TDDDD.FadeBusy. }
-        if FGameOver.Update(DDDD1.FadeBusy, KbgmPlayer1.IsPlaying,
+        if FGameOver.Update(DDDD1.FadeBusy,
                             ConfirmPressed(FSession.Input), GameStateValue) then
           DrawGameOver;
       end;

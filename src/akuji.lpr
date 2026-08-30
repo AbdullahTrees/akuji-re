@@ -5922,6 +5922,119 @@ begin
 end;
 
 
+{ Reported: falling in water kills the player but no game-over screen ever
+  appears, while dying any other way shows one.
+
+  PS_FELL is reached only from Entity_CheckKillTiles, and it counts
+  PF_ANIM_TIMER up to DEATH_HOLD before setting the state to 100. Driving
+  PlayerUpdate alone already reaches game over, so if this fails the fault is
+  in the frame around it, not the death arm: this runs the real
+  Entity_UpdateAll loop, over a layer that is kill tile everywhere. }
+function TestDrownReachesGameOver(Log: TStringList): Integer;
+var
+  Pool: TEntityPool;
+  W: TCountingWorld;
+  S: TStubSprites;
+  Grid: TGridTiles;
+  P: TPlayerState;
+  L: TLayerInfo;
+  Inp: TInputState;
+  E: PEntity;
+  State, Frames, X, Y, Bad, FirstState: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then begin Log.Add('FAILED: ' + What); Inc(Bad); end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- drowning reaches the game-over screen ---');
+
+  Pool := TEntityPool.Create;
+  W := TCountingWorld.Create;
+  S := TStubSprites.Create;
+  Grid := TGridTiles.Create;
+  try
+    W.Pool := Pool;
+    W.Tiles := Grid;
+    W.KillTile := KILL_TILE;
+    Grid.W := 64;
+    Grid.H := 64;
+    for X := 0 to 63 do
+      for Y := 0 to 63 do
+        Grid.Cells[X, Y] := KILL_TILE;
+
+    FillChar(L, SizeOf(L), 0);
+    L.OriginX := POSITION_BIAS;
+    L.OriginY := POSITION_BIAS;
+    L.TileW := 32;
+    L.TileH := 32;
+    FillChar(P, SizeOf(P), 0);
+    FillChar(Inp, SizeOf(Inp), 0);
+
+    E := Pool.Entity(0);
+    FillChar(E^, SizeOf(TEntity), 0);
+    E^.Raw[EF_SLOT]   := 0;
+    E^.Raw[EF_ALIVE]  := 1;
+    E^.Raw[EF_TYPE]   := 1;
+    E^.Raw[EF_SPRITE] := SPRITE_NONE;
+    E^.Raw[EF_BYTE94] := 1;
+    { A REAL extent. With both extents left at zero the swept box is empty -
+      Bottom lands one below Top because of the -1 - and the check returns
+      having probed no tile at all, which is what the original does too. A
+      test built that way cannot fail. The player sprite is 32x32. }
+    E^.Raw[EF_EXTENT_X] := 32;
+    E^.Raw[EF_EXTENT_Y] := 32;
+    E^.Raw[EF_POS_X]  := (64 shl POSITION_SHIFT) + POSITION_BIAS;
+    E^.Raw[EF_POS_Y]  := (64 shl POSITION_SHIFT) + POSITION_BIAS;
+
+    { One frame first: the kill check has to fire at all before the countdown
+      means anything. }
+    { The GLOBAL, not a local. EnterGameOver writes GameStateValue directly,
+      and GmMain threads that same global through TickEntities - so a local
+      here would never see the write and the loop below could not end. }
+    GameStateValue := GS_PLAY;
+    Grid.Probes := '';
+    EntityUpdateAll(Pool, W, S, P, L, Inp, GameStateValue);
+    FirstState := E^.Raw[PF_STATE];
+    { The grid records every probe, so an empty sweep is caught rather than
+      passing for a miss. }
+    Want(Grid.Probes <> '',
+         'the kill check swept no tile at all - with both extents zero the '
+         + 'box is empty and this test cannot fail');
+    Want(FirstState = PS_FELL,
+         Format('after one frame over kill tiles the player state is %d, '
+           + 'want PS_FELL (%d) - the kill check never fired, so nothing '
+           + 'below is being tested', [FirstState, PS_FELL]));
+
+    Frames := 1;
+    while (GameStateValue = GS_PLAY) and (Frames < 400) do
+    begin
+      EntityUpdateAll(Pool, W, S, P, L, Inp, GameStateValue);
+      Inc(Frames);
+    end;
+    State := GameStateValue;
+
+    Want(State = GS_PLAY_ALT,
+         Format('after %d frames the game state is %d, want GS_PLAY_ALT (%d). '
+           + 'Player state %d, death timer %d of %d, alive %d - drowning '
+           + 'never reaches the game-over screen',
+           [Frames, State, GS_PLAY_ALT, E^.Raw[PF_STATE],
+            E^.Raw[PF_ANIM_TIMER], DEATH_HOLD, E^.Raw[EF_ALIVE]]));
+  finally
+    Grid.Free;
+    S.Free;
+    W.Free;
+    Pool.Free;
+  end;
+
+  if Bad = 0 then
+    Log.Add('drowning: kill tile -> PS_FELL -> game over');
+  Result := Bad;
+end;
+
 function SelfTestEntities(Log: TStringList): Integer;
 var
   GameDir, ExeName: string;
@@ -6431,6 +6544,7 @@ begin
   Inc(Result, TestTouchHandlers(Log));
   Inc(Result, TestTileCollide(Log, GameDir));
   Inc(Result, TestKillTiles(Log));
+  Inc(Result, TestDrownReachesGameOver(Log));
   Inc(Result, TestSpriteTables(Log, GameDir));
   Inc(Result, TestItemHandlers(Log));
   Inc(Result, TestEffectHandlers(Log));
@@ -7817,9 +7931,13 @@ type
   TGameOverProbe = class
   public
     Restarts, Fades, Tunes: Integer;
+    { Starting a track makes it play - that is the point of the fix, so the
+      double has to model it rather than hold a constant. }
+    Playing: Boolean;
     procedure Restart;
     procedure Fade(FadeIn: Boolean);
     procedure Music(Track: Integer);
+    function  IsPlaying: Boolean;
   end;
 
 procedure TGameOverProbe.Restart;
@@ -7830,7 +7948,11 @@ procedure TGameOverProbe.Music(Track: Integer);
 begin
   Inc(Tunes);
   if Track <> GAMEOVER_MIDI then Tunes := -1000;
+  Playing := True;
 end;
+
+function TGameOverProbe.IsPlaying: Boolean;
+begin Result := Playing; end;
 
 { Input_ConfirmPressed @ 0x00466E4C and GameOver_Update @ 0x00461A44.
 
@@ -7879,17 +8001,25 @@ begin
     G.OnRestart := Probe.Restart;
     G.OnFade := Probe.Fade;
     G.OnMusic := Probe.Music;
+    G.OnMusicPlaying := Probe.IsPlaying;
 
+    { SILENT AT THE START, which is the drowning case: PS_FELL calls
+      StopMusic before the death timer ever reaches DEATH_HOLD, so the
+      screen begins with nothing playing. Phase 1 starts the game-over tune
+      itself, and phase 2 must see THAT, not the silence it began in. With
+      the answer passed in as an argument this read False and the screen was
+      dismissed in the same frame it appeared. }
+    Probe.Playing := False;
     ScreenPhase := 0;
     TitleSubMode := 7;
     GS := GS_PLAY_ALT;
 
-    Drawn := G.Update(False, True, False, GS);
+    Drawn := G.Update(False, False, GS);
     Want(not Drawn, 'phase 0 drew something');
     Want(ScreenPhase = 1, 'phase 0 did not step to 1');
     Want(Probe.Fades = 1, 'phase 0 did not ask for a fade');
 
-    Drawn := G.Update(False, True, False, GS);
+    Drawn := G.Update(False, False, GS);
     Want(Drawn, 'phase 2 did not draw');
     Want(ScreenPhase = 2, 'phase 1 did not step to 2');
     Want(Probe.Restarts = 1, 'the run was not torn down');
@@ -7897,18 +8027,23 @@ begin
     Want(TitleSubMode = 0, 'the title sub-mode was not cleared');
     Want(GS = GS_PLAY_ALT, 'the state left 100 too early');
 
-    { Held while the tune plays ... }
-    Drawn := G.Update(False, True, False, GS);
-    Want(Drawn and (GS = GS_PLAY_ALT), 'the screen ended while the music ran');
+    { Held while the tune plays - and this is the regression: the screen
+      arrived with the music stopped, so this is the frame that used to end
+      it on the spot. }
+    Drawn := G.Update(False, False, GS);
+    Want(Drawn and (GS = GS_PLAY_ALT),
+         'the screen ended while the music ran - a death that stopped the '
+         + 'stage music first never showed a game-over screen at all');
     { ... and confirm cuts it short. }
-    G.Update(False, True, True, GS);
+    G.Update(False, True, GS);
     Want(GS = GS_TITLE_INIT, 'confirm did not return to the title');
     Want(ScreenPhase = 0, 'the phase was not reset on the way out');
 
     { And the music running out ends it on its own. }
     ScreenPhase := 2;
     GS := GS_PLAY_ALT;
-    G.Update(False, False, False, GS);
+    Probe.Playing := False;
+    G.Update(False, False, GS);
     Want(GS = GS_TITLE_INIT, 'the screen outlived its own music');
   finally
     G.Free;
@@ -8069,6 +8204,9 @@ var
   World: TEntityWorld;
   Killer: TAllKillTiles;
   L: TLayerInfo;
+  Inp2: TInputState;
+  P2: TPlayerState;
+  GS2, Frames: Integer;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -8147,6 +8285,34 @@ begin
                       Pool.Field(Slot, EF_BLOCK_B)]));
 
       Log.Add('kill tile: lethal at 29, harmless at 30');
+
+      { --- and PS_FELL must REACH the game-over screen -----------------
+        Reported: drowning kills but no game-over screen appears, while other
+        deaths show one. PS_FELL counts PF_ANIM_TIMER to DEATH_HOLD and then
+        sets the state to 100. Driven here directly, with no kill tile in
+        reach, so nothing can interfere. }
+      World.Tiles := nil;
+      Pool.SetField(Slot, EF_STATE, KILL_TILE_STATE);
+      { 1, not 0: the timer-zero branch spawns debris and touches the music
+        device, which a bare TEntityWorld answers abstractly. The countdown is
+        what is under test. }
+      Pool.SetField(Slot, EF_BLOCK_B, 1);
+      FillChar(Inp2, SizeOf(Inp2), 0);
+      FillChar(P2, SizeOf(P2), 0);
+      GS2 := GS_PLAY;
+      GameStateValue := GS_PLAY;
+      Frames := 0;
+      while (GameStateValue = GS_PLAY) and (Frames < 400) do
+      begin
+        PlayerUpdate(Pool.Entity(Slot)^, P2, L, Inp2, World, GS2);
+        Inc(Frames);
+      end;
+      Want(GameStateValue = GS_PLAY_ALT,
+           Format('after %d frames in PS_FELL the state is %d, want %d - '
+             + 'drowning never reaches the game-over screen. Death timer '
+             + 'ended at %d, DEATH_HOLD is %d',
+             [Frames, GameStateValue, GS_PLAY_ALT,
+              Pool.Field(Slot, EF_BLOCK_B), DEATH_HOLD]));
     end;
   finally
     Killer.Free;

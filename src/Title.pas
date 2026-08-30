@@ -200,6 +200,9 @@ type
   TFadeEvent = procedure(FadeIn: Boolean) of object;
   TMusicEvent = procedure(Track: Integer) of object;
   TRestartEvent = procedure of object;
+  { Asked, not told. GameOver_Update calls FUN_00450FD0 for the answer at the
+    point it uses it, so this has to be a query and not a value handed in. }
+  TQueryEvent = function: Boolean of object;
 
 const
   GAMEOVER_MIDI = 2;        { AutoLoadMidis[2] is midi\gameover }
@@ -211,16 +214,38 @@ type
     FOnFade: TFadeEvent;
     FOnMusic: TMusicEvent;
     FOnRestart: TRestartEvent;
+    FOnMusicPlaying: TQueryEvent;
   public
     { Returns True while the screen should be drawn, which is phase 2 only.
-      FadeBusy and MusicPlaying are asked of the host every frame because the
-      original asks its two components every frame. }
-    function Update(FadeBusy, MusicPlaying, Confirm: Boolean;
+
+      MUSIC IS NOT A PARAMETER, and that is the whole point. The original
+      calls FUN_00450FD0 inside the phase-2 block, in this order:
+
+          phase 2:  draw the screen
+                    cVar1 = FUN_00450FD0()        <-- asked here
+                    leave to state 10 if cVar1 is 0, or confirm
+
+      and phase 1, in the SAME call, has just started the game-over midi.
+      Taking the answer as an argument means the caller reads it before
+      Update runs, so phase 2 sees the state from BEFORE its own music
+      started. Any death that silences the stage track first - PS_FELL calls
+      StopMusic, PS_DYING does not - then left phase 2 immediately and the
+      screen was never seen. Drowning showed no game over; dying any other
+      way did.
+
+      Confirm stays a parameter: the original calls Input_ConfirmPressed
+      lazily, second in an ||, but ConfirmPressed is a pure read of the input
+      snapshot, so evaluating it eagerly cannot differ. FadeBusy stays one
+      too - it is read in the phase-1 condition, and nothing in the call
+      changes the fader before that point. }
+    function Update(FadeBusy, Confirm: Boolean;
                     var AGameState: Integer): Boolean;
 
     property OnFade: TFadeEvent read FOnFade write FOnFade;
     property OnMusic: TMusicEvent read FOnMusic write FOnMusic;
     property OnRestart: TRestartEvent read FOnRestart write FOnRestart;
+    property OnMusicPlaying: TQueryEvent
+      read FOnMusicPlaying write FOnMusicPlaying;
   end;
 
 
@@ -382,8 +407,10 @@ end;
 
 { --- TGameOverScreen ----------------------------------------------------- }
 
-function TGameOverScreen.Update(FadeBusy, MusicPlaying, Confirm: Boolean;
+function TGameOverScreen.Update(FadeBusy, Confirm: Boolean;
                                 var AGameState: Integer): Boolean;
+var
+  MusicPlaying: Boolean;
 begin
   Result := False;
 
@@ -411,7 +438,9 @@ begin
   if ScreenPhase = 2 then
   begin
     Result := True;
-    { Held for exactly as long as the tune, unless you cut it short. }
+    { Held for exactly as long as the tune, unless you cut it short. Asked
+      HERE, after phase 1 has started that tune - see the note on Update. }
+    MusicPlaying := Assigned(FOnMusicPlaying) and FOnMusicPlaying();
     if (not MusicPlaying) or Confirm then
     begin
       ScreenPhase := 0;
