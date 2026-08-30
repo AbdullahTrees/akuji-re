@@ -915,6 +915,10 @@ type
     { 0x004617FC. A ~30% chance of dropping a type 36. }
     procedure MaybeDropItem(const E: TEntity); virtual;
     procedure PlaySound(Id: Integer); virtual; abstract;
+    { Player_Update's fall-death arm stops the music before the death
+      sound - FUN_00450CBC with a fade of 0. Abstract on purpose: a
+      no-op default is how the other silent-audio bugs happened. }
+    procedure StopMusic; virtual; abstract;
     { Delphi's Random(N), which the original's behaviour genuinely depends
       on. Overridable only so a test can make a trace repeatable. }
     function RandomBelow(N: Integer): Integer; virtual;

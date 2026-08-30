@@ -76,6 +76,7 @@ type
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure PlaySound(Id: Integer); override;
+    procedure StopMusic; override;
 
     { The event system, which Entity_Destroy and the touch handlers reach
       through the world rather than directly. }
@@ -99,6 +100,7 @@ type
   public
     procedure PlayEffect(Id: Integer); virtual;
     procedure PlayMusic(Track: Integer; Loop: Boolean); virtual;
+    procedure StopMusic; virtual;
   end;
 
   { One running game. Owns the pool, the event table and the interpreter;
@@ -258,6 +260,10 @@ procedure TSessionAudio.PlayMusic(Track: Integer; Loop: Boolean);
 begin
 end;
 
+procedure TSessionAudio.StopMusic;
+begin
+end;
+
 { --- TGameWorld ---------------------------------------------------------- }
 
 constructor TGameWorld.Create(ASession: TGameSession);
@@ -282,6 +288,12 @@ begin
   if (FSession.Pool = nil) or (Slot = SLOT_NONE) then
     Exit;
   FSession.Pool.SetField(Slot, IntIndex, Value);
+end;
+
+procedure TGameWorld.StopMusic;
+begin
+  if FSession.Audio <> nil then
+    FSession.Audio.StopMusic;
 end;
 
 procedure TGameWorld.PlaySound(Id: Integer);

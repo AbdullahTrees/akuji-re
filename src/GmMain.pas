@@ -56,6 +56,7 @@ type
     constructor Create(AForm: TFrm_main);
     procedure PlayEffect(Id: Integer); override;
     procedure PlayMusic(Track: Integer; Loop: Boolean); override;
+    procedure StopMusic; override;
   end;
 
   TFormStartHost = class(TStartHost)
@@ -765,6 +766,12 @@ procedure TFormAudio.PlayMusic(Track: Integer; Loop: Boolean);
 begin
   { The fade wrapper - see the note on the class. }
   FForm.PlayMusicTrack(Track, Loop, KBGM_STOP_FADE_NEWGAME);
+end;
+
+procedure TFormAudio.StopMusic;
+begin
+  { FUN_00450CBC with a fade of 0 - a hard stop. }
+  FForm.StopMusicTrack;
 end;
 
 constructor TFormStartHost.Create(AForm: TFrm_main);

@@ -3061,6 +3061,7 @@ type
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure SpawnDebris(const E: TEntity; Kind: Integer); override;
     procedure PlaySound(Id: Integer); override;
+    procedure StopMusic; override;
     function RandomBelow(N: Integer): Integer; override;
   end;
 
@@ -3117,6 +3118,9 @@ procedure TFlatWorld.SpawnDebris(const E: TEntity; Kind: Integer);
 begin
   Inc(Spawns);
 end;
+
+procedure TFlatWorld.StopMusic;
+begin end;
 
 procedure TFlatWorld.PlaySound(Id: Integer);
 begin
@@ -3530,6 +3534,7 @@ type
     procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); override;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); override;
     procedure PlaySound(Id: Integer); override;
+    procedure StopMusic; override;
     function EventProgressIndex(EventId: Integer): Integer; override;
     procedure SetProgress(Index: Integer); override;
   end;
@@ -3587,6 +3592,9 @@ begin
   if Pool <> nil then
     Pool.SetField(Slot, IntIndex, Value);
 end;
+procedure TCountingWorld.StopMusic;
+begin end;
+
 procedure TCountingWorld.PlaySound(Id: Integer);
 begin
   Inc(Sounds);

@@ -94,6 +94,9 @@ const
   { 9 and 10 play on BOTH entering and leaving their state, so the -_END names
     they carried were half wrong. }
   SND_GLIDE       = 9;    SND_AIRDASH    = 10;
+  { 0x79. Both death states hold for 121 frames before the game-over
+    screen. }
+  DEATH_HOLD      = $79;
   SND_DEATH       = 12;   SND_DASH_START = 21;
 
   { --- The weapon table @ 0x00468E84, four 16-byte records ----------------
@@ -434,6 +437,25 @@ end;
   Player_Update itself.
   --------------------------------------------------------------------------- }
 
+{ Both death states end the same way, at the tail of Player_Update's case 9
+  and case 10:
+
+      if (++timer < 0x79) return;
+      p_GameState   := 100;    the game-over screen
+      p_ScreenPhase := 0;
+
+  This was a comment saying "the caller owns that" and no code, and no caller
+  owned it - so dying played its animation for 121 frames and then carried on
+  as though nothing had happened. AGameState is passed by VALUE all the way
+  down, so the player could not have set it through the parameter even had a
+  caller wanted it to. The original does not either: it writes the globals,
+  which is what this does. }
+procedure EnterGameOver;
+begin
+  GameStateValue := GS_PLAY_ALT;
+  ScreenPhase := 0;
+end;
+
 { Player_Update @ 0x004585A8. }
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
@@ -543,9 +565,9 @@ begin
       begin
         E.Raw[PF_ANIM_ID] := SPR_DEATH[FacingIndex(E)];
         Inc(E.Raw[PF_ANIM_TIMER]);
-        if E.Raw[PF_ANIM_TIMER] < $79 then
+        if E.Raw[PF_ANIM_TIMER] < DEATH_HOLD then
           Exit;
-        { GameState := 100, the game-over screen. The caller owns that. }
+        EnterGameOver;
         Exit;
       end;
 
@@ -554,11 +576,18 @@ begin
         if E.Raw[PF_ANIM_TIMER] = 0 then
         begin
           World.SpawnDebris(E, 0);
+          { The original stops the music here, before the death sound -
+            FUN_00450CBC with a fade of 0. Falling silences the stage track;
+            dying on screen does not. }
+          World.StopMusic;
           World.PlaySound(SND_DEATH);
         end;
         E.Raw[EF_POS_X] := 0;
         E.Raw[EF_POS_Y] := 0;
         Inc(E.Raw[PF_ANIM_TIMER]);
+        if E.Raw[PF_ANIM_TIMER] < DEATH_HOLD then
+          Exit;
+        EnterGameOver;
         Exit;
       end;
   end;
