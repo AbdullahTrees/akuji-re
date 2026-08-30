@@ -3045,13 +3045,21 @@ begin
       [P.Head[ABILITY_DASH], P.Head[ABILITY_WALLKICK],
        P.Head[ABILITY_AIRDASH], P.Head[ABILITY_GLIDE]]));
     { Pinned exactly. The claim is that these four bytes are the abilities and
-      that the shipped save is early enough to have only the first. If the file
-      is ever replaced these numbers change and the reading has to be redone
-      rather than quietly adjusted. }
+      that this save is early enough to have only the first. If the file is
+      ever replaced these numbers change and the reading has to be redone
+      rather than quietly adjusted.
+
+      PROVENANCE: the file distributed with the English release was lost on
+      2026-08-30, overwritten by a playtest before anything tracked it. What
+      sits in tests/fixtures now is a real game-written early save supplied on
+      2026-08-31 - stage 2, 46 seconds, the starting jump and weapon, and the
+      dash alone - which is the same shape and is equally good evidence that
+      LoadSave reads the real format, because the game wrote it. It is NOT
+      claimed to be the shipped bytes, and nothing here should say it is. }
     if (P.Head[ABILITY_DASH] <> 1) or (P.Head[ABILITY_WALLKICK] <> 0) or
        (P.Head[ABILITY_AIRDASH] <> 0) or (P.Head[ABILITY_GLIDE] <> 0) then
     begin
-      Log.Add('FAILED: the shipped save no longer has exactly the dash unlocked');
+      Log.Add('FAILED: the save fixture no longer has exactly the dash unlocked');
       Inc(Result);
     end;
     if P.Progress[0] <> 1 then
