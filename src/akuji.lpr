@@ -7946,7 +7946,8 @@ var
   Frames: TSpriteSet;
   S: TGameSession;
   GS, I, Bad, StartY, Fell, Moved, StartX, Slot: Integer;
-  Placed, LiveAfter: Integer;
+  Placed, LiveAfter, Stage, T, J: Integer;
+  Types: string;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -8277,6 +8278,58 @@ begin
     Want(S.Sprites.LiveCount = LiveAfter,
          Format('%d entities are holding %d sprites',
                 [LiveAfter, S.Sprites.LiveCount]));
+
+    { --- and the same for EVERY early room ---------------------------
+      The sweep above only ever ran stage 1, which places no monsters at
+      all - so it could pass while every later room came up empty, and
+      that is exactly the symptom being chased. Rooms are reloaded the way
+      a door does it: map, sprite frames, then BeginStage. What each room
+      places is logged by type, because "nothing spawned" and "the wrong
+      thing spawned" look identical from a count. }
+    for Stage := 1 to 8 do
+    begin
+      if (Stage >= Stages.Count) or (Stages.Layer[Stage, 0] = LAYER_NONE) then
+        Continue;
+      if not Map.Load(GameDir, Stages.Layer[Stage, 0]) then
+      begin
+        Log.Add(Format('room %d: its map would not load', [Stage]));
+        Inc(Bad);
+        Continue;
+      end;
+      Frames.LoadSet(GameDir, Stages.SpriteSet[Stage]);
+      S.SetFrames(Frames);
+      InitNewGame(S.Player, 0);
+      ApplySessionFlags(S.Player, 0);
+      GS := GS_STAGE_BEGIN;
+      S.BeginStage(Stage, GS);
+
+      Types := '';
+      Placed := 0;
+      { BOTH axes. Sweeping only X held the camera at whatever row the
+        player happened to start on, and rooms 2 and 7 - whose events all sit
+        at tile Y 5 - came up empty purely because that row was never in the
+        window. A one-axis sweep of a two-axis window is not a sweep. }
+      for J := 0 to Map.MapHeight - 1 do
+      for I := 0 to Map.MapWidth - 1 do
+      begin
+        S.SetCamera(I * Map.TileWidth, J * Map.TileHeight);
+        S.Frame(GS);
+        for Slot := 1 to 255 do
+          if S.Pool.Alive[Slot] then
+          begin
+            Inc(Placed);
+            T := S.Pool.Field(Slot, EF_TYPE);
+            if Pos(Format(' %d ', [T]), Types) = 0 then
+              Types := Types + Format(' %d ', [T]);
+          end;
+      end;
+      Log.Add(Format('room %d: %d events, %d placements, types%s',
+                     [Stage, S.Events.Count, Placed, Types]));
+      Want(S.Events.Count = 0 = (Placed = 0),
+           Format('room %d loaded %d events and placed %d entities - a room '
+             + 'with events that places nothing is the missing-monster bug',
+             [Stage, S.Events.Count, Placed]));
+    end;
   finally
     S.Free;
     Frames.Free;

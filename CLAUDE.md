@@ -152,6 +152,37 @@ swallowed the entry byte of the function at `0x464D30`.
 To fix one: `G` → address, `C` (clear), `D` (disassemble), `F` (create function).
 Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
+## 3a-0. Working rule: the comments are a specification, not a record
+
+**Read the comments first, then verify them against the disassembly, then check
+the code beside them actually does what they say.**
+
+This project's comments are dense with decoded fact - offsets, orders,
+constants, the reason a number is 19 rather than 16. They were written by
+someone reading the binary carefully. That makes them the best starting point
+for any change, and it makes them dangerous in one specific way:
+
+**A comment describing behaviour is not evidence the behaviour is implemented.**
+
+Four bugs in a single day were exactly this, and every one had the right answer
+written down beside code that did something else:
+
+| the comment said | the code did |
+|---|---|
+| `SpawnX := tileX * TileW + 16`, with the +19 asymmetry explained | nothing - `LoadStage` was an empty inherited method |
+| "two single-character flags decide whether it loops" | passed `True` unconditionally |
+| `FIndex // p_MenuIndex 0x0046CF88, shared with the pause menu` | a private field, shared with nothing |
+| "GameState := 100, the game-over screen. The caller owns that." | `Exit`, and no caller owned it |
+
+So the order is: **read the comment, disassemble the function it names, check
+the two agree, then check the code agrees with both.** A comment that states an
+address is an invitation to open that address, not a substitute for having done
+so.
+
+The tell is a comment written in the passive or the future - "the caller owns
+that", "left to the host", "decides whether" - sitting next to code with no
+corresponding statement. Treat that as an unfinished line, not a finished one.
+
 ## 3a. Working rule: write the code as you read the disassembly
 
 **Translate each function to Pascal in the same breath as decompiling it.** Do
