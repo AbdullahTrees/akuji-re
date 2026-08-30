@@ -8112,7 +8112,16 @@ begin
     InitNewGame(S.Player, 0);
     ApplySessionFlags(S.Player, 0);
     GS := GS_STAGE_BEGIN;
+    { Stage_Begin @ 0x00462210 clears the title sub-mode. TSM_OPTIONS is 1 and
+      the CONTINUE sub-mode is also 1 - one variable, two meanings - so a stage
+      that does not clear it sends the next visit to the title screen straight
+      to the OPTIONS page. Seeded with TSM_OPTIONS so the clear is observable;
+      a test that starts at 0 cannot tell a clear from a no-op. }
+    TitleSubMode := TSM_OPTIONS;
     S.BeginStage(1, GS);
+    Want(TitleSubMode = TSM_MENU,
+         Format('BeginStage left the title sub-mode at %d - the title screen '
+           + 'will come back up on its options page', [TitleSubMode]));
 
     Log.Add(Format('stage 1: terrain %d, solid threshold %d, %d events, '
       + 'map %dx%d tiles of %dx%d',

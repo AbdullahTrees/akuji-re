@@ -548,6 +548,13 @@ begin
   if Anim.TrackCount > 0 then
     FBgAnime := TBgAnime.Create(Map, Anim);
 
+  { Stage_Begin @ 0x00462210 clears the title sub-mode explicitly, right after
+    it sets the state to 0x3C. That is not housekeeping: TSM_OPTIONS is 1 and
+    so is the CONTINUE sub-mode, one variable carrying both meanings at
+    different times, so a continue that does not clear it leaves the title
+    screen rendering its OPTIONS page the next time it is entered. }
+  TitleSubMode := 0;
+
   FEvents.Load(FGameDir, StageIndex);
 
   FTiles.Map := Map;

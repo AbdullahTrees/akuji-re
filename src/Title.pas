@@ -92,7 +92,6 @@ type
 
   TTitleScreen = class
   private
-    FSubMode: Integer;
     FOnSound: TSoundEvent;
     FOnResetState: TNotifyProc;
     FOnResetOpening: TNotifyProc;
@@ -112,8 +111,11 @@ type
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
     procedure Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
 
-    property SubMode: Integer read FSubMode;
     function GetIndex: Integer;
+    function GetSubMode: Integer;
+    { p_TitleSubMode @ 0x0046CEF8 - ONE variable, and this property is now a
+      window onto it rather than a second copy. See GameState.pas. }
+    property SubMode: Integer read GetSubMode;
   public
     { p_MenuIndex, the shared global - see GameState.pas. }
     property Index: Integer read GetIndex;
@@ -374,9 +376,14 @@ begin
   Result := MenuIndex;
 end;
 
+function TTitleScreen.GetSubMode: Integer;
+begin
+  Result := TitleSubMode;
+end;
+
 procedure TTitleScreen.Reset;
 begin
-  FSubMode := TSM_MENU;
+  TitleSubMode := TSM_MENU;
   MenuIndex := 0;
 end;
 
@@ -420,7 +427,7 @@ begin
           FOnResetState;
         GameStateValue := GS_PLAYER_INIT;
         ScreenPhase := 0;
-        FSubMode := Chosen;
+        TitleSubMode := Chosen;
         MenuIndex := 0;
         if Assigned(FOnResetOpening) then
           FOnResetOpening;
@@ -429,7 +436,7 @@ begin
       begin
         PlaySound(SND_OK);
         MenuIndex := 0;
-        FSubMode := TSM_OPTIONS;
+        TitleSubMode := TSM_OPTIONS;
       end;
     3:
       { No sound. EXIT is the one choice the original does not acknowledge. }
@@ -454,7 +461,7 @@ begin
       if Assigned(FOnGallery) then
         FOnGallery(Sel);
       PlaySound(SND_OK);
-      FSubMode := TSM_OMAKE;
+      TitleSubMode := TSM_OMAKE;
     end
     else
       PlaySound(SND_NG);
@@ -466,7 +473,7 @@ begin
   if MenuIndex = OPT_ROW_EXIT then
   begin
     PlaySound(SND_OK);
-    FSubMode := TSM_MENU;
+    TitleSubMode := TSM_MENU;
     MenuIndex := 2;
   end;
 end;
@@ -525,7 +532,7 @@ var
 begin
   Result := False;
 
-  case FSubMode of
+  case TitleSubMode of
     TSM_MENU:
       begin
         if MoveY <> 0 then
@@ -575,7 +582,7 @@ begin
     TSM_OMAKE:
       if Confirm then
       begin
-        FSubMode := TSM_OPTIONS;
+        TitleSubMode := TSM_OPTIONS;
         MenuIndex := Ord(orOmake);
       end;
   end;
@@ -590,7 +597,7 @@ begin
     items, 1 for the cursor, 0 for the credit line. }
   if F = nil then Exit;
 
-  case FSubMode of
+  case TitleSubMode of
     TSM_MENU:
       begin
         if BgMenu <> nil then
