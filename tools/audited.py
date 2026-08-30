@@ -10,6 +10,18 @@ decompile and here is what was compared". That claim ages badly in exactly the
 way this project keeps getting caught by: the code moves, the note does not,
 and the next audit reads it and believes it.
 
+It also reports the WHOLE population, not just the audited part. The
+denominator is notes/game_functions.txt - 149 game-layer functions - and each
+one is FROZEN (read against a decompile and locked), EMUDIFF (an entity handler
+verified by running the original's own machine code) or UNCHECKED. That last
+group is not a defect list: the game is broadly playable, so most of them are
+probably fine. They are unproven rather than suspect, and they are free to
+change without approval. `--list` prints them.
+
+Deriving that from the authority matters. This file used to carry a
+hand-written "NOT yet audited" section, and it named eight functions when the
+real number was fifty-nine.
+
 Three things are checked, and none of them can prove an audit was actually
 done - only that the list still describes this repository:
 
@@ -89,6 +101,48 @@ def fingerprints(text):
         out[key] = (hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]
                     if body is not None else 'MISSING')
     return out
+
+AUTHORITY = os.path.join(REPO, 'notes', 'game_functions.txt')
+
+
+def inventory():
+    """Every game-layer function, from the address authority. This is the
+    denominator: 149 of them, and a hand-written list of "what is left" drifts
+    away from it the moment one is audited and the note is not updated."""
+    out = []
+    for line in open(AUTHORITY, encoding='utf-8'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and re.fullmatch(r'[0-9A-Fa-f]{8}', parts[0]):
+            out.append(('0x' + parts[0].lower(), parts[1]))
+    return out
+
+
+def classify(inv, frozen_addrs):
+    """Three states, and the middle one is not a weaker version of the first -
+    it is a different and in some ways stronger check.
+
+      FROZEN    read line by line against a fresh decompile, and locked
+      EMUDIFF   an entity handler, verified by RUNNING the original's own
+                machine code under Ghidra's emulator and diffing the result -
+                296 cases, 0 disagree. Machine-checked rather than read
+      UNCHECKED neither. Free to change; nobody has established what it does
+
+    UNCHECKED is not a defect list. The game is broadly playable, so most of
+    these are probably fine - they are simply unproven, and that is worth
+    knowing when a bug points at one."""
+    state = {}
+    for addr, name in inv:
+        if addr in frozen_addrs:
+            state[addr] = 'FROZEN'
+        elif name.startswith('EntityUpdate_Type'):
+            state[addr] = 'EMUDIFF'
+        else:
+            state[addr] = 'UNCHECKED'
+    return state
+
 
 def main():
     if not os.path.exists(LEDGER):
@@ -189,14 +243,39 @@ def main():
             bad.append('%s has a fingerprint but is no longer listed as frozen'
                        % k)
 
+    # --- the whole population, not a hand-kept list of leftovers ---------
+    inv = inventory()
+    frozen_addrs = {k.split()[0] for k in now}
+    for a in frozen_addrs:
+        if a not in {addr for addr, _ in inv}:
+            bad.append('%s is frozen but is not in notes/game_functions.txt, '
+                       'the address authority' % a)
+    state = classify(inv, frozen_addrs)
+    n_frozen = sum(1 for v in state.values() if v == 'FROZEN')
+    n_emu = sum(1 for v in state.values() if v == 'EMUDIFF')
+    n_open = sum(1 for v in state.values() if v == 'UNCHECKED')
+
+    if '--list' in sys.argv:
+        want = 'UNCHECKED'
+        for flag in ('FROZEN', 'EMUDIFF', 'UNCHECKED'):
+            if '--' + flag.lower() in sys.argv:
+                want = flag
+        for addr, name in inv:
+            if state[addr] == want:
+                print('  %s  %s' % (addr, name))
+        print('%d %s' % (sum(1 for v in state.values() if v == want), want))
+        return 0
+
     if bad:
         print('FAIL - notes/audited.md no longer describes this repository:')
         for b in bad:
             print('  ' + b)
         return 1
 
-    print('%d functions audited (%d matched, %d needed a fix), %d still to do; '
-          '%d frozen' % (len(audited), matches, fixed, todo, len(now)))
+    print('%d game functions: %d read-audited and frozen, %d verified by '
+          'emudiff, %d unchecked' % (len(inv), n_frozen, n_emu, n_open))
+    print('   of the audited rows: %d matched, %d needed a fix'
+          % (matches, fixed))
     return 0
 
 

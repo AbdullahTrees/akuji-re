@@ -74,18 +74,30 @@ counterpart to freeze; both are expected.
     0x00456698  Dialogue.pas      TDialogueBox.SubMode
     0x00454EF4  EventRunner.pas   TEventRunner.StartEvent
 
+## The other 134
+
+The three states are not a ranking, and the middle one is not a weaker version
+of the first:
+
+| state | count | what it means |
+|---|---|---|
+| FROZEN | 15 | read line by line against a fresh decompile, and locked - CLAUDE.md section 3a |
+| EMUDIFF | 75 | an entity handler, verified by RUNNING the original's own machine code under Ghidra's emulator and diffing the result: 296 cases, 0 disagree. Machine-checked rather than read, which for arithmetic is the stronger evidence |
+| UNCHECKED | 59 | neither. Free to change, and nobody has established what they do |
+
+`python tools/audited.py --list` prints the unchecked ones (or `--frozen` /
+`--emudiff`). The list is DERIVED from `notes/game_functions.txt`, the address
+authority, so it cannot drift the way a hand-written "what is left" section
+does - this file carried one, and it named eight functions when the real
+number was fifty-nine.
+
+**UNCHECKED is not a defect list.** The game is broadly playable, so most of
+those 59 are probably fine. They are unproven rather than suspect, and the
+point of tracking them is that when a bug points at one, nobody wastes time
+assuming it was already verified - and nobody needs approval to change it.
+
 ## Audited before this file existed
 
 Recorded in CLAUDE.md section 14a rather than here, and listed so the gap is
 visible: `Player_Update` (3 defects found) and `Entities.pas`'s
 `Entity_Spawn`, `Entity_TileEdgeDistX/Y` and `Entity_UpdateDying`.
-
-## NOT yet audited
-
-The rest of the flow layer. Every one of these has executable Pascal and none
-has been read against a fresh decompile:
-
-`Ending_Update` 0x00463624, `EventScript_Execute` 0x00455210,
-`EventScript_AdvanceStep` 0x0045509C, `Entity_UpdateAll` 0x004608BC,
-`Load_Event_Scripts` 0x00465B50, `Terrain_Configure` 0x004645B0,
-`DDDD1Init` 0x00465584, `FormDestroy` 0x00466644.
