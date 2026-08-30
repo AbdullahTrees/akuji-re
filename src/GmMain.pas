@@ -1268,9 +1268,33 @@ begin
       showing a blank one. }
     GS_TITLE_MENU:
       begin
-        FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
+        { DRAW FIRST, THEN INPUT, because Title_MainMenu is one function and
+          that is the order inside it: each sub-mode arm draws, and only then
+          reads the stick and the confirm. Two things follow from it, and we
+          had neither.
+
+          THE FLASH. p_TitleSubMode is OVERLOADED. On NEW GAME or CONTINUE the
+          menu arm does
+
+              uVar3 = p_MenuIndex        (0 for new, 1 for continue)
+              GameState_Reset(0)
+              p_GameState   = 0x28       (40, Game_StartOrLoad)
+              p_TitleSubMode = uVar3
+
+          so it carries the CHOICE into state 40 - which GS_PLAYER_INIT below
+          reads back as smContinue - using the same variable that means OPTIONS
+          inside this function. The original never draws that value because by
+          the next frame the state is 40 and this arm no longer runs. Updating
+          before drawing meant Draw saw sub-mode 1 and rendered the options
+          screen for exactly one frame on the way into CONTINUE.
+
+          THE CURSOR. The original draws the highlight from p_MenuIndex and
+          only afterwards adds the stick to it, so the cursor a frame shows is
+          the position BEFORE that frame's input. Updating first moved it a
+          frame early. }
         FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2],
                           FEndingBmp);
+        FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
       end;
     GS_PLAYER_INIT:
       begin

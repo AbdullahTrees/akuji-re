@@ -329,6 +329,30 @@ def main():
         bad.append('EntityWorldFading no longer answers DDDD1.FadeBusy, so '
                    'the soft-landing guard is reading something else')
 
+    # DRAW BEFORE INPUT in the title arm. Title_MainMenu is one function and
+    # every sub-mode arm inside it draws first and reads the stick second.
+    # p_TitleSubMode is overloaded - NEW GAME and CONTINUE store the menu index
+    # into it to carry the choice into state 40 - so updating first let Draw
+    # see sub-mode 1, which inside that function means OPTIONS, and the options
+    # screen appeared for one frame on the way into CONTINUE. It also moved the
+    # menu cursor a frame early, since the original draws the highlight from
+    # p_MenuIndex before adding that frame's input to it.
+    post = body_of(text, 'DispatchPost')
+    m = re.search('GS_TITLE_MENU:(.*?)^    GS_', post, re.S | re.M)
+    if m is None:
+        bad.append('the GS_TITLE_MENU arm is gone from DispatchPost')
+    else:
+        arm = m.group(1)
+        d, u = arm.find('FTitleScreen.Draw'), arm.find('FTitleScreen.Update')
+        if d < 0 or u < 0:
+            bad.append('the GS_TITLE_MENU arm no longer both draws and updates')
+        elif u < d:
+            bad.append('the title arm updates before it draws - Title_MainMenu '
+                       'draws first and reads input second, and because NEW '
+                       'GAME and CONTINUE store the menu index into the '
+                       'sub-mode, drawing afterwards shows the options screen '
+                       'for one frame on the way into CONTINUE')
+
     if bad:
         print('FAIL - the frame loop no longer matches the traced game:')
         for b in bad:
