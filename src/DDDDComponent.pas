@@ -24,6 +24,9 @@ const
     120 at 4 a frame is thirty frames. }
   FADE_FULL = $78;
   FADE_STEP = 4;
+  { 0x78 / 4 = 30 steps to cover, plus the one that pushes the level
+    strictly outside and ends the fade. }
+  FADE_TICKS = FADE_FULL div FADE_STEP + 1;
 
 type
   TDDDDDebugOptionItem = (ddoHaltOnError);
@@ -173,23 +176,20 @@ procedure TDDDD.TickFade;
 begin
   if not FFadeBusy then
     Exit;
+  { The bounds are STRICT and the level is not clamped - 0x0044DC70 tests
+    `> 0x78` and `< 0`, so the counter runs one step past the end before the
+    fade stops being busy. Clamping it would end the fade a frame early. }
   if FFadeOut then
   begin
     Inc(FFadeLevel, FADE_STEP);
-    if FFadeLevel >= FADE_FULL then
-    begin
-      FFadeLevel := FADE_FULL;
+    if FFadeLevel > FADE_FULL then
       FFadeBusy := False;
-    end;
   end
   else
   begin
     Dec(FFadeLevel, FADE_STEP);
-    if FFadeLevel <= 0 then
-    begin
-      FFadeLevel := 0;
+    if FFadeLevel < 0 then
       FFadeBusy := False;
-    end;
   end;
 end;
 
@@ -204,56 +204,46 @@ begin
   FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
 end;
 
-{ DIVERGENCE DIV-005. Darken the whole surface toward black by FadeLevel/FADE_FULL.
+{ THE FADE IS A BOX WIPE, not a dissolve. 0x0044DC70 is the per-frame half and
+  it draws four black rectangles closing in from the edges:
 
-  The original faded through DirectDraw - a palette ramp on an 8-bit surface,
-  or a blit with a blend on a 16-bit one - and neither is available here. What
-  is reproduced is the OBSERVABLE: the screen goes to black over thirty frames
-  and comes back over thirty, on the same counter and the same step.
+      Rect(0,   0,   level,       240)          the left band
+      Rect(320, 0,   320 - level, 240)          the right band
+      Rect(0,   0,   320,         level)        the top band
+      Rect(0,   240, 320,         240 - level)  the bottom band
 
-  Done on the surface's pixels rather than with a translucent rectangle
-  because the LCL canvas has no alpha. It runs once per frame and only while a
-  fade is actually up. }
+  so as the counter runs 0 to 0x78 the picture is squeezed shut from all four
+  sides at once, and at 120 the top and bottom bands meet exactly - 240 is
+  twice 120. The horizontal pair never meets, which does not matter because
+  the vertical pair has already covered the screen.
+
+  This was implemented as a brightness ramp first, which reached the same black
+  by a route the original does not take and looked nothing like it on the way.
+  The mistake was inferring the picture from the counter instead of reading the
+  function that draws it.
+
+  The BUSY flag clears on `level > 0x78` and `level < 0` - strictly outside -
+  so the counter overshoots by one step before the fade is declared finished.
+  Reproduced. }
 procedure TDDDD.ApplyFade;
 var
-  Y, X, Keep, Bpp: Integer;
-  P: PByte;
+  L, W, H: Integer;
 begin
-  if FFadeLevel <= 0 then
+  if (not FFadeBusy) and (FFadeLevel <= 0) then
     Exit;
-  if FFadeLevel >= FADE_FULL then
-  begin
-    FSurface.Canvas.Brush.Color := clBlack;
-    FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
+  { Mode 0 only, as 0x0044DC70's guard has it - and every caller passes 0. }
+  if FFadeMode <> 0 then
     Exit;
-  end;
-  { How much of each channel survives, 0..256. }
-  Keep := ((FADE_FULL - FFadeLevel) * 256) div FADE_FULL;
-  Bpp := FSurface.RawImage.Description.BitsPerPixel div 8;
-  if Bpp < 3 then
+  L := FFadeLevel;
+  if L <= 0 then
     Exit;
-  FSurface.BeginUpdate(True);
-  try
-    for Y := 0 to FSurface.Height - 1 do
-    begin
-      P := PByte(FSurface.RawImage.GetLineStart(Y));
-      if P = nil then
-        Continue;
-      for X := 0 to FSurface.Width - 1 do
-      begin
-        { The three colour bytes only. On a 32-bit surface the fourth is
-          alpha, and scaling that fades the picture to TRANSPARENT rather
-          than to black - the window behind would show through. }
-        P^ := Byte((P^ * Keep) shr 8); Inc(P);
-        P^ := Byte((P^ * Keep) shr 8); Inc(P);
-        P^ := Byte((P^ * Keep) shr 8); Inc(P);
-        if Bpp > 3 then
-          Inc(P, Bpp - 3);
-      end;
-    end;
-  finally
-    FSurface.EndUpdate(False);
-  end;
+  W := FSurface.Width;
+  H := FSurface.Height;
+  FSurface.Canvas.Brush.Color := clBlack;
+  FSurface.Canvas.FillRect(0, 0, L, H);          { left }
+  FSurface.Canvas.FillRect(W - L, 0, W, H);      { right }
+  FSurface.Canvas.FillRect(0, 0, W, L);          { top }
+  FSurface.Canvas.FillRect(0, H - L, W, H);      { bottom }
 end;
 
 procedure TDDDD.Present;

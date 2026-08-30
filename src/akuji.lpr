@@ -35,7 +35,7 @@ uses
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
   SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title, Ending, Opening,
-  GameFont,
+  GameFont, DDDDComponent,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -2310,6 +2310,73 @@ begin
     Log.Add('OK - a continue is a new game with a file read over the top');
 end;
 
+{ The screen fade's TIMING, against 0x0044DC48 and 0x0044DC70.
+
+  The counter starts at 0 for a fade out and 0x78 for a fade in, moves by the
+  step the caller wrote to +0x10 - always 4 - and the busy flag clears when the
+  level goes STRICTLY outside 0..0x78. That last detail is why the count is 31
+  and not 30: the level reaches 0x78 on tick 30 and is still busy, because the
+  test is `> 0x78`, and only tick 31 pushes it to 124 and ends it.
+
+  Clamping the level at the boundary, which is the obvious way to write this,
+  ends every fade one frame early. }
+function TestFade(Log: TStrings): Integer;
+var
+  D: TDDDD;
+  Ticks: Integer;
+
+  function RunFade(FadeOut: Boolean): Integer;
+  begin
+    D.StartFade(0, FadeOut);
+    Result := 0;
+    while D.FadeBusy and (Result < 1000) do
+    begin
+      D.TickFade;
+      Inc(Result);
+    end;
+  end;
+
+begin
+  Result := 0;
+  D := TDDDD.Create(nil);
+  try
+    Ticks := RunFade(True);
+    if Ticks <> FADE_TICKS then
+    begin
+      Log.Add(Format('FAILED: a fade OUT took %d ticks, want %d',
+                     [Ticks, FADE_TICKS]));
+      Inc(Result);
+    end;
+    Ticks := RunFade(False);
+    if Ticks <> FADE_TICKS then
+    begin
+      Log.Add(Format('FAILED: a fade IN took %d ticks, want %d',
+                     [Ticks, FADE_TICKS]));
+      Inc(Result);
+    end;
+    { And the direction: out starts clear, in starts covered. }
+    D.StartFade(0, True);
+    if D.FadeLevel <> 0 then
+    begin
+      Log.Add(Format('FAILED: a fade OUT starts at level %d, want 0',
+                     [D.FadeLevel]));
+      Inc(Result);
+    end;
+    D.StartFade(0, False);
+    if D.FadeLevel <> FADE_FULL then
+    begin
+      Log.Add(Format('FAILED: a fade IN starts at level %d, want %d',
+                     [D.FadeLevel, FADE_FULL]));
+      Inc(Result);
+    end;
+    if Result = 0 then
+      Log.Add(Format('  fade: %d ticks each way, out from 0, in from %d',
+                     [FADE_TICKS, FADE_FULL]));
+  finally
+    D.Free;
+  end;
+end;
+
 { The frame clock's RESOLUTION, which is what the frame rate actually rests on.
 
   The limiter proceeds when the elapsed time reaches FRAME_MS, so the clock's
@@ -2945,6 +3012,7 @@ begin
   Inc(Result, TestOpeningTiming(Log));
   Inc(Result, TestOutlinedFontName(Log, GameDir));
   Inc(Result, TestFrameClock(Log));
+  Inc(Result, TestFade(Log));
 
   Log.Add('');
   if Result = 0 then
