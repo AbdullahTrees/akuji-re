@@ -1218,12 +1218,11 @@ begin
             Entity_PlayerTouch, which the log finds in state 60 and nowhere
             else. That gating belongs to the handlers, not to us. }
           if FDialogue.Mode = omPanel then
-            FDialogue.Update(not KbgmPlayer1.IsPlaying, 0, False,
+            FDialogue.Update(not KbgmPlayer1.IsPlaying, FSession.Input,
                              GameStateValue)
           else
             FDialogue.Update(FSession.Input.Button[0] and not FConfirmLatch,
-                             FSession.Input.AxisX, FSession.Input.Moving,
-                             GameStateValue);
+                             FSession.Input, GameStateValue);
         end;
         DrawScene;
       end;

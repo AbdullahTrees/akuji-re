@@ -47,7 +47,12 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-ADDR = re.compile(r'0x00[0-9A-Fa-f]{6}')
+# An address may be followed by a FIELD OFFSET, and then it names a different
+# location. 0x0046D320 + 0x10 and 0x0046D320 + 0x14 are the message box's
+# animation frame and its timer - two fields of one record, not two copies
+# of one variable - so the offset is part of the key. Only a suffix counts:
+# the settings record writes its own offset BEFORE the address it mirrors.
+ADDR = re.compile(r'0x00[0-9A-Fa-f]{6}(?:\s*\+\s*0x[0-9A-Fa-f]+)?')
 # `Name: Type` or `Name: Type = value` - a line that reserves storage. The
 # leading anchor keeps `Result := Foo` and prose out.
 DECL = re.compile(r'^\s*(F?[A-Za-z_]\w*)\s*:\s*[A-Za-z_]')
@@ -85,7 +90,8 @@ def main():
                 if not m:
                     continue
                 for a in ADDR.findall(line):
-                    claims.setdefault(a.lower(), []).append(
+                    key = re.sub(r'\s+', '', a).lower()
+                    claims.setdefault(key, []).append(
                         (name, n, m.group(1), line.strip()[:66]))
 
     shared = {}

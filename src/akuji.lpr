@@ -7853,6 +7853,206 @@ begin
       + 'runs its three phases');
 end;
 
+{ The typewriter and the two icons, from MessageBox_Update @ 0x00456038.
+
+  Driven from the SHIPPED script rather than from a hand-made string, so the
+  test needs no way to inject text that the original has no counterpart for.
+
+  Three facts, each invisible to the others:
+
+    * the reveal is in TWO-BYTE units, one per THIRD frame, because the
+      original scans Copy(text, i * 2 - 1, 2) and gates on a counter > 2
+    * any input fast-forwards it - AxisY, or either confirm button HELD
+    * when the page runs out, the marker that ended it picks the next mode,
+      and only then do the Yes/No line and its hand appear
+
+  The page used to be split into three finished lines the moment it was taken,
+  so there was nothing left to reveal and no mode to be in. }
+function TestTypewriter(Log: TStrings; const GameDir: string): Integer;
+var
+  Bad, I, K, Seen, Plain: Integer;
+  D: TDialogueBox;
+  Sc: TEventScript;
+  Inp: TInputState;
+  GS: Integer;
+  L: string;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+  { The first script line whose opening eight characters carry no marker, so
+    the expected prefixes are the line's own text and nothing has to
+    re-implement the splitter to know them. }
+  function PlainLine: Integer;
+  var
+    N: Integer;
+  begin
+    Result := -1;
+    for N := 0 to Sc.LineCount - 1 do
+      if (Length(Sc.Lines[N]) >= 10)
+         and (Pos('\', Copy(Sc.Lines[N], 1, 8)) = 0) then
+      begin
+        Result := N;
+        Exit;
+      end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the typewriter, and the two icons ---');
+
+  Sc := TEventScript.Create;
+  D := TDialogueBox.Create;
+  try
+    Sc.Load(GameDir, 1);
+    if Sc.LineCount = 0 then
+    begin
+      Log.Add('  FAIL: stage 1 loaded no dialogue lines');
+      Result := 1;
+      Exit;
+    end;
+    D.Bind(Sc, nil, nil, nil, nil);
+    FillChar(Inp, SizeOf(Inp), 0);
+    GS := GS_STATE_140;
+
+    Plain := PlainLine;
+    Want(Plain >= 0, 'no shipped line starts with eight marker-free chars');
+    if Plain >= 0 then
+    begin
+      L := Sc.Lines[Plain];
+      D.ShowLine(Plain);
+      Want(D.BoxMode = MB_MODE_TYPING,
+           'a fresh page is not in the typing mode');
+      Want(D.VisibleLine[0] = '',
+           Format('the box showed "%s" before a single frame ran - the page '
+             + 'is printed, not typed', [D.VisibleLine[0]]));
+
+      { Two frames must reveal NOTHING: the counter has to pass 2. }
+      D.Update(False, Inp, GS);
+      D.Update(False, Inp, GS);
+      Want(D.VisibleLine[0] = '',
+           Format('after two frames the box already reads "%s" - the reveal '
+             + 'is meant to take three', [D.VisibleLine[0]]));
+
+      { The third uncovers exactly one TWO-byte unit. }
+      D.Update(False, Inp, GS);
+      Want(D.VisibleLine[0] = Copy(L, 1, 2),
+           Format('the third frame revealed "%s", want "%s" - one two-byte '
+             + 'unit', [D.VisibleLine[0], Copy(L, 1, 2)]));
+
+      { Six more frames is two more units, at the same rate. }
+      for I := 1 to 6 do
+        D.Update(False, Inp, GS);
+      Want(D.VisibleLine[0] = Copy(L, 1, 6),
+           Format('nine frames revealed "%s", want "%s"',
+                  [D.VisibleLine[0], Copy(L, 1, 6)]));
+
+      { --- the fast-forward -------------------------------------------- }
+      D.ShowLine(Plain);
+      Inp.Button[0] := True;
+      D.Update(False, Inp, GS);
+      Want(D.VisibleLine[0] = Copy(L, 1, 2),
+           Format('holding a button revealed "%s" on the first frame, want '
+             + '"%s" - the fast-forward is not wired',
+             [D.VisibleLine[0], Copy(L, 1, 2)]));
+      Inp.Button[0] := False;
+    end;
+
+    { --- run a whole page out and see which mode it lands in ------------ }
+    for K := 0 to Sc.LineCount - 1 do
+    begin
+      D.ShowLine(K);
+      Seen := 0;
+      Inp.Button[0] := True;      { fast-forward, or this takes all day }
+      while (D.BoxMode = MB_MODE_TYPING) and (Seen < 4000) do
+      begin
+        D.Update(False, Inp, GS);
+        Inc(Seen);
+      end;
+      Inp.Button[0] := False;
+      Want(D.BoxMode <> MB_MODE_TYPING,
+           Format('line %d never finished typing in %d frames', [K, Seen]));
+      if D.BoxMode = MB_MODE_TYPING then
+        Break;
+    end;
+
+    { --- the \k prompt icon animates ------------------------------------ }
+    for K := 0 to Sc.LineCount - 1 do
+    begin
+      D.ShowLine(K);
+      Seen := 0;
+      Inp.Button[0] := True;
+      while (D.BoxMode = MB_MODE_TYPING) and (Seen < 4000) do
+      begin
+        D.Update(False, Inp, GS);
+        Inc(Seen);
+      end;
+      Inp.Button[0] := False;
+      if D.BoxMode = MB_MODE_WAITKEY then
+      begin
+        Seen := D.AnimFrame;
+        for I := 1 to 5 do
+          D.Update(False, Inp, GS);
+        Want(D.AnimFrame <> Seen,
+             'the \k prompt icon did not advance after five frames - it is '
+             + 'meant to cycle six steps');
+        Break;
+      end;
+    end;
+
+    { --- the \w hand: horizontal, and it animates ------------------------ }
+    for K := 0 to Sc.LineCount - 1 do
+    begin
+      D.ShowLine(K);
+      Seen := 0;
+      Inp.Button[0] := True;
+      while (D.BoxMode = MB_MODE_TYPING) and (Seen < 4000) do
+      begin
+        D.Update(False, Inp, GS);
+        Inc(Seen);
+      end;
+      Inp.Button[0] := False;
+      if D.BoxMode = MB_MODE_PROMPT then
+      begin
+        Want(D.Choice = 0, 'the prompt did not start on Yes');
+        Inp.AxisX := 1;
+        Inp.Moving := False;
+        D.Update(False, Inp, GS);
+        Want(D.Choice = 1,
+             'right did not move the prompt to No - the original moves this '
+             + 'on AxisX, not on up and down');
+        D.Update(False, Inp, GS);
+        Want(D.Choice = 1, 'the choice ran past No instead of clamping');
+        Inp.AxisX := -1;
+        D.Update(False, Inp, GS);
+        Want(D.Choice = 0, 'left did not move the prompt back to Yes');
+        Inp.AxisX := 0;
+
+        Seen := D.AnimFrame;
+        for I := 1 to 9 do
+          D.Update(False, Inp, GS);
+        Want(D.AnimFrame <> Seen,
+             'the yes/no hand did not advance after nine frames');
+        Break;
+      end;
+    end;
+
+    Log.Add(Format('typewriter: two bytes every three frames; \k icon cycles '
+      + '%d steps, hand %d', [MB_KEY_FRAMES, MB_HAND_FRAMES]));
+  finally
+    D.Free;
+    Sc.Free;
+  end;
+  Result := Bad;
+end;
+
 { Pause > RESET must reach the TITLE, and must not carry the confirm with it.
 
   Reported symptom: "Pause > Reset brought me back to the last saved location,
@@ -8632,6 +8832,7 @@ begin
   Inc(Bad, TestEnding(Log));
   Inc(Bad, TestContinueLoadsSave(Log, GetTempDir));
   Inc(Bad, TestPauseFlow(Log));
+  Inc(Bad, TestTypewriter(Log, GameDir));
 
   Result := Bad;
   Log.Add('');

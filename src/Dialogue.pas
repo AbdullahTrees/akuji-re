@@ -114,6 +114,46 @@ const
     not ASCII 0x20. }
   MB_FULLWIDTH_SPACE = #$81#$40;
 
+  { --- MessageBox_Update's typewriter and its two icons -------------------
+    All four numbers below are the original's, and the units matter.
+
+    THE REVEAL IS IN TWO-BYTE UNITS. 0x00456038 rebuilds the visible lines
+    every frame by scanning Copy(text, i * 2 - 1, 2) from the page start to a
+    cursor, so one step of that cursor uncovers TWO bytes. The text is
+    Shift-JIS, which is what the pairing is for; in the English build that
+    means two ASCII letters appear at a time. It is also why every marker is
+    exactly two characters - they have to land on the same grid to be seen. }
+  MB_REVEAL_TICKS   = 2;    { counter > 2, so a step every THIRD frame }
+
+  { The \k prompt: six animation steps over a four-cell strip, 0 16 32 48 32
+    16 - a ping-pong, read from the table at 0x0046CB2C through the pointer
+    cell at 0x0046D050. }
+  MB_KEY_FRAMES     = 6;
+  MB_KEY_ANIM_TICKS = 4;    { timer > 4, so a step every FIFTH frame }
+  MB_KEY_SPRITE_X: array[0..MB_KEY_FRAMES - 1] of Integer =
+    (0, 16, 32, 48, 32, 16);
+
+  { The yes/no hand: two frames, and slower. }
+  MB_HAND_FRAMES     = 2;
+  MB_HAND_ANIM_TICKS = 8;   { timer > 8, so a step every NINTH frame }
+
+  { Both icons come out of surface slot 1 - the same sheet as the box frame -
+    from a strip that starts 0x20 in. The \k prompt is the top row and the
+    hand is the row below it, both 16x16:
+
+        key   Rect(x + 0x20, 0,    x + 0x30, 0x10)   at (0xF8, box + 0x40)
+        hand  Rect(f * 16 + 0x20, 0x10, ... 0x20)    at (c * 0x34 + 0x60,
+                                                         box + 0x3C) }
+  MB_ICON_SIZE   = $10;
+  MB_ICON_SRC_X  = $20;
+  MB_KEY_SRC_Y   = $00;
+  MB_HAND_SRC_Y  = $10;
+  MB_KEY_ICON_X  = $F8;
+  MB_KEY_ICON_DY = $40;
+  MB_HAND_ICON_X    = $60;
+  MB_HAND_ICON_STEP = $34;
+  MB_HAND_ICON_DY   = $3C;
+
   { Where the box goes: below the player if the player is high on the screen,
     above if not. 0x79 is the test, 0x88 the low position. }
   MB_PLAYER_HIGH  = $79;
@@ -266,6 +306,12 @@ type
     FRest: string;            { pages still to come, after a \k }
     FPrompt: Boolean;         { this page ended in \w }
     FChoice: Integer;         { 0 = yes, 1 = no }
+    FBoxMode: Integer;        { p_MessageMode 0x0046CF28 - MB_MODE_* }
+    FPageText: string;        { the page being typed, markers stripped }
+    FReveal: Integer;         { p_Reveal 0x0046CF24, in TWO-BYTE units }
+    FRevealTimer: Integer;    { 0x0046CBA4 }
+    FAnimFrame: Integer;      { 0x0046D320 + 0x10 }
+    FAnimTimer: Integer;      { 0x0046D320 + 0x14 }
     FScript: TEventScript;
     FRunner: TEventRunner;
     FPlayer: PPlayerState;
@@ -286,6 +332,7 @@ type
     function EventSlot(EventId: Integer): Integer;
     function MusicBusy: Boolean;
     procedure DrawFrame(Dest: TCanvas; X, Y, Rows, Cols: Integer);
+    procedure DrawIcon(Dest: TCanvas; X, Y, SrcX, SrcY: Integer);
   public
     { Where the script and the state it answers into live. Set once. }
     procedure Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -356,12 +403,23 @@ type
       the backlog as "described, not implemented" purely because nothing
       carried the address where the coverage tool looks. }
     procedure PlayBoxSound(Index: Integer);
-    function Update(Confirm: Boolean; MoveX: Integer; Moving: Boolean;
+    function  GetVisibleLine(Index: Integer): string;
+    procedure BuildLines;
+    function  RevealUnits: Integer;
+    procedure EndOfPage;
+    function Update(Confirm: Boolean; const Inp: TInputState;
                     var AGameState: Integer): Boolean;
 
     procedure Draw(Dest: TCanvas; Font: TGameFont; PlayerScreenY: Integer);
 
     property Active: Boolean read FActive;
+    { Read-only, for the tests. Observation only - nothing here gates any
+      behaviour, and the original has no counterpart because in the original
+      these ARE the globals 0x0046CF28, 0x0046D320+0x10 and 0x0046CF70. }
+    property BoxMode: Integer read FBoxMode;
+    property AnimFrame: Integer read FAnimFrame;
+    property Choice: Integer read FChoice;
+    property VisibleLine[Index: Integer]: string read GetVisibleLine;
     property Mode: TOverlayMode read FMode;
     property OnSound: TOverlaySound read FOnSound write FOnSound;
     property OnMusic: TOverlayMusic read FOnMusic write FOnMusic;
@@ -455,36 +513,68 @@ begin
     have lost its second page. }
   Src := Text;
   Page := SplitPage(Src, FRest, FPrompt);
-  { Sound 0xD - kakunin, "confirmation" - the moment a \w prompt comes up.
-    0x00456038 plays it on mode 4's first frame, which is this moment. }
-  if FPrompt then
-  begin
-    FChoice := 0;
-    PlayBoxSound(SND_KAKUNIN);
-  end;
+
+  { The page is KEPT whole and uncovered a bit at a time. It used to be split
+    into its three lines here, all of them visible at once, which is why there
+    was no typewriter: nothing was ever hidden to reveal. BuildLines does the
+    \n split now, every frame, over as much as has been revealed. }
+  FPageText := Page;
+  FReveal := 0;
+  FRevealTimer := 0;
+  FAnimFrame := 0;
+  FAnimTimer := 0;
+  FChoice := 0;
+  FBoxMode := MB_MODE_TYPING;
+  BuildLines;
+end;
+
+{ How many two-byte units the page holds - see MB_REVEAL_TICKS. An odd length
+  still has a last unit, hence the round up. }
+function TDialogueBox.RevealUnits: Integer;
+begin
+  Result := (Length(FPageText) + 1) div 2;
+end;
+
+{ The visible lines, rebuilt from scratch each frame exactly as 0x00456038
+  does it: walk the page in two-byte units up to the cursor, start a new line
+  on \n, append anything else. }
+procedure TDialogueBox.BuildLines;
+var
+  I, N: Integer;
+  Ch: string;
+begin
   for N := 0 to BOX_LINES - 1 do
     FLines[N] := '';
-
-  { \n breaks a page into its three lines. }
   N := 0;
-  while (Page <> '') and (N < BOX_LINES) do
+  for I := 1 to FReveal do
   begin
-    P := Pos('\n', Page);
-    if P = 0 then
-    begin
-      Line := Page;
-      Page := '';
-    end
+    if N >= BOX_LINES then
+      Break;
+    Ch := Copy(FPageText, I * 2 - 1, 2);
+    if Ch = '\n' then
+      Inc(N)
     else
-    begin
-      Line := Copy(Page, 1, P - 1);
-      Page := Copy(Page, P + 2, MaxInt);
-    end;
-    FLines[N] := Trim(Line);
-    Inc(N);
+      FLines[N] := FLines[N] + Ch;
   end;
+end;
 
-  FChoice := 0;
+{ What happens when the last character has been uncovered. The marker that
+  ended the page decides, and SplitPage has already told us which it was. }
+procedure TDialogueBox.EndOfPage;
+begin
+  FAnimFrame := 0;
+  FAnimTimer := 0;
+  if FPrompt then
+  begin
+    { Mode 4's first frame plays 0xD - kakunin, "confirmation". }
+    FBoxMode := MB_MODE_PROMPT;
+    FChoice := 0;
+    PlayBoxSound(SND_KAKUNIN);
+  end
+  else if FRest <> '' then
+    FBoxMode := MB_MODE_WAITKEY
+  else
+    FBoxMode := MB_MODE_END;
 end;
 
 procedure TDialogueBox.Bind(AScript: TEventScript; ARunner: TEventRunner;
@@ -593,6 +683,22 @@ end;
   edge, 1 the middle, 2 the right; row 0 the top, 1 the middle, 2 the bottom.
   The destination runs 0..Cols and 0..Rows INCLUSIVE - the original draws its
   far corner at Cols*8, so a 27-column box is 28 tiles wide. }
+{ One 16x16 cell of slot 1's icon strip, which starts MB_ICON_SRC_X in.
+  Opaque, exactly as DrawFrame blits the box out of the same sheet - the real
+  one goes through TDDDD_DrawSprite with the component's colour key, which is
+  DIV-008's territory rather than this unit's. }
+procedure TDialogueBox.DrawIcon(Dest: TCanvas; X, Y, SrcX, SrcY: Integer);
+begin
+  if FFrameSheet = nil then
+    Exit;
+  FFrameSheet.Transparent := False;
+  Dest.CopyRect(
+    Rect(X, Y, X + MB_ICON_SIZE, Y + MB_ICON_SIZE),
+    FFrameSheet.Canvas,
+    Rect(MB_ICON_SRC_X + SrcX, SrcY,
+         MB_ICON_SRC_X + SrcX + MB_ICON_SIZE, SrcY + MB_ICON_SIZE));
+end;
+
 procedure TDialogueBox.DrawFrame(Dest: TCanvas; X, Y, Rows, Cols: Integer);
 var
   Col, Row, SrcCol, SrcRow: Integer;
@@ -789,15 +895,24 @@ begin
   TakePage(FScript.Lines[Index]);
 end;
 
+function TDialogueBox.GetVisibleLine(Index: Integer): string;
+begin
+  if (Index < 0) or (Index >= BOX_LINES) then
+    Result := ''
+  else
+    Result := FLines[Index];
+end;
+
 procedure TDialogueBox.PlayBoxSound(Index: Integer);
 begin
   if Assigned(FOnSound) then
     FOnSound(Index);
 end;
 
-function TDialogueBox.Update(Confirm: Boolean; MoveX: Integer;
-                             Moving: Boolean;
+function TDialogueBox.Update(Confirm: Boolean; const Inp: TInputState;
                              var AGameState: Integer): Boolean;
+var
+  Ch: string;
 begin
   Result := FActive;
   if not FActive then
@@ -822,53 +937,96 @@ begin
     Exit;
   end;
 
-  { THE PROMPT IS HORIZONTAL. 0x00456038's mode 4 draws "Yes       No  " as one
-    string at x 0x70 and puts the cursor at choice * 0x34 + 0x60 - side by
-    side - and moves it on AxisX:
+  case FBoxMode of
 
-        if ((*(int *)p_InputState != 0) && (p_InputState[0x10] == 0)) {
-            PlaySound(0);
-            *PTR_DAT_0046cf70 += *(int *)p_InputState;
-            clamp to 0..1
+    { --- 1, the typewriter ------------------------------------------------
+      Inc the counter; on the third frame - or on ANY input, which is the
+      fast-forward - uncover one two-byte unit and click. The click is
+      suppressed for the full-width space and nothing else. }
+    MB_MODE_TYPING:
+      begin
+        Inc(FRevealTimer);
+        if (FRevealTimer > MB_REVEAL_TICKS) or (Inp.AxisY <> 0)
+           or Inp.Button[0] or Inp.Button[1] then
+        begin
+          FRevealTimer := 0;
+          if FReveal < RevealUnits then
+          begin
+            Inc(FReveal);
+            Ch := Copy(FPageText, FReveal * 2 - 1, 2);
+            if Ch <> MB_FULLWIDTH_SPACE then
+              PlayBoxSound(SND_PI);
+            BuildLines;
+          end;
+          if FReveal >= RevealUnits then
+            EndOfPage;
+        end;
+      end;
 
-    p_InputState + 0 is AxisX and +0x10 is Moving, so it is a fresh press of
-    left or right, and the delta is ADDED and then clamped rather than each
-    direction selecting a fixed side. This took Up and Down, which is the one
-    axis the original does not read here. }
-  if FPrompt and (MoveX <> 0) and not Moving then
-  begin
-    PlayBoxSound(SND_PI);
-    Inc(FChoice, MoveX);
-    if FChoice < 0 then FChoice := 0;
-    if FChoice > 1 then FChoice := 1;
+    { --- 2, \k: wait for a key, with the animated button prompt ----------- }
+    MB_MODE_WAITKEY:
+      begin
+        Inc(FAnimTimer);
+        if FAnimTimer > MB_KEY_ANIM_TICKS then
+        begin
+          FAnimTimer := 0;
+          FAnimFrame := (FAnimFrame + 1) mod MB_KEY_FRAMES;
+        end;
+        if ((Inp.AxisY <> 0) and not Inp.Moving) or Confirm then
+          TakePage(FRest);
+      end;
+
+    { --- 3, \e: the message is over -------------------------------------- }
+    MB_MODE_END:
+      begin
+        if ((Inp.AxisX <> 0) and not Inp.Moving)
+           or ((Inp.AxisY <> 0) and not Inp.Moving) or Confirm then
+        begin
+          FActive := False;
+          Result := False;
+          if (FRunner <> nil) and (FPlayer <> nil) then
+            FRunner.AdvanceStep(FPlayer^, AGameState);
+        end;
+      end;
+
+    { --- 4, \w: the yes/no prompt, with the animated hand ------------------
+      HORIZONTAL. Mode 4 draws "Yes       No  " as one string at x 0x70 and
+      puts the hand at choice * 0x34 + 0x60 - side by side - and moves the
+      choice on AxisX with the Moving guard, ADDING the delta and then
+      clamping rather than each direction selecting a fixed side. This once
+      took Up and Down, which is the one axis the original does not read. }
+    MB_MODE_PROMPT:
+      begin
+        if (Inp.AxisX <> 0) and not Inp.Moving then
+        begin
+          PlayBoxSound(SND_PI);
+          Inc(FChoice, Inp.AxisX);
+          if FChoice < 0 then FChoice := 0;
+          if FChoice > 1 then FChoice := 1;
+        end;
+        Inc(FAnimTimer);
+        if FAnimTimer > MB_HAND_ANIM_TICKS then
+        begin
+          FAnimTimer := 0;
+          FAnimFrame := (FAnimFrame + 1) mod MB_HAND_FRAMES;
+        end;
+        if Confirm then
+        begin
+          { Sound 1 on choosing, which the original plays before it writes. }
+          PlayBoxSound(SND_OK);
+          { BOTH flags, which is what 0x00456038 writes - see the header.
+            Writing only Progress[3] left every script that guards on "No"
+            unable to see the answer at all. }
+          if FPlayer <> nil then
+            DialogueAnswer(FPlayer^, FChoice);
+          FPrompt := False;
+          FActive := False;
+          Result := False;
+          if (FRunner <> nil) and (FPlayer <> nil) then
+            FRunner.AdvanceStep(FPlayer^, AGameState);
+        end;
+      end;
   end;
-
-  if not Confirm then
-    Exit;
-
-  if FPrompt then
-  begin
-    { Sound 1 on choosing, which the original plays before it writes. }
-    PlayBoxSound(SND_OK);
-    { BOTH flags, which is what 0x00456038 writes - see the header. Writing
-      only Progress[3] left every script that guards on "No" unable to see
-      the answer at all. }
-    if FPlayer <> nil then
-      DialogueAnswer(FPlayer^, FChoice);
-    FPrompt := False;
-  end;
-
-  if FRest <> '' then
-  begin
-    TakePage(FRest);
-    Exit;
-  end;
-
-  { Done. Closing the box is what advances the script - see the header. }
-  FActive := False;
-  Result := False;
-  if (FRunner <> nil) and (FPlayer <> nil) then
-    FRunner.AdvanceStep(FPlayer^, AGameState);
 end;
 
 procedure TDialogueBox.Draw(Dest: TCanvas; Font: TGameFont;
@@ -909,11 +1067,23 @@ begin
                             FLines[I], BOX_TEXT_OUTLINE, BOX_TEXT_FILL,
                             OUTLINED_FONT_SIZE, Dest);
 
-  if FPrompt then
+  { The two icons, both 16x16 out of slot 1's strip. Keyed off the MODE, not
+    off FPrompt: the Yes/No line and its hand appear only once the page has
+    finished typing, which is what mode 4 means. }
+  if FBoxMode = MB_MODE_WAITKEY then
+    DrawIcon(Dest, MB_KEY_ICON_X, BoxY + MB_KEY_ICON_DY,
+             MB_KEY_SPRITE_X[FAnimFrame], MB_KEY_SRC_Y);
+
+  if FBoxMode = MB_MODE_PROMPT then
+  begin
     Game_DrawTextOutlined(MB_PROMPT_TEXT_X, BoxY + MB_PROMPT_TEXT_DY,
                           MB_PROMPT_TEXT,
                           MB_PROMPT_OUTLINE, MB_PROMPT_FILL,
                           OUTLINED_FONT_SIZE, Dest);
+    DrawIcon(Dest, FChoice * MB_HAND_ICON_STEP + MB_HAND_ICON_X,
+             BoxY + MB_HAND_ICON_DY,
+             FAnimFrame * MB_ICON_SIZE, MB_HAND_SRC_Y);
+  end;
 end;
 
 end.
