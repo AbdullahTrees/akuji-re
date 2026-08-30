@@ -152,6 +152,45 @@ swallowed the entry byte of the function at `0x464D30`.
 To fix one: `G` → address, `C` (clear), `D` (disassemble), `F` (create function).
 Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
+## 3a. AN AUDITED FUNCTION IS FROZEN
+
+**`notes/audited.md` lists every function whose Pascal has been read against a
+fresh decompile. Once a function is in that list as MATCHES or FIXED, no other
+piece of work may change it.**
+
+This is not a style preference. Those functions went through two passes: a
+first one that too often wrote the SPECIFICATION into Pascal - a comment
+describing what the binary does, beside code that did something else - and a
+second that read the disassembly, implemented the behaviour for real, and
+tested it. That second pass is expensive and it is the only reason the entries
+are trustworthy. A later change made in passing, to fix something else, silently
+throws it away: the row still says the function was verified, and it no longer
+describes the code.
+
+So the rule, and it has no expiry:
+
+* **Do not touch an audited function as collateral.** If a fix somewhere else
+  seems to need one changed, the fix is in the wrong place until proven
+  otherwise. Change the caller, the host, the component - not the audited body.
+* **If an audited function really does have a bug, say so and STOP.** Name the
+  function, quote the disassembly that proves the defect, explain what is wrong,
+  and *ask*. **User approval is required before the edit.** Not "flag it and
+  proceed", not "fix it and mention it in the commit" - approval first.
+* Approval is per change. It does not carry to the next one.
+* After an approved change the function must be **re-audited against a fresh
+  decompile** and its row updated to say what was re-checked. It does not stay
+  verified because it was verified once.
+
+Comments and formatting inside an audited function are NOT frozen - behaviour
+is. Improving a comment needs no approval.
+
+`tools/audited.py` enforces this rather than trusting anyone to remember it. It
+fingerprints every frozen implementation with comments stripped and whitespace
+normalised, so prose and layout stay free while a changed statement fails the
+gate. `notes/audited.lock` holds the hashes and
+`python tools/audited.py --bless` rewrites it - blessing IS the approval
+gesture, so it is never run without the user having said yes.
+
 ## 3a-0. Working rule: the comments are a specification, not a record
 
 **Read the comments first, then verify them against the disassembly, then check

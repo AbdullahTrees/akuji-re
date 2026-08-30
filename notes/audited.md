@@ -46,6 +46,34 @@ Status values:
 | 0x0044DC48 | the fader's start | writes +4/+0xC/+0xD and sets +8 to 0x78 only when both arguments are 0 - which is the fade-IN asymmetry TDDDD.StartFade reproduces |
 | 0x0044DAE0 | `TileMap_DefineTile` | pins the tile component's layout: TileW at +0x6028, TileH at +0x602C, so +0x6034/+0x6038 are its ScrollX/ScrollY |
 
+## Frozen implementations
+
+Every row above is FROZEN - see CLAUDE.md section 3a. `tools/audited.py`
+fingerprints the Pascal named here, with comments stripped and whitespace
+normalised, so a changed statement fails the gate while prose and layout stay
+free. A deliberate, user-approved change is blessed with
+`python tools/audited.py --bless`.
+
+Some originals share one Pascal routine (the message box and the overlay are
+one class here) and some audited entries are RTL or component routines with no
+counterpart to freeze; both are expected.
+
+    0x00454790  EventRunner.pas   TEventRunner.SpawnNearCamera
+    0x00462210  GameSession.pas   TGameSession.BeginStage
+    0x00462330  Title.pas         TTitleScreen.Update
+    0x0046214C  GmMain.pas        TFrm_main.TitleInit
+    0x00461EE4  Title.pas         TPauseMenu.Update
+    0x004665C8  GmMain.pas        TFrm_main.FormKeyDown
+    0x00466E4C  GameState.pas     ConfirmPressed
+    0x00464D30  GmMain.pas        TFrm_main.AppIdle
+    0x00462F40  PlayerState.pas   GameStartOrLoad
+    0x00456038  Dialogue.pas      TDialogueBox.Update
+    0x00461BA8  GmMain.pas        TFrm_main.DrawHud
+    0x00461A44  Title.pas         TGameOverScreen.Update
+    0x004568D0  Dialogue.pas      TDialogueBox.Draw
+    0x00456698  Dialogue.pas      TDialogueBox.SubMode
+    0x00454EF4  EventRunner.pas   TEventRunner.StartEvent
+
 ## Audited before this file existed
 
 Recorded in CLAUDE.md section 14a rather than here, and listed so the gap is
