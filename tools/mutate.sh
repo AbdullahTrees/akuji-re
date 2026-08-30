@@ -46,6 +46,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GAME="${2:-$REPO/English Translated Version 1.1 (D)}"
 LAZBUILD="${LAZBUILD:-/e/lazarus/lazbuild.exe}"
 TEST_TIMEOUT="${TEST_TIMEOUT:-120}"
+# Remember whether the CALLER chose one, so a spec-file header can override
+# the built-in default without overriding an explicit request.
+SELFTEST_FROM_ENV="${SELFTEST:-}"
 SELFTEST="${SELFTEST:---selftest-entities}"
 # A full command to run instead of the built-in self-test. Some defects are
 # only visible to the DIFFERENTIAL test - a wrong RNG reproduces itself, so
@@ -173,7 +176,24 @@ run_one() {  # name file old new
     fi
 }
 
+# A SPEC MAY NAME THE SELF-TEST IT NEEDS, as `# selftest: --selftest-session`
+# on a line of its own. This is not a convenience.
+#
+# The default is --selftest-entities, which does not touch the menus, the
+# message box or the session. Running menus.txt under it reported all six of
+# its mutations as SURVIVED - six real defects, every one of them caught by a
+# test that was simply never run - and "survived" reads as "your test is
+# worthless", which is the most expensive possible way to be wrong here.
+if [ -z "$SELFTEST_FROM_ENV" ]; then
+    spec_selftest=$(sed -n 's/^# *selftest: *//p' "$SPEC" | head -1 | tr -d '
+')
+    if [ -n "$spec_selftest" ]; then
+        SELFTEST="$spec_selftest"
+    fi
+fi
+
 echo "=== mutation testing: $(basename "$SPEC") ==="
+echo "    self-test: $SELFTEST"
 
 # One record per line with every field base64'd: the old and new text are
 # multi-line by nature and would otherwise break a line-oriented read.
@@ -195,8 +215,12 @@ for rec in text.split('\n===\n'):
     # Drop comment lines so a file-level header block is not mistaken for a
     # record - it produced a mutation whose "file" was '#', which then tripped
     # the restore guard and aborted the run.
+    # BLANK lines go too, not just comments. A file-level header ends with
+    # one, and it survived the comment filter to become the record's NAME -
+    # which shifted every field by one, so the FILE to patch was read as the
+    # description and cp was handed the words of a Pascal statement as paths.
     lines = [l for l in head.strip().split('\n')
-             if not l.lstrip().startswith('#')]
+             if l.strip() and not l.lstrip().startswith('#')]
     if len(lines) < 2:
         continue
     print(' '.join(enc(v) for v in (lines[0].strip(), lines[1].strip(), old, new)))

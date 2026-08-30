@@ -1241,5 +1241,17 @@ new` records. Every guard in the script is scar tissue:
   spread
 * **stray-process cleanup** before every build
 
+**A SPEC MUST NAME ITS SELF-TEST.** `mutate.sh` defaults to
+`--selftest-entities`, which touches neither the menus, the message box nor the
+session. Run `menus.txt` under that default and all six of its mutations report
+SURVIVED - six real defects, every one of them caught, by a test that was
+simply never run. "Survived" reads as "your test is worthless", which is the
+most expensive way to be wrong here. Each spec file therefore carries
+
+    # selftest: --selftest-session
+
+on a line of its own, and the harness prints which one it used. An explicit
+`SELFTEST=` in the environment still wins.
+
 Calibrate it with a negative control — a comment-only change must SURVIVE.
 Without that, "everything was killed" can just mean everything failed to build.

@@ -7871,6 +7871,7 @@ end;
 function TestTypewriter(Log: TStrings; const GameDir: string): Integer;
 var
   Bad, I, K, Seen, Plain: Integer;
+  FoundKey, FoundPrompt: Boolean;
   D: TDialogueBox;
   Sc: TEventScript;
   Inp: TInputState;
@@ -7905,13 +7906,20 @@ var
 
 begin
   Bad := 0;
+  FoundKey := False;
+  FoundPrompt := False;
   Log.Add('');
   Log.Add('--- the typewriter, and the two icons ---');
 
   Sc := TEventScript.Create;
   D := TDialogueBox.Create;
   try
-    Sc.Load(GameDir, 1);
+    { STAGE 2, not 1, and the difference is the whole point of the found
+      flags below: tk001 contains no \w at all - the save prompt starts at
+      stage 2 - so a test that loaded stage 1 ran its prompt assertions ZERO
+      times and passed. The mutation harness caught that by surviving "the
+      yes/no prompt reads the vertical axis again". }
+    Sc.Load(GameDir, 2);
     if Sc.LineCount = 0 then
     begin
       Log.Add('  FAIL: stage 1 loaded no dialogue lines');
@@ -7997,6 +8005,7 @@ begin
       Inp.Button[0] := False;
       if D.BoxMode = MB_MODE_WAITKEY then
       begin
+        FoundKey := True;
         Seen := D.AnimFrame;
         for I := 1 to 5 do
           D.Update(False, Inp, GS);
@@ -8021,6 +8030,7 @@ begin
       Inp.Button[0] := False;
       if D.BoxMode = MB_MODE_PROMPT then
       begin
+        FoundPrompt := True;
         Want(D.Choice = 0, 'the prompt did not start on Yes');
         Inp.AxisX := 1;
         Inp.Moving := False;
@@ -8044,8 +8054,19 @@ begin
       end;
     end;
 
+    { The assertions above live inside `if we found one` blocks, so if the
+      script has no such page they never run and the test passes having
+      checked nothing. These two say so out loud. }
+    Want(FoundKey,
+         'no page in this script ended in \k - the prompt-icon assertions '
+         + 'never ran');
+    Want(FoundPrompt,
+         'no page in this script ended in \w - the yes/no assertions never '
+         + 'ran, so the axis it reads was not checked at all');
+
     Log.Add(Format('typewriter: two bytes every three frames; \k icon cycles '
-      + '%d steps, hand %d', [MB_KEY_FRAMES, MB_HAND_FRAMES]));
+      + '%d steps, hand %d; both icons exercised',
+      [MB_KEY_FRAMES, MB_HAND_FRAMES]));
   finally
     D.Free;
     Sc.Free;

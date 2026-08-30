@@ -1,0 +1,63 @@
+# selftest: --selftest-session
+#
+# The menus, the title sub-mode and the message box. NOT --selftest-entities,
+# which is the harness default and touches none of them - under it every
+# mutation below survives, which reads as six worthless tests rather than as
+# the wrong suite having been run.
+
+the title menu reads its cursor AFTER GameState_Reset zeroes it
+src/Title.pas
+---
+        Chosen := MenuIndex;
+        if Assigned(FOnResetState) then
+          FOnResetState;
+--->
+        if Assigned(FOnResetState) then
+          FOnResetState;
+        Chosen := MenuIndex;
+===
+Stage_Begin stops clearing the title sub-mode
+src/GameSession.pas
+---
+  TitleSubMode := 0;
+
+  FEvents.Load(FGameDir, StageIndex);
+--->
+  FEvents.Load(FGameDir, StageIndex);
+===
+the message box reveals a character every frame instead of every third
+src/Dialogue.pas
+---
+  MB_REVEAL_TICKS   = 2;
+--->
+  MB_REVEAL_TICKS   = 0;
+===
+the message box reveals ONE byte at a time rather than two
+src/Dialogue.pas
+---
+    Ch := Copy(FPageText, I * 2 - 1, 2);
+--->
+    Ch := Copy(FPageText, I, 1);
+===
+the yes/no prompt reads the vertical axis again
+src/Dialogue.pas
+---
+        if (Inp.AxisX <> 0) and not Inp.Moving then
+        begin
+          PlayBoxSound(SND_PI);
+          Inc(FChoice, Inp.AxisX);
+--->
+        if (Inp.AxisY <> 0) and not Inp.Moving then
+        begin
+          PlayBoxSound(SND_PI);
+          Inc(FChoice, Inp.AxisY);
+===
+the page finishes typing but never leaves the typing mode
+src/Dialogue.pas
+---
+          if FReveal >= RevealUnits then
+            EndOfPage;
+--->
+          if FReveal > RevealUnits + 1 then
+            EndOfPage;
+===
