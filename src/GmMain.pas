@@ -668,10 +668,12 @@ end;
   correctly; nothing was driving it. }
 function TFrm_main.OpeningStep: Boolean;
 begin
-  { No fader is modelled, so FadeBusy is always False - DIVERGENCE DIV-005.
-    The sequence is the same, it just has no dissolve. }
+  { The real FadeBusy now. Passing a constant False here is why the opening's
+    last phase never waited: Opening_Update arms the fade, then holds at the
+    999 sentinel until it lands, and with the answer hard-coded it fell
+    through on the same frame and the screen cut straight to stage 1. }
   Result := FOpening.Update(ConfirmPressed(FSession.Input),
-                            KbgmPlayer1.IsPlaying, False);
+                            KbgmPlayer1.IsPlaying, DDDD1.FadeBusy);
   FOpening.Draw(DDDD1.Canvas, FFont, FOpeningBmp);
 end;
 
@@ -742,7 +744,10 @@ end;
 
 procedure TFrm_main.OpeningFade(FadeIn: Boolean);
 begin
-  { DIVERGENCE DIV-005 - no fader is modelled. }
+  { Opening_Update makes the same pair of calls every other screen does -
+    self+0x10 := 4, then 0x0044DC48 with the direction. The argument here is
+    named FadeIn and StartFade takes FadeOut, so it inverts. }
+  DDDD1.StartFade(0, not FadeIn);
 end;
 
 constructor TFormAudio.Create(AForm: TFrm_main);
@@ -887,10 +892,9 @@ end;
 
 procedure TFrm_main.GameOverFade(FadeIn: Boolean);
 begin
-  { DIVERGENCE DIV-005. No fader is modelled. Recorded rather than dropped:
-    the original
-    sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48 with
-    FadeIn as its third argument. }
+  { The original sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48
+    with FadeIn as its third argument. }
+  DDDD1.StartFade(0, not FadeIn);
 end;
 
 procedure TFrm_main.GameOverMusic(Track: Integer);

@@ -94,6 +94,8 @@ type
       both wait on it: fade out, wait, then load. With it stuck at False the
       wait passed on the frame it started and transitions happened instantly. }
     procedure StartFade(Mode: Integer; FadeOut: Boolean);
+    { Applied by Present; exposed for tests. }
+    procedure ApplyFade;
     procedure TickFade;
     function FadeBusy: Boolean;
     { 0 = clear, FADE_FULL = black. What a real fader would draw. }
@@ -202,8 +204,63 @@ begin
   FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
 end;
 
+{ DIVERGENCE DIV-005. Darken the whole surface toward black by FadeLevel/FADE_FULL.
+
+  The original faded through DirectDraw - a palette ramp on an 8-bit surface,
+  or a blit with a blend on a 16-bit one - and neither is available here. What
+  is reproduced is the OBSERVABLE: the screen goes to black over thirty frames
+  and comes back over thirty, on the same counter and the same step.
+
+  Done on the surface's pixels rather than with a translucent rectangle
+  because the LCL canvas has no alpha. It runs once per frame and only while a
+  fade is actually up. }
+procedure TDDDD.ApplyFade;
+var
+  Y, X, Keep, Bpp: Integer;
+  P: PByte;
+begin
+  if FFadeLevel <= 0 then
+    Exit;
+  if FFadeLevel >= FADE_FULL then
+  begin
+    FSurface.Canvas.Brush.Color := clBlack;
+    FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
+    Exit;
+  end;
+  { How much of each channel survives, 0..256. }
+  Keep := ((FADE_FULL - FFadeLevel) * 256) div FADE_FULL;
+  Bpp := FSurface.RawImage.Description.BitsPerPixel div 8;
+  if Bpp < 3 then
+    Exit;
+  FSurface.BeginUpdate(True);
+  try
+    for Y := 0 to FSurface.Height - 1 do
+    begin
+      P := PByte(FSurface.RawImage.GetLineStart(Y));
+      if P = nil then
+        Continue;
+      for X := 0 to FSurface.Width - 1 do
+      begin
+        { The three colour bytes only. On a 32-bit surface the fourth is
+          alpha, and scaling that fades the picture to TRANSPARENT rather
+          than to black - the window behind would show through. }
+        P^ := Byte((P^ * Keep) shr 8); Inc(P);
+        P^ := Byte((P^ * Keep) shr 8); Inc(P);
+        P^ := Byte((P^ * Keep) shr 8); Inc(P);
+        if Bpp > 3 then
+          Inc(P, Bpp - 3);
+      end;
+    end;
+  finally
+    FSurface.EndUpdate(False);
+  end;
+end;
+
 procedure TDDDD.Present;
 begin
+  { The fade is the last thing before the surface reaches the screen, which is
+    where DirectDraw would have applied it too. }
+  ApplyFade;
   { The original branched on a fullscreen flag at +0x3C: DirectDraw Flip when
     set, otherwise Blt to the window's screen origin. Windowed is the shipped
     configuration (system.ini fullscreen=off), so that is the path to build. }

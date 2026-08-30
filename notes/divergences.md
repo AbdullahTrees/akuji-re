@@ -89,17 +89,23 @@ rather than a line, but it must then say what stands in for it.
 - behaviour: NEUTRAL in practice - Update clamps Slide to 1..10 before anything
   reads it, so the guard never fires.
 
-## DIV-005 - no fader is modelled
+## DIV-005 - the fade is timed but not dissolved
 - category: B
-- sites: src/GmMain.pas
-- original: 0x0044DC48, called with the object at 0x0046CB6C, +0x10 set.
-- The screen-fade callbacks are empty. Both end screens and the opening ask for
-  a fade and get nothing, so they step straight through the phase that waits on
-  it.
-- behaviour: AFFECTING - phase timing on the opening, ending and game-over
-  screens.
-- exit: implement the fade in the SDL2 presentation layer and drive FadeBusy
-  from it.
+- sites: src/DDDDComponent.pas
+- original: 0x0044DC48, called with the object at 0x0046CB6C, +0x10 set to 4.
+- RESOLVED IN PART. The fader itself is now implemented on the display
+  component, at the original's own offsets and counter: 0 to 0x78 in steps of
+  4, thirty frames each way, with FadeBusy on +0x0D. Every screen that waits
+  on it now waits the right number of frames, and the surface really is
+  darkened to black and back.
+- what remains: the original faded through DirectDraw - a palette ramp on an
+  8-bit surface, or a blended blit on a 16-bit one. This scales the surface's
+  colour bytes instead. The RESULT is the same black; the mechanism is not,
+  and a palette ramp would have quantised differently on the way down.
+- behaviour: the timing is now identical; only the intermediate frames' exact
+  colours differ.
+- exit: a real palette or blended blit once the presentation layer is more
+  than a TBitmap.
 
 ## DIV-006 - the entity dispatcher has an else arm
 - category: C
