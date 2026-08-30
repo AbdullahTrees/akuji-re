@@ -816,7 +816,15 @@ type
     procedure SetDepth(Handle, Depth: Integer); virtual; abstract;
   end;
 
+  { Asked of the host at the point of use, the way the original dereferences
+    its component rather than being handed a value. }
+  TWorldQuery = function: Boolean of object;
+
   TEntityWorld = class
+  private
+    FFading: Boolean;
+    FOnFading: TWorldQuery;
+    function GetFading: Boolean;
   public
     PushX, PushY: Integer;       { 0x00484FAC / 0x00484FB0 }
     OnTopOfSolid: Boolean;       { 0x00484FB4 }
@@ -825,7 +833,24 @@ type
       surf rooms. Terrain_Configure writes it directly beside the threshold,
       which is what "adjacent in BSS" means literally. }
     KillTile: Integer;
-    Fading: Boolean;             { suppresses the soft landing sound }
+    { THE FADER'S +0x0D, which suppresses the soft landing sound. The guard
+      in Player_Update is:
+
+          if (fall / 3 < 0xb)
+              if (fader[+0x0D] == 0)  PlaySound(8)
+
+      so a landing that happens mid-fade is silent. A door transition fades -
+      the warp waits on the fader before it loads - and the player is placed
+      standing on the floor as it ends, with PF_LANDED at 0, so its first
+      update runs the whole just-landed sequence. Without this every room
+      change plays a landing sound the original never plays.
+
+      ASKED, NOT STORED. The original dereferences the fader object where it
+      uses it. Copying the answer into a field once a frame is the shape of
+      mistake that hid the game-over screen, where the caller sampled the
+      music state before the code that starts the music had run. A world with
+      no fader wired keeps answering the plain field, which is what the test
+      doubles set. }
 
     { The layer the entities live on, and the stage's terrain id. Both are
       globals in the original - p_LayerInfo and the stage record's last int -
@@ -859,6 +884,9 @@ type
       the platform it is on, which is how type 60 turns round at a ledge
       rather than walking off. Defaulted so every existing caller is
       unchanged. }
+    property Fading: Boolean read GetFading write FFading;
+    property OnFading: TWorldQuery read FOnFading write FOnFading;
+
     function TileAtX(const E: TEntity; Delta: Integer;
                      Scrolling: Boolean;
                      DeltaY: Integer = 0): Integer; virtual;
@@ -1515,6 +1543,14 @@ end;
 function TEntityWorld.RandomBelow(N: Integer): Integer;
 begin
   Result := DelphiRandom(N);
+end;
+
+function TEntityWorld.GetFading: Boolean;
+begin
+  if Assigned(FOnFading) then
+    Result := FOnFading()
+  else
+    Result := FFading;
 end;
 
 function TEntityWorld.TileAtX(const E: TEntity; Delta: Integer;

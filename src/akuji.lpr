@@ -3238,6 +3238,24 @@ var
     W.Spawns := 0;
   end;
 
+  { Reset settles for three frames and then clears Sounds, which is right for
+    every other test here and wrong for this one: the sound it clears is the
+    one being measured. This places the player the same way and stops. }
+  procedure PlaceOnFloor;
+  begin
+    FillChar(E, SizeOf(E), 0);
+    FillChar(Inp, SizeOf(Inp), 0);
+    E.Raw[EF_ALIVE] := 1;
+    E.Raw[EF_TYPE] := 1;
+    E.Raw[EF_EXTENT_X] := 16;
+    E.Raw[EF_EXTENT_Y] := 16;
+    E.Raw[EF_POS_X] := POSITION_BIAS + 100 * 32;
+    E.Raw[EF_POS_Y] := POSITION_BIAS + 199 * 32;
+    E.Raw[PF_STATE] := PS_GROUND;
+    W.Sounds := '';
+    W.Spawns := 0;
+  end;
+
 begin
   Result := 0;
   W := TFlatWorld.Create;
@@ -3484,6 +3502,47 @@ begin
       Log.Add('FAILED: the play clock did not run while paused - it should');
       Inc(Result);
     end;
+
+    { --- a landing while the screen fades is SILENT ---------------------
+      This is the door-transition case. Reset's own comment says it: an
+      entity placed on the ground has PF_LANDED = 0, so its first update
+      runs the whole just-landed sequence, sound included. A warp places the
+      player exactly that way, and it waits on the fader, so the original's
+      guard - fader +0x0D - is what keeps a room change quiet. }
+    W.Fading := False;
+    PlaceOnFloor;
+    Step(0, 0, False, False);
+    if W.Sounds <> IntToStr(SND_LAND_SOFT) + ' ' then
+    begin
+      Log.Add(Format('FAILED: landing not fading played [%s], want [%d] - '
+        + 'the control case is broken, so the fading case below proves '
+        + 'nothing', [W.Sounds, SND_LAND_SOFT]));
+      Inc(Result);
+    end;
+
+    W.Fading := True;
+    PlaceOnFloor;
+    Step(0, 0, False, False);
+    if W.Sounds <> '' then
+    begin
+      Log.Add(Format('FAILED: landing while the fader is busy played [%s] - '
+        + 'every door transition makes a falling sound the original does '
+        + 'not', [W.Sounds]));
+      Inc(Result);
+    end;
+
+    { and the HARD landing has no such guard - it sounds through the fade. }
+    W.Fading := True;
+    PlaceOnFloor;
+    E.Raw[PF_FALL_FRAMES] := FALL_HARD_THRESHOLD * 3;
+    Step(0, 0, False, False);
+    if Pos(IntToStr(SND_LAND_HARD), W.Sounds) = 0 then
+    begin
+      Log.Add(Format('FAILED: the hard landing was silenced too, playing '
+        + '[%s] - only the soft one is guarded', [W.Sounds]));
+      Inc(Result);
+    end;
+    W.Fading := False;
 
   finally
     W.Free;

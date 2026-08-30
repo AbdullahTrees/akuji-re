@@ -305,6 +305,30 @@ def main():
                        'track (0x00450EDC), then starts playlist entry 4; the '
                        'panel is dismissed by that track ending' % name)
 
+    # THE FADER REACHES THE ENTITY UPDATE. Player_Update's soft-landing sound
+    # is guarded on the fader's +0x0D:
+    #
+    #     if (fall / 3 < 0xb)
+    #         if (fader[+0x0D] == 0)  PlaySound(8)
+    #
+    # so a landing during a fade is silent. TEntityWorld.Fading carries that
+    # flag and Player.pas reads it, but for a long time NO LINE ASSIGNED IT:
+    # it was False for the life of the process, and every door transition
+    # played a landing sound the original does not. A behavioural test cannot
+    # catch that - the guard itself was always correct, and the world double
+    # in the tests sets the field by hand. It is the wiring that was missing,
+    # which makes it the same kind of claim as everything else in this file:
+    # about arrangement, in a TForm, where only the source can be read.
+    if not re.search(r'\.World\.OnFading\s*:=', text):
+        bad.append('the world has no OnFading wired - Player_Update guards '
+                   'the soft landing sound on the fader being idle, and with '
+                   'nothing answering that query every door transition plays '
+                   'a landing sound the original suppresses')
+    if not re.search(r'function TFrm_main\.EntityWorldFading[^;]*;\s*begin\s*'
+                     r'Result\s*:=\s*DDDD1\.FadeBusy', text):
+        bad.append('EntityWorldFading no longer answers DDDD1.FadeBusy, so '
+                   'the soft-landing guard is reading something else')
+
     if bad:
         print('FAIL - the frame loop no longer matches the traced game:')
         for b in bad:
@@ -312,7 +336,8 @@ def main():
         return 1
 
     print('frame loop OK - %d pre arms, %d post arms, entity update '
-          'unconditional between them; opening and power-up audio wired'
+          'unconditional between them; opening and power-up audio wired; '
+          'the fader reaches the entity update'
           % (len(got_pre), len(got_post)))
     return 0
 

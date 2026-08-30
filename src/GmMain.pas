@@ -185,6 +185,7 @@ type
     procedure GameOverFade(FadeIn: Boolean);
     procedure GameOverMusic(Track: Integer);
     function  GameOverMusicPlaying: Boolean;
+    function  EntityWorldFading: Boolean;
   end;
 
 var
@@ -370,6 +371,9 @@ begin
   FGameOver.OnFade := GameOverFade;
   FGameOver.OnMusic := GameOverMusic;
   FGameOver.OnMusicPlaying := GameOverMusicPlaying;
+  { Player_Update's soft-landing guard reads the fader. Wired here rather
+    than copied into the world each frame - see TEntityWorld.Fading. }
+  FSession.World.OnFading := EntityWorldFading;
   { The original calls MainForm.DDSD1.Play straight from the title function;
     routing it through a callback keeps Title.pas off the component layer. }
   FTitleScreen.OnSound := TitleSound;
@@ -461,6 +465,21 @@ begin
     the same state value in the original and mutually exclusive arms of one
     case here, so no frame runs both and the position is equivalent. }
   FSession.Runner.TickDelay(FSession.Events, FSession.Player, GameStateValue);
+  { THE FADER, which Player_Update's soft-landing guard reads and nothing
+    here was writing. The original:
+
+        if (fall / 3 < 0xb)
+            if (fader[+0x0D] == 0)  PlaySound(8)
+
+    so a landing that happens while the screen is fading is SILENT. A door
+    transition fades - the warp waits on FadeBusy before it loads - and the
+    player is placed standing on the floor as it ends, with PF_LANDED at 0, so
+    its first update runs the whole just-landed sequence. Without this every
+    room change played a landing sound the original never plays.
+
+    Only the SOFT landing is guarded; the hard one at 0xb and above sounds
+    either way. TEntityWorld.Fading existed and Player.pas read it, but no
+    line ever assigned it, so it was False for the life of the process. }
   FSession.TickEntities(GameStateValue);
 
   { THE SCREEN SHAKE, which was set and never applied. 0x00464D30 runs this
@@ -1039,6 +1058,12 @@ begin
     what reloads surface slot 0 and forces the font rebuild below. }
   FStageLoaded := -1;
   LoadStage(0);
+end;
+
+{ The fader's +0x0D, which Player_Update dereferences at the point of use. }
+function TFrm_main.EntityWorldFading: Boolean;
+begin
+  Result := DDDD1.FadeBusy;
 end;
 
 { FUN_00450FD0, which GameOver_Update calls from inside its phase-2 block
