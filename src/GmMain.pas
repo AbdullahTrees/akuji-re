@@ -451,31 +451,75 @@ begin
   DispatchPre;
   FSession.TickEntities(GameStateValue);
   DispatchPost;
-  { DIVERGENCE DIV-002. These three stand in for a Joy poll the original does
-    every frame, so they have to LAST one frame - and they were being cleared
-    inside the GS_TITLE_MENU arm instead, which meant any state that did not
-    clear them handed them to whatever ran next.
+  { The fade advances once a frame, which is what makes FadeBusy fall to False
+    after thirty of them and lets the interpreter's wait finish.
+
+    NOT WHILE PAUSED, and that is the original's own guard, immediately after
+    its PauseMenu_Update call:
+
+        if (*(int *)p_GameState == 0x82) PauseMenu_Update();
+        if (*(int *)p_GameState != 0x82) FUN_0044DC70(fader);
+
+    so a room transition caught mid-fade holds where it is until you unpause,
+    instead of running to completion behind the menu. This ticked
+    unconditionally. }
+  if GameStateValue <> GS_PAUSE then
+    DDDD1.TickFade;
+
+  { The OTHER way into the pause menu, which was missing entirely.
+    0x00464D30 does this from the frame loop, between the fader tick and the
+    end-of-frame input block:
+
+        if (((*p_GameState != 0x14) || (*p_TitleSubMode != 1)) &&
+            ((*p_GameState != 0x82) &&
+             (p_InputState[0x1e] == 1 && p_InputState[0x22] == 0)))
+              PTR_DAT_0046d2c0  = *p_MenuIndex     ... SavedMenuIndex
+              *p_MenuIndex      = 0
+              *p_SavedGameState = *p_GameState
+              *p_GameState      = 0x82
+
+    Button 2 - the same button the pause menu's own cancel reads - with its
+    latch, so it fires on the press and not while held. The two guards are the
+    original's: not while already paused, and not on the title screen's OPTIONS
+    page, where button 2 is that screen's back key instead.
+
+    Only FormKeyDown's VK_ESCAPE was implemented, so the mapped pause button
+    did nothing. Both paths write the same four globals, which is why they are
+    one procedure here. }
+  if (GameStateValue <> GS_PAUSE)
+     and not ((GameStateValue = GS_TITLE_MENU) and (TitleSubMode = TSM_OPTIONS))
+     and FSession.Input.Button[PAUSE_CANCEL_BUTTON]
+     and not FSession.Input.ButtonLatch[PAUSE_CANCEL_BUTTON] then
+    EnterPause;
+
+  { DIVERGENCE DIV-002. These three stand in for the Joy poll the original runs
+    at the TOP of every frame - two FUN_00454648 calls for the axes, then four
+    FUN_004546C4 calls through p_KeyMap into p_InputState+0x1C - which
+    OVERWRITES the previous frame's values unconditionally. So the stand-ins
+    must live exactly one frame too, and they were being cleared inside the
+    GS_TITLE_MENU arm instead, which meant any state that did not clear them
+    handed them to whatever ran next.
 
     That is not theoretical: pressing Down then Z in the PAUSE menu left
     FMoveY = 1 and FConfirm = True, and pause RESET goes to the title screen.
-    The title menu's first Update then moved its cursor 0 -> 1 and confirmed
-    it in the same call - and row 1 of the title menu is CONTINUE, so Reset
-    loaded the last save. Both menus index the same cursor global and the two
-    rows happen to line up, which is why it looked like the pause menu WAS the
-    main menu.
+    The title menu's first Update then moved its cursor 0 -> 1 and confirmed it
+    in the same call - and row 1 of the title menu is CONTINUE, so Reset loaded
+    the last save.
 
-    Cleared here, after every dispatch, because a real poll would have
-    overwritten them by now regardless of which state ran. }
+    Cleared at the frame boundary rather than at the top, because these are fed
+    by WM_KEYDOWN between frames while the original's poll reads the physical
+    state during the frame; the boundary is where a key event stops being this
+    frame's input. That placement is a property of the stand-in, not of the
+    binary - it goes when DIV-002 does. }
   FMoveY := 0;
   FMoveX := 0;
   FConfirm := False;
 
   { Step 7. Must come after the dispatch: the handlers read Moving and the
-    button latches expecting the PREVIOUS frame's values. }
+    button latches expecting the PREVIOUS frame's values. The original's
+    equivalent block sits here too - after the pause check, before the
+    present. }
   InputStep7;
-  { The fade advances once a frame, which is what makes FadeBusy fall to
-    False after thirty of them and lets the interpreter's wait finish. }
-  DDDD1.TickFade;
   DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
   DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
 

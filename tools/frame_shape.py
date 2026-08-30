@@ -96,6 +96,30 @@ def main():
             bad.append('AppIdle never clears %s - a keypress in one state '
                        'survives into the next, and pause RESET turns into '
                        'title CONTINUE' % flag)
+    # The fader is FROZEN while paused. 0x00464D30 puts these two lines
+    # adjacent, and the second one's guard is the point:
+    #     if (*p_GameState == 0x82) PauseMenu_Update();
+    #     if (*p_GameState != 0x82) FUN_0044DC70(fader);
+    # Without it a room transition caught mid-fade runs to completion behind
+    # the pause menu.
+    if not re.search(r'if\s+GameStateValue\s*<>\s*GS_PAUSE\s+then\s*'
+                     r'DDDD1\.TickFade', idle_for_flags):
+        bad.append('AppIdle ticks the fader without excluding GS_PAUSE - the '
+                   'original freezes the fade while the pause menu is up')
+
+    # The frame loop's own pause entry, which is NOT FormKeyDown's. Button 2
+    # with its latch, guarded against re-entry and against the options page.
+    if 'EnterPause' not in idle_for_flags:
+        bad.append('AppIdle never enters pause - only FormKeyDown does, so the '
+                   'mapped pause button does nothing')
+    else:
+        for token in ('PAUSE_CANCEL_BUTTON', 'TSM_OPTIONS', 'ButtonLatch'):
+            if token not in idle_for_flags:
+                bad.append('the AppIdle pause entry does not mention %s - the '
+                           'original tests button 2 against its latch and '
+                           'refuses on the title screen options page'
+                           % token)
+
     post_body = re.sub(r'[{][^}]*[}]', ' ', body_of(text, 'DispatchPost'))
     for flag in ('FMoveY', 'FMoveX', 'FConfirm'):
         if re.search(r'(?<![A-Za-z0-9_])%s\s*:=\s*(0|False)\s*;' % flag, post_body):
