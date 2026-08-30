@@ -202,6 +202,17 @@ printf '  %-22s exit=%d  %s
 [ $rc -ne 0 ] && { fail=1; sed -n '/^FAIL/,$p' "$SCRATCH/div.log" | head -12; }
 
 note ""
+note "=== the audit ledger still describes this repository ==="
+# notes/audited.md says which functions have been read against a fresh
+# decompile and what was compared. It cannot prove an audit was thorough, only
+# that the list has not rotted into describing a repo that no longer exists.
+python "$REPO/tools/audited.py" > "$SCRATCH/audited.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "audited" "$rc"         "$(tail -1 "$SCRATCH/audited.log")"
+[ $rc -ne 0 ] && { fail=1; sed -n '/^FAIL/,$p' "$SCRATCH/audited.log" | head -10; }
+
+note ""
 note "=== no address is claimed by two different variables ==="
 # One of the original's globals declared twice - once properly and once as a
 # private field whose comment names the same address - has shipped three times,

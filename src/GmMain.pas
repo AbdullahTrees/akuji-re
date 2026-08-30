@@ -1008,8 +1008,12 @@ begin
 end;
 
 { HUD_Draw @ 0x00461BA8: a "%3d/%-3d" counter, an h:mm:ss timer, and a row of
-  life icons - filled up to Lives, empty out to MaxLives. Icon graphics are not
-  wired yet, so the count is shown as text. }
+  life icons - filled up to Lives, empty out to MaxLives.
+
+  The last sentence of this comment used to read "icon graphics are not wired
+  yet, so the count is shown as text", and it was still saying so long after
+  DrawHud below was drawing every one of them. A stale comment is worse than
+  none: it is the thing an audit reads and believes. }
 { ---------------------------------------------------------------------------
   DrawHud - HUD_Draw @ 0x00461BA8.
 
@@ -1059,8 +1063,15 @@ begin
   if (FSession.Player.TargetIndex >= 0) and
      (FSession.Player.TargetIndex <= High(COUNTER_TARGETS)) then
     Target := COUNTER_TARGETS[FSession.Player.TargetIndex];
+  { TRIMMED, and the format is padded on purpose so that it has something to
+    trim. 0x00461BA8 runs the result of Format through 0x00407D44 - which is
+    Trim: skip bytes < 0x21 from the front, drop them from the back, Copy what
+    is left - and only then concatenates the '@ ' in front of it. '%3d' right
+    aligns the count in three columns and '%-3d' left aligns the goal, so the
+    untrimmed string is '  0/2  '; without the Trim the '@ ' is followed by two
+    spaces and the number sits two glyphs right of where it belongs. }
   FFont.TextOut(DDDD1.Canvas, 8, $20,
-    '@ ' + Format('%3d/%-3d', [FSession.Player.Counter, Target]), 0);
+    '@ ' + Trim(Format('%3d/%-3d', [FSession.Player.Counter, Target])), 0);
 
   { Variant 2 for the label, 0 for the digits - the original passes exactly
     these as Game_DrawText's fifth argument. }
@@ -1191,10 +1202,20 @@ begin
       HUD_Draw, which is the one thing they do share. }
     GS_PLAY_ALT:
       begin
-        { No fader is modelled yet, so FadeBusy is always False and the
-          screen steps straight from 0 to 2. That is a configuration, not a
-          stub: the sequence is the same, it just has no dissolve. }
-        if FGameOver.Update(False, KbgmPlayer1.IsPlaying,
+        { GameOver_Update @ 0x00461A44 waits on the FADER between its phases:
+
+              phase 0            StartFade, then nothing until it finishes
+              phase 1, +0x0D==0  reset, reload the title assets, midi 2,
+                                 StartFade the other way
+              phase 2            draw slot 3, leave on the music ending or a
+                                 confirm
+
+          The comment that used to sit here said no fader was modelled, so
+          this passed a hard-coded False - and it was still saying it after
+          the fader was implemented. With FadeBusy permanently False phase 0
+          fell straight into phase 1 in the same frame and BOTH dissolves were
+          invisible. +0x0D is TDDDD.FadeBusy. }
+        if FGameOver.Update(DDDD1.FadeBusy, KbgmPlayer1.IsPlaying,
                             ConfirmPressed(FSession.Input), GameStateValue) then
           DrawGameOver;
       end;
