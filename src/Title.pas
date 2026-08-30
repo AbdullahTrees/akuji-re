@@ -279,7 +279,16 @@ begin
       PAUSE_QUIT:     AGameState := GS_QUIT;
     end;
     Result := False;
-    Exit;
+    { NO EXIT HERE. Every arm of the original's confirm ends in
+      `JMP 0x00462024`, which is the CANCEL test - not the epilogue at
+      0x004620C7 - so a confirm falls through to the cancel test and then to
+      the movement block. Two consequences, both the original's: a confirm and
+      a cancel in the same frame let the cancel win and put the state back,
+      and the cursor still moves on that frame.
+
+      The cancel arm below DOES leave, and that is not an inconsistency:
+      0x00462061 jumps to the epilogue, because the movement block is its
+      `else`. }
   end;
 
   if Inp.Button[PAUSE_CANCEL_BUTTON]

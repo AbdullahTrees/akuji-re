@@ -668,6 +668,14 @@ begin
     Exit(False);
 
   Result := True;
+  { Statement 2, and it sits between the opening gate and the state write:
+      00462f5f  MOV EAX,[0x0046cc14]     ; ScreenPhase
+      00462f66  MOV dword ptr [EAX],EDX  ; := 0
+      00462f68  MOV EAX,[0x0046d06c]
+      00462f6d  MOV dword ptr [EAX],0x1e ; GameState := 30
+    Stage_Begin clears it again a frame later, so nothing observable read the
+    stale value - but it was a missing statement in a row marked MATCHES. }
+  ScreenPhase := 0;
   AGameState := GS_STAGE_BEGIN;
 
   InitNewGame(P, ASettings.GameLevel);

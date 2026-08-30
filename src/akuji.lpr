@@ -8326,6 +8326,42 @@ begin
          + 'fires there, which is how RESET turns into CONTINUE');
     Want(Inp.ButtonLatch[0], 'ButtonLatch[0] was not set by the pause confirm');
 
+    { --- the confirm FALLS THROOUGH -----------------------------------
+      Every arm of 0x00461EE4's confirm ends in `JMP 0x00462024`, the CANCEL
+      test - not the epilogue at 0x004620C7 - so after a confirm the cancel
+      test and then the movement block still run. Two observable consequences.
+
+      First: the cursor still moves on the frame you confirm. }
+    FillChar(Inp, SizeOf(Inp), 0);
+    ScreenPhase := 1;
+    MenuIndex := PAUSE_RESTART;
+    GameStateValue := GS_PAUSE;
+    Inp.Button[0] := True;
+    Inp.AxisY := 1;
+    Inp.Moving := False;
+    Pause.Update(Inp, GameStateValue);
+    Want(GameStateValue = GS_TITLE_INIT,
+         'the confirm did not take');
+    Want(MenuIndex = PAUSE_RESTART + 1,
+         Format('the cursor is %d after confirming with down held, want %d - '
+           + 'the confirm must fall through to the movement block',
+           [MenuIndex, PAUSE_RESTART + 1]));
+
+    { Second: a cancel in the SAME frame wins, because it runs after the
+      confirm and writes the state again. }
+    FillChar(Inp, SizeOf(Inp), 0);
+    ScreenPhase := 1;
+    MenuIndex := PAUSE_RESTART;
+    SavedGameState := GS_PLAY;
+    GameStateValue := GS_PAUSE;
+    Inp.Button[0] := True;                          { confirm }
+    Inp.Button[PAUSE_CANCEL_BUTTON] := True;        { and cancel }
+    Pause.Update(Inp, GameStateValue);
+    Want(GameStateValue = GS_PLAY,
+         Format('confirm and cancel in one frame left the state at %d, want '
+           + 'the cancel to win at %d - it runs after the confirm',
+           [GameStateValue, GS_PLAY]));
+
     Log.Add(Format('pause: reset -> state %d, confirm latched %s',
                    [GameStateValue, BoolToStr(Inp.ButtonLatch[0], True)]));
   finally
@@ -8433,7 +8469,13 @@ begin
     FillChar(Cfg, SizeOf(Cfg), 0);
     FillChar(P, SizeOf(P), 0);
     GS := 0;
+    ScreenPhase := 7;      { must be cleared - see below }
     GameStartOrLoad(P, Cfg, smContinue, Host, True, SaveName, GS);
+    { Statement 2 of 0x00462F40: ScreenPhase := 0, between the opening gate
+      and the state write. Seeded so the clear is observable. }
+    Want(ScreenPhase = 0,
+         Format('GameStartOrLoad left ScreenPhase at %d - it clears it at '
+                + '00462F66, right after the opening gate', [ScreenPhase]));
     Want(Cfg.CurrentStage = 7,
          Format('CONTINUE resumed at stage %d, want the saved stage 7 - '
            + 'stage %d is where a NEW GAME starts',
