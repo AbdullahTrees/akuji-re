@@ -97,9 +97,17 @@ type
     make one without disturbing the game's.
 
         0x0046D24C  the steps array        0x0046D334  which step
-        0x0046CE7C  which event            0x0046D028  the argument it began with
+        0x0046CE7C  which event            0x0046D028  the delay it began with
         0x0046D218  the cursor within a step
-        0x0046CC14  the wait state, cleared on every step boundary }
+        0x0046D334  the STEP INDEX. EventScript_AdvanceStep increments it and
+                    compares it against DynArrayHigh(steps), and Event_Begin
+                    seeds it to -1 so the first increment lands on 0. It was
+                    recorded as "the save slot cursor", which it is not.
+        0x0046CC14  ScreenPhase - the SAME global the pause menu, the game-over
+                    screen, the ending and the message box step through. This
+                    unit kept a separate `Waiting` field for it, so a step
+                    boundary cleared one copy and every other screen read the
+                    other. AdvanceStep clears it as its FIRST statement. }
   TEventRunner = class
   public
     Steps: array of string;
@@ -107,7 +115,6 @@ type
     EventId: Integer;
     Arg: Integer;
     Cursor: Integer;
-    Waiting: Integer;
 
     { 0x00454EF4. Starts the script on an event record, unless one is already
       running - the guard is the game state itself, not a flag. }
@@ -281,7 +288,6 @@ begin
   EventId := AEventId;
   Arg := AArg;
   Cursor := 0;
-  Waiting := 0;
   AGameState := GS_STATE_140;
   { 0x00454EF4 clears the shared sub-phase here, and it has to: the message
     box's \k and \w arms both open with `if ScreenPhase = 0 then` one-shots
@@ -329,7 +335,7 @@ var
   List: TStringList;
   I, Flag: Integer;
 begin
-  Waiting := 0;
+  ScreenPhase := 0;
   Inc(StepIndex);
 
   if StepIndex > High(Steps) then
@@ -398,48 +404,48 @@ begin
 
     SUBOP_LOAD_STAGE:
       { Fade out, and only once the fade has finished does the stage change.
-        Waiting is the little state machine that spans those frames. }
+        ScreenPhase is the little state machine that spans those frames. }
       begin
-        if Waiting = 0 then
+        if ScreenPhase = 0 then
         begin
-          Waiting := 1;
+          ScreenPhase := 1;
           Host.StartFade(True);
         end;
-        if (Waiting = 1) and (not Host.FadeBusy) then
+        if (ScreenPhase = 1) and (not Host.FadeBusy) then
         begin
           Host.StartFade(False);
           Host.LoadStage(StepArg(Step, Op, 0), StepArg(Step, Op, 1),
                          StepArg(Step, Op, 2), StepArg(Step, Op, 3),
                          StepArg(Step, Op, 4));
           AGameState := GS_STAGE_BEGIN;
-          Waiting := 0;
+          ScreenPhase := 0;
         end;
       end;
 
     1:
       { The same fade, then a warp within the stage rather than a load. }
       begin
-        if Waiting = 0 then
+        if ScreenPhase = 0 then
         begin
-          Waiting := 1;
+          ScreenPhase := 1;
           Host.StartFade(True);
         end;
-        if (Waiting = 1) and (not Host.FadeBusy) then
+        if (ScreenPhase = 1) and (not Host.FadeBusy) then
         begin
           Host.StartFade(False);
           Host.WarpPlayer(StepArg(Step, Op, 0), StepArg(Step, Op, 1),
                           StepArg(Step, Op, 2), StepArg(Step, Op, 3));
           AGameState := GS_PLAY;
-          Waiting := 0;
+          ScreenPhase := 0;
         end;
       end;
 
     SUBOP_DIALOGUE:
       { Shown once; the dialogue box itself decides when it is done, and it
         is what calls AdvanceStep afterwards. }
-      if Waiting = 0 then
+      if ScreenPhase = 0 then
       begin
-        Waiting := 1;
+        ScreenPhase := 1;
         Host.ShowLine(StepArg(Step, Op, 0));
       end;
 
