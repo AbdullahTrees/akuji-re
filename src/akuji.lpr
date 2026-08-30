@@ -8128,6 +8128,24 @@ begin
                  Pool.Entity(Slot), World);
       Want(Pool.Field(Slot, EF_STATE) = 0,
            'an ordinary tile killed the entity');
+
+      { --- and dying that way must REACH the game-over screen ----------
+        Reported: drowning kills but never shows the game-over screen, while
+        other deaths do. PS_FELL counts PF_ANIM_TIMER up to DEATH_HOLD and
+        then sets the state - and PF_ANIM_TIMER is EF_BLOCK_B, which is the
+        very field Entity_CheckKillTiles zeroes. If anything re-runs the check
+        while the player is dying, the timer restarts for ever. }
+      World.KillTile := 29;
+      Pool.SetField(Slot, EF_STATE, 0);
+      Pool.SetField(Slot, EF_BLOCK_B, 0);
+      ApplyMoveY(L, Pool.Entity(Slot)^.Raw[EF_POS_Y],
+                 Pool.Entity(Slot)^.Raw[EF_VEL_Y], False, False,
+                 Pool.Entity(Slot), World);
+      Want(Pool.Field(Slot, EF_STATE) = KILL_TILE_STATE, 'not killed');
+      Log.Add(Format('after the kill: state %d, death timer %d',
+                     [Pool.Field(Slot, EF_STATE),
+                      Pool.Field(Slot, EF_BLOCK_B)]));
+
       Log.Add('kill tile: lethal at 29, harmless at 30');
     end;
   finally

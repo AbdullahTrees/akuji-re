@@ -271,7 +271,7 @@ RTL provides them - so they carry no status.
 
 ## Audited before this table existed
 
-Recorded in CLAUDE.md section 14a rather than here, and listed so the gap is
+Recorded in notes/verification.md rather than here, and listed so the gap is
 visible: `Player_Update` (3 defects found) and `Entities.pas`'s `Entity_Spawn`,
 `Entity_TileEdgeDistX/Y` and `Entity_UpdateDying`. They are not marked frozen
 because that audit predates this table and its detail was never written down in
