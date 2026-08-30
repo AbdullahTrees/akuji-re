@@ -3127,6 +3127,10 @@ type
     FloorY, WallX, Nonce: Integer;
     Sounds: string;
     Spawns: Integer;
+    { Counted, not swallowed. This was an empty override, so the missing
+      StopMusic on the on-screen death was invisible to every test that ran
+      through this world. }
+    MusicStops: Integer;
     function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean;
                      DeltaY: Integer = 0): Integer; override;
     function TileAtY(const E: TEntity; Delta: Integer; Scrolling: Boolean): Integer; override;
@@ -3198,7 +3202,9 @@ begin
 end;
 
 procedure TFlatWorld.StopMusic;
-begin end;
+begin
+  Inc(MusicStops);
+end;
 
 procedure TFlatWorld.PlaySound(Id: Integer);
 begin
@@ -3530,6 +3536,51 @@ begin
       Log.Add('FAILED: the play clock did not run while paused - it should');
       Inc(Result);
     end;
+
+    { --- dying on screen stops the stage music ---------------------------
+      Player_UpdateKnockback, at the moment the last life goes:
+
+          spawn three type-9 souls at 0, 0x14, 0x28
+          FUN_00450CBC(music, 0)      <- the stage track stops
+          PlaySound(0x0C)
+          state := 9
+
+      The music stop sits between the souls and the sound, and it was the one
+      statement missing - the death played its sound while the stage track ran
+      on underneath it and into the game-over screen. }
+    P.Lives := 0;
+    PlaceOnFloor;
+    E.Raw[PF_STATE] := PS_SPECIAL3;      { knockback }
+    W.MusicStops := 0;
+    Step(0, 0, False, False);
+    if E.Raw[PF_STATE] <> PS_DYING then
+    begin
+      Log.Add(Format('FAILED: knockback with no lives left ended in state %d, '
+        + 'want PS_DYING (%d) - the death never happened, so the music check '
+        + 'below proves nothing', [E.Raw[PF_STATE], PS_DYING]));
+      Inc(Result);
+    end;
+    if W.MusicStops <> 1 then
+    begin
+      Log.Add(Format('FAILED: dying on screen stopped the music %d times, '
+        + 'want 1 - the stage track plays on over the death',
+        [W.MusicStops]));
+      Inc(Result);
+    end;
+
+    { and with a life still in hand it is an ordinary landing, music intact. }
+    P.Lives := 1;
+    PlaceOnFloor;
+    E.Raw[PF_STATE] := PS_SPECIAL3;
+    W.MusicStops := 0;
+    Step(0, 0, False, False);
+    if W.MusicStops <> 0 then
+    begin
+      Log.Add(Format('FAILED: surviving a knockback stopped the music %d '
+        + 'times - only the last life does', [W.MusicStops]));
+      Inc(Result);
+    end;
+    P.Lives := 3;
 
     { --- a landing while the screen fades is SILENT ---------------------
       This is the door-transition case. Reset's own comment says it: an

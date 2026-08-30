@@ -428,6 +428,18 @@ begin
                         E.Raw[EF_POS_Y] - POSITION_BIAS - $200);
     World.SetSpawnField(Slot, EF_FACING, I * DEATH_SOUL_STEP);
   end;
+  { THE STAGE TRACK STOPS HERE, before the death sound - FUN_00450CBC with a
+    fade of 0, exactly as the fall death does it. Dying on screen silences the
+    music just as falling does; what differs between the two is only WHERE the
+    call sits. The fall makes it in the PS_FELL arm, on the frame the timer is
+    still 0, because nothing transitions into that state - the kill check
+    writes state 10 directly. Knockback has a real transition, so the original
+    puts it here, at the moment the last life goes.
+
+    This was the missing statement: the reconstruction spawned the souls and
+    played the sound but never stopped the track, so the stage music carried on
+    over the death and into the game-over screen. }
+  World.StopMusic;
   World.PlaySound(SND_DEATH);
   E.Raw[PF_STATE] := PS_DYING;
   E.Raw[PF_ANIM_FRAME] := 0;
