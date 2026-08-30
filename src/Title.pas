@@ -110,7 +110,8 @@ type
       should leave the title screen; the new GameStateValue has already been
       set. }
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
-    procedure Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
+    procedure Draw(C: TCanvas; F: TGameFont;
+                   BgMenu, BgOptions, Gallery: TBitmap);
 
     function GetIndex: Integer;
     function GetSubMode: Integer;
@@ -643,13 +644,25 @@ begin
   end;
 end;
 
-procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
+procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont;
+                            BgMenu, BgOptions, Gallery: TBitmap);
 var
   I: Integer;
 begin
   { The original blits p_Surfaces[1] for the menu and p_Surfaces[2] for options
     full-screen first. Colour variants match the original's param_5: 2 for menu
     items, 1 for the cursor, 0 for the credit line. }
+  { The gallery draws ONE sprite and no text, so it is handled before the font
+    guard - the original's third arm is a Rect and a single TDDDD_DrawSprite,
+    with no Game_DrawText anywhere in it. Sitting below the guard meant it
+    never ran when the font had not been built. }
+  if TitleSubMode = TSM_OMAKE then
+  begin
+    if Gallery <> nil then
+      C.Draw(0, 0, Gallery);
+    Exit;
+  end;
+
   if F = nil then Exit;
 
   case TitleSubMode of

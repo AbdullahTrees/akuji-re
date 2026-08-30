@@ -91,6 +91,10 @@ type
     procedure SetDepth(Handle, Depth: Integer); override;
 
     { Draws every visible sprite, shallowest depth last. }
+    { The screen shake displaces every live sprite by the same amount, once a
+      frame, AFTER Entity_UpdateAll has written their positions - so it is a
+      displacement of this frame's value, not an accumulation. }
+    procedure ShiftY(Delta: Integer);
     function DrawOrder: TSpriteOrder;
     procedure DrawAll(Dest: TCanvas; ASurfaces: TSurfaceSet);
     procedure DrawTop(Dest: TCanvas; ASurfaces: TSurfaceSet);
@@ -246,6 +250,15 @@ end;
   WITHIN a bucket the original walks the pool from the LAST slot to the first,
   so a lower slot number draws later and therefore in front of a higher one at
   the same depth. }
+procedure TSpritePool.ShiftY(Delta: Integer);
+var
+  I: Integer;
+begin
+  for I := 0 to SPRITE_POOL_SIZE - 1 do
+    if FSlots[I].Used then
+      Inc(FSlots[I].Y, Delta);
+end;
+
 function TSpritePool.DrawOrder: TSpriteOrder;
 var
   Depth, I, N: Integer;

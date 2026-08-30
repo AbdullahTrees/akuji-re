@@ -975,7 +975,16 @@ begin
           FAnimFrame := (FAnimFrame + 1) mod MB_KEY_FRAMES;
         end;
         if ((Inp.AxisY <> 0) and not Inp.Moving) or Confirm then
+        begin
+          { The original clears the shared sub-phase here as well as advancing
+            - 0x00456038's mode-2 arm is
+                PTR_DAT_0046cc14 = 0; reveal++; pageStart = reveal; mode = 1;
+            and 0x0046CC14 is ScreenPhase, the same global the pause menu and
+            the game-over screen step through. It went unnoticed while this
+            unit had no way to say so. }
+          ScreenPhase := 0;
           TakePage(FRest);
+        end;
       end;
 
     { --- 3, \e: the message is over -------------------------------------- }

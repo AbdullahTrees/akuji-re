@@ -86,6 +86,7 @@ type
     procedure TitleSound(Index: Integer);
   private
     FLastFrame: DWord;     // p_LastFrameTime 0x0046D1E0
+    FShakeOffset: Integer; // this frame's Random(0x10) - 8
     FArchive: TQdaArchive;
     FTitle: TBitmap;
     FTitleScreen: TTitleScreen;
@@ -459,6 +460,29 @@ begin
     case here, so no frame runs both and the position is equivalent. }
   FSession.Runner.TickDelay(FSession.Events, FSession.Player, GameStateValue);
   FSession.TickEntities(GameStateValue);
+
+  { THE SCREEN SHAKE, which was set and never applied. 0x00464D30 runs this
+    immediately after Entity_UpdateAll and before anything is drawn:
+
+        if (*p_ScreenShakeOn == 1)
+            *p_ScreenShakeTimer -= 1
+            off = Random(0x10) - 8
+            if (*p_ScreenShakeTimer < 1) *p_ScreenShakeOn = 0
+            for every live sprite:  sprite[+0x30] -= off
+
+    and the same `off` is ADDED to the background tilemap's scroll Y further
+    down, so the map and the sprites shift together. EntityHandlers sets
+    ScreenShakeOn for a type-77 impact and GameSession clears it on reset -
+    nothing in between ever read it. }
+  FShakeOffset := 0;
+  if ScreenShakeOn then
+  begin
+    Dec(ScreenShakeTimer);
+    FShakeOffset := DelphiRandom(SHAKE_RANGE) - SHAKE_CENTRE;
+    if ScreenShakeTimer < 1 then
+      ScreenShakeOn := False;
+    FSession.Sprites.ShiftY(-FShakeOffset);
+  end;
   DispatchPost;
   { The fade advances once a frame, which is what makes FadeBusy fall to False
     after thirty of them and lets the interpreter's wait finish.
@@ -620,7 +644,8 @@ begin
   if (FMap <> nil) and (FStages <> nil) then
     FMap.Draw(DDDD1.Canvas, FSurfaces,
               FStages.Tileset[Settings.CurrentStage, 0],
-              PixelOf(FSession.Layer.OriginX), PixelOf(FSession.Layer.OriginY),
+              PixelOf(FSession.Layer.OriginX),
+              PixelOf(FSession.Layer.OriginY) + FShakeOffset,
               SCREEN_W, SCREEN_H);
   { The panel covers everything, so it replaces the scene rather than sitting
     on it - PowerUp_Show blits a full 320x240 picture before Overlay_Update
@@ -1206,7 +1231,8 @@ begin
     GS_TITLE_MENU:
       begin
         FTitleScreen.Update(FMoveY, FMoveX, FConfirm);
-        FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2]);
+        FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2],
+                          FEndingBmp);
       end;
     GS_PLAYER_INIT:
       begin

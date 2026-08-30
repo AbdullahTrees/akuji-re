@@ -29,7 +29,7 @@ program akuji;
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces,   // LCL widgetset - must come first
-  Forms,
+  Forms, Graphics,
   GmMain in 'GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
@@ -55,6 +55,56 @@ uses
   --------------------------------------------------------------------------- }
 
 { --selftest <qda> [outdir] : archive reader. }
+{ WHERE THE ORIGINAL BINARY IS, and why this is not just a filename.
+
+  The game directory holds the ORIGINAL akuji.exe, which every differential
+  check reads: the entity jump table, the const tables, the emulator's input.
+  It is also the obvious place to drop OUR build to play it - and if that
+  happens under the name akuji.exe, every one of those checks silently starts
+  comparing the reconstruction against ITSELF and passes.
+
+  So: prefer akuji_source.exe, fall back to akuji.exe, and in either case
+  REFUSE anything that is not the original. The original is 502784 bytes and
+  carries ' was recovered! ' at 0x004568BC - our build is tens of megabytes and
+  has neither. }
+function OriginalExe(const GameDir: string): string;
+const
+  ORIGINAL_BYTES = 502784;
+var
+  Dir: string;
+
+  function Looks(const FN: string): Boolean;
+  var
+    F: TFileStream;
+    Buf: array[0..15] of Char;
+  begin
+    Result := False;
+    if not FileExists(FN) then
+      Exit;
+    F := TFileStream.Create(FN, fmOpenRead or fmShareDenyNone);
+    try
+      if F.Size <> ORIGINAL_BYTES then
+        Exit;
+      { 0x004568BC in the CODE section: VA - 0x400C00 is the file offset. }
+      F.Position := $004568BC - $00400C00;
+      F.ReadBuffer(Buf, SizeOf(Buf));
+      Result := Buf = ' was recovered! ';
+    finally
+      F.Free;
+    end;
+  end;
+
+begin
+  Dir := IncludeTrailingPathDelimiter(GameDir);
+  Result := Dir + 'akuji_source.exe';
+  if Looks(Result) then
+    Exit;
+  Result := Dir + 'akuji.exe';
+  if Looks(Result) then
+    Exit;
+  Result := '';
+end;
+
 function SelfTestArchive(Log: TStrings): Integer;
 var
   A: TQdaArchive;
@@ -2485,7 +2535,7 @@ var
 
 begin
   Result := 0;
-  Path := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+  Path := OriginalExe(GameDir);
   if not FileExists(Path) then
   begin
     Log.Add('FAILED: no akuji.exe to pin the font name against');
@@ -2854,7 +2904,7 @@ begin
   Bad := 0;
   Exe := TMemoryStream.Create;
   try
-    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    ExeName := OriginalExe(GameDir);
     if not FileExists(ExeName) then
     begin
       Log.Add('FAILED: akuji.exe is not in the game directory');
@@ -4568,7 +4618,7 @@ begin
 
   Exe := TMemoryStream.Create;
   try
-    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    ExeName := OriginalExe(GameDir);
     if not FileExists(ExeName) then
     begin
       Log.Add('FAILED: akuji.exe is not in the game directory');
@@ -5871,6 +5921,7 @@ begin
   end;
 end;
 
+
 function SelfTestEntities(Log: TStringList): Integer;
 var
   GameDir, ExeName: string;
@@ -5924,7 +5975,7 @@ begin
   NoArm := 0;
   Exe := TMemoryStream.Create;
   try
-    ExeName := IncludeTrailingPathDelimiter(GameDir) + 'akuji.exe';
+    ExeName := OriginalExe(GameDir);
     if not FileExists(ExeName) then
     begin
       Log.Add('FAILED: akuji.exe is not in the game directory');
@@ -7869,6 +7920,8 @@ function TestSpriteOrder(Log: TStrings): Integer;
 var
   Bad, I: Integer;
   Pool: TSpritePool;
+  Dest, Pic: TBitmap;
+  Title: TTitleScreen;
   Sign, Door, Player, Dead, Hidden, Other: Integer;
   Order: TSpriteOrder;
 
@@ -7947,6 +8000,43 @@ begin
 
     Log.Add(Format('draw order: %d sprites, player at position %d of %d',
                    [Length(Order), PosOf(Player), Length(Order)]));
+
+    { --- the gallery picture is actually DRAWN ------------------------
+      0x00462330's third arm blits the loaded surface over the whole screen.
+      Draw had arms for the menu and the options page and NONE for the
+      gallery, so choosing an image loaded the bitmap and showed whatever was
+      already there. Painted into a real canvas and read back, because the
+      defect was a missing branch - nothing short of the pixel proves it. }
+    Dest := TBitmap.Create;
+    Pic := TBitmap.Create;
+    Title := TTitleScreen.Create;
+    try
+      Dest.SetSize(64, 64);
+      Dest.Canvas.Brush.Color := clBlack;
+      Dest.Canvas.FillRect(0, 0, 64, 64);
+      Pic.SetSize(64, 64);
+      Pic.Canvas.Brush.Color := clRed;
+      Pic.Canvas.FillRect(0, 0, 64, 64);
+
+      TitleSubMode := TSM_OMAKE;
+      Title.Draw(Dest.Canvas, nil, nil, nil, Pic);
+      Want(Dest.Canvas.Pixels[8, 8] = clRed,
+           'the gallery sub-mode drew nothing - Draw has no TSM_OMAKE arm, so '
+           + 'the picture is loaded and never blitted');
+
+      { and it must not paint the gallery over the ordinary menu }
+      Dest.Canvas.Brush.Color := clBlack;
+      Dest.Canvas.FillRect(0, 0, 64, 64);
+      TitleSubMode := TSM_MENU;
+      Title.Draw(Dest.Canvas, nil, nil, nil, Pic);
+      Want(Dest.Canvas.Pixels[8, 8] <> clRed,
+           'the gallery picture was drawn while in the ordinary menu');
+      TitleSubMode := TSM_MENU;
+    finally
+      Title.Free;
+      Pic.Free;
+      Dest.Free;
+    end;
   finally
     Pool.Free;
   end;

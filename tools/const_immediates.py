@@ -44,12 +44,33 @@ import struct
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE = os.path.join(REPO, 'English Translated Version 1.1 (D)', 'akuji.exe')
+GAMEDIR = os.path.join(REPO, 'English Translated Version 1.1 (D)')
 SRC = os.path.join(REPO, 'src', 'EntityHandlers.pas')
 
 CODE_VA_BIAS = 0x400C00          # CODE: VA 0x401000 at raw 0x400
 CONST_RE = re.compile(r'^\s*T(\d+)_([A-Z0-9_]+)\s*=\s*(-?\$[0-9A-Fa-f]+|-?\d+)\s*;',
                       re.M)
+
+
+
+def original_exe(gamedir):
+    """The ORIGINAL akuji.exe, verified rather than assumed.
+
+    The game directory is also where our own build gets dropped to play it. If
+    that lands as akuji.exe, every differential check here would compare the
+    reconstruction against itself and pass. So prefer akuji_source.exe, fall
+    back to akuji.exe, and refuse anything that is not 502784 bytes carrying
+    ' was recovered! ' at 0x004568BC."""
+    import os as _os
+    for name in ('akuji_source.exe', 'akuji.exe'):
+        path = _os.path.join(gamedir, name)
+        if not _os.path.exists(path) or _os.path.getsize(path) != 502784:
+            continue
+        with open(path, 'rb') as fh:
+            fh.seek(0x004568BC - 0x00400C00)
+            if fh.read(16) == b' was recovered! ':
+                return path
+    return None
 
 
 def handler_addrs():
@@ -76,11 +97,11 @@ def main():
                     help='list every constant, not only the misses')
     args = ap.parse_args()
 
-    if not os.path.exists(EXE):
+    if not os.path.exists(original_exe(GAMEDIR)):
         print('no akuji.exe to check against')
         return 0
 
-    blob = open(EXE, 'rb').read()
+    blob = open(original_exe(GAMEDIR), 'rb').read()
     addrs = handler_addrs()
     ordered = sorted(a for a in addrs if a)
 

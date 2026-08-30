@@ -627,7 +627,22 @@ def main():
 
     work = tempfile.mkdtemp(prefix='emudiff_')
     try:
-        exe = os.path.join(args.gamedir, 'akuji.exe')
+        # The ORIGINAL, verified - see the note in akuji.lpr's OriginalExe.
+        # Our own build in the game directory under the name akuji.exe would
+        # make this compare the reconstruction against itself and pass.
+        exe = None
+        for _n in ('akuji_source.exe', 'akuji.exe'):
+            _p = os.path.join(args.gamedir, _n)
+            if os.path.exists(_p) and os.path.getsize(_p) == 502784:
+                with open(_p, 'rb') as _fh:
+                    _fh.seek(0x004568BC - 0x00400C00)
+                    if _fh.read(16) == b' was recovered! ':
+                        exe = _p
+                        break
+        if exe is None:
+            print('FAIL: no original akuji.exe in %s - expected 502784 bytes '
+                  'as akuji_source.exe or akuji.exe' % args.gamedir)
+            return 1
         if not os.path.exists(exe):
             print('no akuji.exe under %s' % args.gamedir)
             return 2

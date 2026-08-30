@@ -60,7 +60,15 @@ import struct
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_A = os.path.join(HERE, 'English Translated Version 1.1 (D)', 'akuji.exe')
+def _original(d):
+    for n in ('akuji_source.exe', 'akuji.exe'):
+        p = os.path.join(d, n)
+        if os.path.exists(p) and os.path.getsize(p) == 502784:
+            return p
+    return os.path.join(d, 'akuji.exe')
+
+
+DEFAULT_A = _original(os.path.join(HERE, 'English Translated Version 1.1 (D)'))
 DEFAULT_B = os.path.join(HERE, 'akuji_ver101', 'akuji.exe')
 
 

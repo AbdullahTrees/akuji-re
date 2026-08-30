@@ -120,6 +120,22 @@ def main():
                            'refuses on the title screen options page'
                            % token)
 
+    # The screen shake is CONSUMED. EntityHandlers sets ScreenShakeOn for a
+    # type-77 impact and GameSession clears it on reset; for a long time
+    # nothing in between ever read it, so the flag was set and the screen
+    # never moved. 0x00464D30 runs the shake immediately after
+    # Entity_UpdateAll and before anything is drawn.
+    for token in ('ScreenShakeOn', 'ScreenShakeTimer', 'ShiftY'):
+        if token not in idle_for_flags:
+            bad.append('AppIdle never mentions %s - the screen shake is set by '
+                       'a handler and consumed by nobody' % token)
+    if ('TickEntities' in idle_for_flags
+            and idle_for_flags.find('ScreenShakeOn')
+                < idle_for_flags.find('TickEntities')):
+        bad.append('the screen shake runs BEFORE the entity update - it '
+                   'displaces the positions that update has just written, so '
+                   'it has to come after')
+
     post_body = re.sub(r'[{][^}]*[}]', ' ', body_of(text, 'DispatchPost'))
     for flag in ('FMoveY', 'FMoveX', 'FConfirm'):
         if re.search(r'(?<![A-Za-z0-9_])%s\s*:=\s*(0|False)\s*;' % flag, post_body):
@@ -150,8 +166,13 @@ def main():
     # why the statement beside it is unconditional. That is the third check in
     # this file to fail on its own explanatory prose; the stripped copy exists
     # for exactly this and was simply not used here.
+    # The span is DispatchPre -> TickEntities, not -> DispatchPost. The point
+    # is that the ENTITY UPDATE is not guarded; it is not that nothing may be
+    # conditional in the region. The original itself has an `if` after the
+    # entity update - the screen shake - so the wider span rejected a faithful
+    # translation.
     seg = idle_code[idle_code.find('DispatchPre'):
-                    idle_code.find('DispatchPost')]
+                    idle_code.find('FSession.TickEntities')]
     if re.search(r'(?<![A-Za-z0-9_])if(?![A-Za-z0-9_])', seg):
         bad.append('there is an `if` between DispatchPre and DispatchPost - '
                    'the entity update runs in EVERY state, unconditionally')

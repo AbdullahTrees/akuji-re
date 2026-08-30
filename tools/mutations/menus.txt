@@ -1,4 +1,10 @@
 # selftest: --selftest-session
+#
+# The SCREEN SHAKE is deliberately not mutated here. Its wiring lives in
+# AppIdle and is guarded by tools/frame_shape.py, a source-shape check that
+# --selftest-session cannot see - removing the ShiftY call survives this suite
+# and is caught by the gate instead. Verified by hand: frame_shape reports
+# "the screen shake is set by a handler and consumed by nobody".
 # NOT MUTATED, and the reason is worth keeping: "Stage_Begin stops clearing
 # ScreenPhase" and "...the title sub-mode" both SURVIVE, correctly. Those are
 # statements 4 and 6 of Stage_Begin, and GameState_Reset - statement 3 - has
@@ -148,4 +154,17 @@ src/PlayerState.pas
   AGameState := GS_STAGE_BEGIN;
 --->
   AGameState := GS_STAGE_BEGIN;
+===
+the gallery image is loaded and never drawn
+src/Title.pas
+---
+  if TitleSubMode = TSM_OMAKE then
+  begin
+    if Gallery <> nil then
+      C.Draw(0, 0, Gallery);
+    Exit;
+  end;
+--->
+  if TitleSubMode = TSM_OMAKE then
+    Exit;
 ===

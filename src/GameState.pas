@@ -34,6 +34,11 @@ const
   GS_QUIT        = 999;   // clears OnIdle, terminates
 
   { PauseMenu_Update selection, p_PauseMenuIndex @ 0x0046CF88 }
+  { 0x00464D30's shake: Random(0x10) - 8, so -8..+7 inclusive, recomputed on
+    every frame the shake is on. }
+  SHAKE_RANGE  = $10;
+  SHAKE_CENTRE = 8;
+
   PAUSE_CONTINUE = 0;     // restores p_SavedGameState
   PAUSE_RESTART  = 1;     // -> GS_TITLE_INIT
   PAUSE_QUIT     = 2;     // -> GS_QUIT
