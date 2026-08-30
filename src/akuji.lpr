@@ -8067,8 +8067,9 @@ var
   Frames: TSpriteSet;
   S: TGameSession;
   GS, I, Bad, StartY, Fell, Moved, StartX, Slot: Integer;
-  Placed, LiveAfter, Stage, T, J, NoSprite: Integer;
-  Types, Blind: string;
+  Placed, LiveAfter, Stage, T, J, NoSprite, EvI, K: Integer;
+  Types, Blind, Surv: string;
+  PlacedIn, SurvivedIn: array[0..ENTITY_TYPE_COUNT - 1] of Integer;
 
   procedure Want(Cond: Boolean; const What: string);
   begin
@@ -8409,6 +8410,8 @@ begin
       thing spawned" look identical from a count. }
     NoSprite := 0;
     Blind := '';
+    FillChar(PlacedIn, SizeOf(PlacedIn), 0);
+    FillChar(SurvivedIn, SizeOf(SurvivedIn), 0);
     for Stage := 1 to Stages.Count - 1 do
     begin
       if (Stage >= Stages.Count) or (Stages.Layer[Stage, 0] = LAYER_NONE) then
@@ -8456,13 +8459,73 @@ begin
             end;
           end;
       end;
-      Log.Add(Format('room %d: %d events, %d placements, types%s',
-                     [Stage, S.Events.Count, Placed, Types]));
+      { PLACED IS NOT ALIVE. The sweep above moves the camera every frame, so
+        it counts each entity on the frame it spawns - a monster that its own
+        handler kills on frame 2 is counted exactly the same as one that
+        stands there waiting for you. So park the camera on each event in turn
+        and let the room RUN, then ask which types are still there. A type that
+        spawns everywhere and survives nowhere is invisible in every count
+        taken so far, and is what "the monsters do not exist" looks like from
+        the inside. }
+      Surv := '';
+      for EvI := 0 to S.Events.Count - 1 do
+      begin
+        if S.Events[EvI].Opcode = EVOP_ALWAYS then
+          Continue;
+        S.SetCamera((S.Events[EvI].TileX - 5) * Map.TileWidth,
+                    (S.Events[EvI].TileY - 3) * Map.TileHeight);
+        for K := 1 to 90 do
+          S.Frame(GS);
+        for Slot := 1 to 255 do
+          if S.Pool.Alive[Slot] then
+          begin
+            T := S.Pool.Field(Slot, EF_TYPE);
+            if Pos(Format(' %d ', [T]), Surv) = 0 then
+              Surv := Surv + Format(' %d ', [T]);
+          end;
+      end;
+      { Per-room this is NOISE, not a signal: a walking monster that wanders
+        off the edge is SUPPOSED to be culled, so "did not survive here" is
+        normal for anything mobile. What is not normal is a type that the
+        shipped data places and that survives in NO room anywhere - that one
+        cannot be explained by where it walked. Counted across the whole game
+        and judged at the end. }
+      for T := 0 to ENTITY_TYPE_COUNT - 1 do
+      begin
+        if Pos(Format(' %d ', [T]), Types) > 0 then
+          Inc(PlacedIn[T]);
+        if Pos(Format(' %d ', [T]), Surv) > 0 then
+          Inc(SurvivedIn[T]);
+      end;
+
+      Log.Add(Format('room %d: %d events, %d placements, types%s | survives%s',
+                     [Stage, S.Events.Count, Placed, Types, Surv]));
       Want(S.Events.Count = 0 = (Placed = 0),
            Format('room %d loaded %d events and placed %d entities - a room '
              + 'with events that places nothing is the missing-monster bug',
              [Stage, S.Events.Count, Placed]));
     end;
+    { A LOG, NOT AN ASSERTION, and the reason is worth keeping. The obvious
+      reading of this list - "these types spawn and are instantly lost" - is
+      wrong for most of it. Type 3 heads the list at 45 rooms and is a PUFF:
+      EntityUpdate_Type03 animates it through T3_FRAMES and then destroys it
+      itself. Types 4..7 share EffectLatch, which arms a death timer on their
+      first update. Short-lived effects self-destructing is the behaviour, not
+      a defect, and asserting on it fails the gate on correct code.
+
+      The counter is also not what its name suggests: it counts types seen
+      ALIVE during the sweep, which includes effects spawned by other entities'
+      handlers, not only what the event table places.
+
+      It stays because it did answer the question it was written for - the
+      early rooms the bug was reported against place monsters AND keep them,
+      types 21 and 29 among them - and because a type that is genuinely lost
+      would appear here first. Read it, do not gate on it. }
+    for T := 0 to ENTITY_TYPE_COUNT - 1 do
+      if (PlacedIn[T] > 0) and (SurvivedIn[T] = 0) then
+        Log.Add(Format('  note: type %d seen alive in %d rooms, in none of '
+                       + 'them after 90 frames', [T, PlacedIn[T]]));
+
     Log.Add(Format('all %d rooms swept; %d placements held no sprite%s',
       [Stages.Count - 1, NoSprite,
        Copy(' (types ' + Blind + ')', 1, 200 * Ord(NoSprite > 0))]));
