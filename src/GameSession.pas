@@ -450,7 +450,6 @@ begin
   ScreenPhase := 0;
   TitleSubMode := 0;
   MenuIndex := 0;
-  SavedMenuIndex := 0;
 
   if FSprites <> nil then
     FSprites.Clear;
@@ -489,14 +488,23 @@ begin
       FEvents.SetActive(I, False);
     end;
 
-  { The interpreter's own three, which DID gain counterparts since the note
-    below was written: 0x0046CE7C is EventId, 0x0046D028 is Arg - the delay
-    that re-fires the opcode-4 checkers - and 0x0046D218 is Cursor. Leaving
-    the delay set across a reset meant a countdown armed in one room could
-    fire in the next. }
+  { The interpreter's own FOUR, in the original's order: 0x0046CE7C is
+    EventId, 0x0046D334 is StepIndex, 0x0046D028 is Arg - the delay that
+    re-fires the opcode-4 checkers - and 0x0046D218 is Cursor. Leaving the
+    delay set across a reset meant a countdown armed in one room could fire in
+    the next.
+
+    StepIndex was missing here until 2026-08-31 because the list below called
+    0x0046D334 a save-slot cursor. It is not, and EventRunner.pas has said so
+    for a while: EventScript_AdvanceStep increments it and compares it against
+    DynArrayHigh(steps), Event_Begin seeds it to -1, and EventScript_Execute
+    indexes the current step by it. Nothing observable turned on the omission -
+    StartEvent seeds it to -1 before any read, exactly as Event_Begin does -
+    but the original clears it here and so does this now. }
   if FRunner <> nil then
   begin
     FRunner.EventId := 0;
+    FRunner.StepIndex := 0;
     FRunner.Arg := 0;
     FRunner.Cursor := 0;
   end;
@@ -510,7 +518,9 @@ begin
 
   { Still not reproduced, and now the whole of the list:
 
-    0x0046D29C and 0x0046D334, the save slot cursor - no counterpart exists.
+    0x0046D29C, which GameState_Reset is the ONLY function in the binary to
+    touch - nothing reads it, ever - so a counterpart would be a variable that
+    exists to be cleared and never examined. Left unmodelled deliberately.
 
     The mode<>2 clear above walks THREE layers in the original and zeroes each
     tile component's scroll at +0x6034/+0x6038 as well as the layer record.
@@ -518,9 +528,20 @@ begin
     every one of the 66 has -1 in csv 3 and 4 - so the other two are never
     populated and clearing them is unobservable.
 
-    The two objects freed through 0x0046D1F0 and 0x0046CEA4: the first is the
+    The two objects freed through 0x0046D1F0 and 0x0046CEA4. The first is the
     power-up panel surface, which this build loads once at startup instead of
-    per-use (see PowerUp_Show), so there is nothing to free. }
+    per-use (see PowerUp_Show). The second was unaccounted for until 2026-08-31
+    and is the ENDING SCREEN'S SCRATCH SURFACE: DDDD1Init zeroes it,
+    Ending_Update frees and rebuilds it - a run of FUN_00451560 blits composes
+    the results screen into it - and FormDestroy frees it too. Ending.pas
+    models the results and the unlocks and allocates no surface of its own, so
+    as with the panel there is nothing here to free either.
+
+    NO EXTRAS remain. SavedMenuIndex := 0 used to sit beside MenuIndex here and
+    was removed on 2026-08-31: 0x0046D2C0 is SavedMenuIndex and GameState_Reset
+    never writes it. Harmless either way - EnterPause overwrites it from
+    MenuIndex before anything reads it back - but the standard is that nothing
+    exists here which the original does not do. }
 end;
 
 procedure TGameSession.SetFrames(AFrames: TSpriteSet);
