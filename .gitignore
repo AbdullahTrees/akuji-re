@@ -37,3 +37,7 @@ src/akuji.exe
 
 # The second build, for tools/bindiff.py. Big, and not ours to redistribute.
 akuji_ver101/
+
+# The pinned save fixture is a real shipped file, tracked on purpose - see
+# tests/fixtures/README.md. Everything else a test writes here is not.
+!tests/fixtures/save.dat

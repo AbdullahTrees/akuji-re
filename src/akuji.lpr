@@ -2733,6 +2733,7 @@ end;
 function SelfTestPlayer(Log: TStrings): Integer;
 var
   GameDir: string;
+  SavePath: string;
   M: TTileMap;
   L: TLayerInfo;
   P: TPlayerState;
@@ -3013,9 +3014,28 @@ begin
     [Bad]));
   Inc(Result, Bad);
 
-  { --- 5. the shipped save ------------------------------------------------ }
-  if LoadSave(P, IncludeTrailingPathDelimiter(GameDir) + 'data' + PathDelim +
-              'save.dat') then
+  { --- 5. the shipped save ------------------------------------------------
+    FROM tests/fixtures, NOT from the game directory. The game writes over
+    <game>/data/save.dat every time you save at a statue, so pinning anything
+    to that file means a playtest session silently invalidates the test - which
+    is exactly what happened on 2026-08-30, and the shipped original was lost
+    because the game directory is gitignored and nothing tracked it.
+
+    Absent, this SKIPS rather than fails: the reading is not wrong, the
+    evidence is missing, and a red gate that cannot be made green by any change
+    to the source would just be noise. tests/fixtures/README.md says how to
+    restore it. }
+  SavePath := ExtractFilePath(ParamStr(0)) + '..' + PathDelim + 'tests'
+              + PathDelim + 'fixtures' + PathDelim + 'save.dat';
+  if not FileExists(SavePath) then
+  begin
+    Log.Add('');
+    Log.Add('SKIP: the pinned save fixture is missing - see '
+      + 'tests/fixtures/README.md. Restore data/save.dat from a fresh copy '
+      + 'of the English release; the copy in the game directory is written '
+      + 'over whenever the game saves.');
+  end
+  else if LoadSave(P, SavePath) then
   begin
     Log.Add('');
     Log.Add(Format('save.dat: stage %d, lives %d/%d, %ds, weapon %d, jump %d',
@@ -3052,7 +3072,7 @@ begin
   end
   else
   begin
-    Log.Add('FAILED: could not read the shipped save');
+    Log.Add('FAILED: the save fixture is present and could not be read');
     Inc(Result);
   end;
 
