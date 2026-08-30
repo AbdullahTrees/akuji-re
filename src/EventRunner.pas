@@ -144,10 +144,13 @@ type
       The camera tile is passed in rather than read from the tilemap object,
       because that is the one thing here the original reaches for through a
       component this reconstruction does not have. }
+    { World is optional only so the older tests need not all be rewritten; the
+      game always passes it, and without it the disable path can only kill. }
     procedure SpawnNearCamera(Events: TEventScript; Pool: TEntityPool;
                               const L: TLayerInfo;
                               CamTileX, CamTileY: Integer;
-                              var P: TPlayerState; var AGameState: Integer);
+                              var P: TPlayerState; var AGameState: Integer;
+                              World: TEntityWorld = nil);
   end;
 
 const
@@ -697,7 +700,8 @@ procedure TEventRunner.SpawnNearCamera(Events: TEventScript; Pool: TEntityPool;
                                        const L: TLayerInfo;
                                        CamTileX, CamTileY: Integer;
                                        var P: TPlayerState;
-                                       var AGameState: Integer);
+                                       var AGameState: Integer;
+                                       World: TEntityWorld = nil);
 var
   I, Slot, TypeId, CamPxX, CamPxY: Integer;
   Rec: TEventRecord;
@@ -741,8 +745,27 @@ begin
        and (P.Progress[Rec.BlockedBy] = 1) then
     begin
       Events.Disable(I);
+      { ENTITY_DESTROY, NOT A KILL. The original's disable branch ends
+
+            if (*(char *)(tbl + 5 + i*0x24) == 1)
+                Entity_Destroy(pool + slot * 0x104, 0);
+
+        and the difference is the whole bug: Kill clears EF_ALIVE and nothing
+        else, so the sprite stays in the pool, still visible. Entity_UpdateAll
+        skips dead entities, so that sprite is never repositioned again - it
+        stays at the SCREEN coordinates it last had and appears to follow the
+        player around the room. Reported for a door that had just been
+        unlocked, which is exactly when this branch fires: the door's
+        BlockedBy flag goes up and the event is disabled forever.
+
+        The same distinction left the power-up orb on screen. }
       if Rec.Active then
-        Pool.Kill(Rec.EntitySlot);
+      begin
+        if World <> nil then
+          World.DestroyEntity(Pool.Entity(Rec.EntitySlot)^, False)
+        else
+          Pool.Kill(Rec.EntitySlot);
+      end;
       Continue;
     end;
 

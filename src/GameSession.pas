@@ -669,7 +669,7 @@ end;
 procedure TGameSession.TickPre(var AGameState: Integer);
 begin
   FRunner.SpawnNearCamera(FEvents, FPool, FWorld.Layer, CamTileX, CamTileY,
-                          Player, AGameState);
+                          Player, AGameState, FWorld);
 
   { BEFORE the entity update, not after, and NOT gated on whether a message
     box is up. EventScript_Execute was logged 2213 times against 2213 frames

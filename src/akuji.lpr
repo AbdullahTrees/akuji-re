@@ -7904,6 +7904,114 @@ begin
       + 'runs its three phases');
 end;
 
+{ Unlocking a door must DESTROY its entity, not merely kill it.
+
+  Reported: after unlocking a door, the closed-door sprite followed the player
+  around the room. That is the signature of a stale sprite - Entity_UpdateAll
+  skips dead entities, so a sprite left behind is never repositioned again and
+  holds the SCREEN coordinates it last had.
+
+  0x00454790's disable branch, the one that fires the moment a BlockedBy flag
+  goes up, ends with Entity_Destroy - confirmed by the xref at 0x004548E3 -
+  and 0x00461400 hides the sprite, zeroes its depth and sets EF_SPRITE to -1.
+  Kill sets EF_ALIVE and nothing else. }
+function TestDisableDestroys(Log: TStrings; const GameDir: string): Integer;
+var
+  Bad, I, J, Slot, GS: Integer;
+  S: TEventScript;
+  R: TEventRunner;
+  Pool: TEntityPool;
+  World: TCountingWorld;
+  Spr: TSpritePool;
+  P: TPlayerState;
+  L: TLayerInfo;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- a disabled event DESTROYS its entity ---');
+
+  S := TEventScript.Create;
+  R := TEventRunner.Create;
+  Pool := TEntityPool.Create;
+  World := TCountingWorld.Create;
+  Spr := TSpritePool.Create;
+  try
+    { A SPRITE SINK, or the whole test is vacuous. Entity_Spawn only takes a
+      sprite handle when one is attached, so without this every entity spawns
+      with EF_SPRITE already -1 and "the sprite was released" is true whatever
+      the code does. The mutation harness caught exactly that. }
+    Pool.Sprites := Spr;
+    World.Sprites := Spr;
+    World.Pool := Pool;
+    FillChar(L, SizeOf(L), 0);
+    L.TileW := 32;  L.TileH := 32;
+    L.MapTilesX := 100;  L.MapTilesY := 100;
+    L.OriginX := POSITION_BIAS;  L.OriginY := POSITION_BIAS;
+
+    { Find any shipped record that carries a forbidding flag and places
+      something - that is the door's shape. }
+    Slot := SLOT_NONE;
+    for I := 1 to 65 do
+    begin
+      S.Load(GameDir, I);
+      for J := 0 to S.Count - 1 do
+        if (S[J].BlockedBy <> 0) and (S[J].BlockedBy < PROGRESS_LENGTH) then
+        begin
+          Pool.Clear;
+          FillChar(P, SizeOf(P), 0);
+          P.Progress[0] := 1;
+          GS := GS_PLAY;
+          R.SpawnNearCamera(S, Pool, L, S[J].TileX, S[J].TileY, P, GS, World);
+          if S[J].Active then
+          begin
+            Slot := S[J].EntitySlot;
+            { the precondition, stated out loud }
+            Want(Pool.Field(Slot, EF_SPRITE) <> SPRITE_NONE,
+                 'the placed entity has no sprite, so releasing it proves '
+                 + 'nothing - this test needs a sprite sink');
+            { now set the forbidding flag, as unlocking the door does }
+            P.Progress[S[J].BlockedBy] := 1;
+            R.SpawnNearCamera(S, Pool, L, S[J].TileX, S[J].TileY, P, GS, World);
+            Break;
+          end;
+        end;
+      if Slot <> SLOT_NONE then
+        Break;
+    end;
+
+    Want(Slot <> SLOT_NONE,
+         'no shipped record with a forbidding flag placed anything - this '
+         + 'test exercised nothing');
+    if Slot <> SLOT_NONE then
+    begin
+      Want(not Pool.Alive[Slot], 'the disabled event left its entity alive');
+      Want(Pool.Field(Slot, EF_SPRITE) = SPRITE_NONE,
+           Format('the entity was killed but its sprite handle is still %d - '
+             + 'Entity_UpdateAll skips dead entities, so that sprite is never '
+             + 'moved again and follows the camera',
+             [Pool.Field(Slot, EF_SPRITE)]));
+      Log.Add('disable path: entity destroyed and its sprite released');
+    end;
+  finally
+    Spr.Free;
+    World.Free;
+    Pool.Free;
+    R.Free;
+    S.Free;
+  end;
+  Result := Bad;
+end;
+
 { The options screen's four string tables, read back out of akuji.exe.
 
   Every one of these rows used to draw a NUMBER where the original draws a
@@ -9319,6 +9427,7 @@ begin
   Inc(Bad, TestEventDelay(Log, GameDir));
   Inc(Bad, TestSpriteOrder(Log));
   Inc(Bad, TestOptionTables(Log, GameDir));
+  Inc(Bad, TestDisableDestroys(Log, GameDir));
 
   Result := Bad;
   Log.Add('');
