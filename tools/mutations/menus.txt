@@ -61,3 +61,20 @@ src/Dialogue.pas
           if FReveal > RevealUnits + 1 then
             EndOfPage;
 ===
+the event delay is stored but never counted down
+src/EventRunner.pas
+---
+  Dec(Arg);
+  if (Arg <> 0) or (Events = nil) then
+--->
+  if (Arg <> 0) or (Events = nil) then
+===
+the puzzle checkers re-fire one frame early
+src/EventRunner.pas
+---
+  if (Arg <> 0) or (Events = nil) then
+    Exit;
+--->
+  if (Arg > 1) or (Events = nil) then
+    Exit;
+===

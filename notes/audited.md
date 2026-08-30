@@ -34,6 +34,9 @@ Status values:
 | 0x00456038 | `MessageBox_Update` | FIXED | all four modes. The typewriter did not exist - the page was split into finished lines the moment it was taken; the yes/no prompt read the vertical axis where the original reads AxisX; and neither the \k prompt icon nor the yes/no hand was drawn |
 | 0x00461BA8 | `HUD_Draw` | FIXED | the '@ ' prefix, the 12-entry goal table at 0x00468EC4, the h:mm:ss split, the 4-step life animation (19 38 57 38), both clamps, and the lit/unlit icon loops. All matched; the one difference was the missing `Trim` around the padded counter format |
 | 0x00461A44 | `GameOver_Update` | FIXED | all three phases, the midi index, surface slot 3, and leaving on the music ending or a confirm. The phase logic matched; the caller passed a hard-coded False for FadeBusy, so both dissolves were skipped |
+| 0x004568D0 | `Overlay_Update` | MATCHES | both modes. The panel's blit and its centred line at `(0x140 - len*6) >> 1, 0xD8`; the box's `0x79` split to `0x88`/`0`, the frame at x 0x30 and three lines at x 0x3C, 16 apart; and all four colours - fill `$FFE6C8` and outline `$735400` for the box, `$FFFFFF` and `$FF0000` for the panel. The close check sits OUTSIDE both modes: when the music stops it resumes the track, clears the overlay and calls EventScript_AdvanceStep, which is what resumes the script. One behaviour-neutral difference: the original frees and reloads the panel surface each time, we load it once |
+| 0x00456698 | `PowerUp_Show` | MATCHES | effect 0x10, remember-music then playlist entry 4 unlooped, overlay active + mode 1, and the grant chain - which is a run of INDEPENDENT ifs, two of them conditional (variant 0 only when Weapon is 0, variant 1 unless Weapon is 3), not a case. The panel sentence is real: the two literals at 0x004568B0 and 0x004568BC read `'  '` and `' was recovered! '` in the image |
+| 0x00454EF4 | `Event_Begin` | FIXED | the state-140 re-entry guard, the `/`-to-`,` split, and the Progress[1..4] wipe all matched. Two things were missing: it clears the shared ScreenPhase, without which the message box's \k and \w one-shots see whatever the last screen left; and its second argument is a DELAY stored at 0x0046D028 which 0x00464D30 counts down, re-firing every opcode-4 checker at zero. The runner stored that argument and never counted it, with a field comment naming the address |
 
 ## Supporting routines identified while auditing
 
@@ -54,9 +57,7 @@ visible: `Player_Update` (3 defects found) and `Entities.pas`'s
 The rest of the flow layer. Every one of these has executable Pascal and none
 has been read against a fresh decompile:
 
-`Overlay_Update` 0x004568D0, `PowerUp_Show` 0x00456698,
 `Ending_Update` 0x00463624, `EventScript_Execute` 0x00455210,
-`EventScript_AdvanceStep` 0x0045509C, `Event_Begin` 0x00454EF4,
-`Entity_UpdateAll` 0x004608BC, `Load_Event_Scripts` 0x00465B50,
-`Terrain_Configure` 0x004645B0, `DDDD1Init` 0x00465584,
-`FormDestroy` 0x00466644.
+`EventScript_AdvanceStep` 0x0045509C, `Entity_UpdateAll` 0x004608BC,
+`Load_Event_Scripts` 0x00465B50, `Terrain_Configure` 0x004645B0,
+`DDDD1Init` 0x00465584, `FormDestroy` 0x00466644.

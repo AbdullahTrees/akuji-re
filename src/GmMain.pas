@@ -449,6 +449,11 @@ begin
                     130 PauseMenu_Update, 140 MessageBox_Update, 60 HUD }
   FSession.BeginFrame;
   DispatchPre;
+  { 0x00464D30 counts the event delay down HERE - between the state-60/140
+    spawn-and-script block and the state-10/30 one. Those are separate `if`s on
+    the same state value in the original and mutually exclusive arms of one
+    case here, so no frame runs both and the position is equivalent. }
+  FSession.Runner.TickDelay(FSession.Events, FSession.Player, GameStateValue);
   FSession.TickEntities(GameStateValue);
   DispatchPost;
   { The fade advances once a frame, which is what makes FadeBusy fall to False

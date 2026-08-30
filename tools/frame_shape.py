@@ -145,8 +145,14 @@ def main():
 
     # TickEntities must not be conditional. A guard here is the original bug
     # wearing a different hat.
-    seg = idle[idle.find('DispatchPre'):idle.find('DispatchPost')]
-    if re.search(r'\bif\b', seg):
+    # idle_CODE, not idle. This check read the RAW text and so tripped on a
+    # comment between the two dispatches that used the word `if` to explain
+    # why the statement beside it is unconditional. That is the third check in
+    # this file to fail on its own explanatory prose; the stripped copy exists
+    # for exactly this and was simply not used here.
+    seg = idle_code[idle_code.find('DispatchPre'):
+                    idle_code.find('DispatchPost')]
+    if re.search(r'(?<![A-Za-z0-9_])if(?![A-Za-z0-9_])', seg):
         bad.append('there is an `if` between DispatchPre and DispatchPost - '
                    'the entity update runs in EVERY state, unconditionally')
 

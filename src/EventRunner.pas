@@ -111,6 +111,8 @@ type
 
     { 0x00454EF4. Starts the script on an event record, unless one is already
       running - the guard is the game state itself, not a flag. }
+    procedure TickDelay(Events: TEventScript; var P: TPlayerState;
+                        var AGameState: Integer);
     procedure StartEvent(Events: TEventScript; AEventId, AArg: Integer;
                          var P: TPlayerState; var AGameState: Integer);
 
@@ -281,8 +283,44 @@ begin
   Cursor := 0;
   Waiting := 0;
   AGameState := GS_STATE_140;
+  { 0x00454EF4 clears the shared sub-phase here, and it has to: the message
+    box's \k and \w arms both open with `if ScreenPhase = 0 then` one-shots
+    that reset their animation, and the game-over screen and the ending step
+    through the same counter. Starting a script without clearing it leaves
+    whatever the last screen left behind. }
+  ScreenPhase := 0;
 
   AdvanceStep(P, AGameState);
+end;
+
+{ The delay 0x0046D028 holds, counted down once a frame by 0x00464D30:
+
+      if ((d028 != 0) && (--d028 == 0) && (DynArrayHigh(EventTable) >= 0))
+          for i := 0 to high:
+              if (EventTable[i].opcode == 4) Event_Begin(i, 0);
+
+  So the argument Event_Begin is called with is a DELAY, and when it runs out
+  every opcode-4 event fires again. Events_SpawnNearCamera starts each puzzle
+  checker with Event_Begin(i, 4), so a checker re-runs four frames later - which
+  is how a puzzle that is not yet solved keeps testing itself.
+
+  Arg was being STORED and never counted, and the field comment above already
+  said what it was for. Re-entry is safe because StartEvent refuses while the
+  state is 140, exactly as Event_Begin's own guard does, so at most one of them
+  takes. }
+procedure TEventRunner.TickDelay(Events: TEventScript; var P: TPlayerState;
+                                 var AGameState: Integer);
+var
+  I: Integer;
+begin
+  if Arg = 0 then
+    Exit;
+  Dec(Arg);
+  if (Arg <> 0) or (Events = nil) then
+    Exit;
+  for I := 0 to Events.Count - 1 do
+    if Events[I].Opcode = EVOP_ALWAYS then
+      StartEvent(Events, I, 0, P, AGameState);
 end;
 
 procedure TEventRunner.AdvanceStep(var P: TPlayerState;

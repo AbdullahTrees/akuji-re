@@ -7853,6 +7853,95 @@ begin
       + 'runs its three phases');
 end;
 
+{ The event delay: Event_Begin's second argument is a COUNTDOWN.
+
+  0x00464D30 decrements 0x0046D028 once a frame and, when it reaches zero,
+  calls Event_Begin(i, 0) for every opcode-4 record. Events_SpawnNearCamera
+  starts each puzzle checker with Event_Begin(i, 4), so an unsolved checker
+  re-tests itself four frames later. The runner was STORING that argument and
+  never counting it - the field's own comment said what it was for.
+
+  Stage 14 is used because it carries one of the nine opcode-4 records in the
+  shipped data; stage 1 has none, and a test that silently exercises nothing is
+  the failure this suite keeps finding in itself. }
+function TestEventDelay(Log: TStrings; const GameDir: string): Integer;
+var
+  Bad, I, Fours: Integer;
+  Sc: TEventScript;
+  R: TEventRunner;
+  P: TPlayerState;
+  GS: Integer;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the event delay re-fires the puzzle checkers ---');
+
+  Sc := TEventScript.Create;
+  R := TEventRunner.Create;
+  try
+    Sc.Load(GameDir, 14);
+    Fours := 0;
+    for I := 0 to Sc.Count - 1 do
+      if Sc[I].Opcode = EVOP_ALWAYS then
+        Inc(Fours);
+    Want(Fours > 0,
+         'stage 14 carries no opcode-4 record - this test exercises nothing');
+
+    FillChar(P, SizeOf(P), 0);
+    GS := GS_PLAY;
+
+    { Arm the delay the way the spawn walk does, then put the state back as if
+      the script had finished. }
+    for I := 0 to Sc.Count - 1 do
+      if Sc[I].Opcode = EVOP_ALWAYS then
+      begin
+        R.StartEvent(Sc, I, EVENT_BEGIN_FROM_SPAWN, P, GS);
+        Break;
+      end;
+    Want(GS = GS_STATE_140, 'starting a checker did not enter state 140');
+    GS := GS_PLAY;
+
+    { Three ticks must NOT re-fire it: the delay is four. }
+    R.TickDelay(Sc, P, GS);
+    R.TickDelay(Sc, P, GS);
+    R.TickDelay(Sc, P, GS);
+    Want(GS = GS_PLAY,
+         Format('the checker re-fired after three frames (state %d) - the '
+                + 'delay is meant to be %d', [GS, EVENT_BEGIN_FROM_SPAWN]));
+
+    { The fourth does. }
+    R.TickDelay(Sc, P, GS);
+    Want(GS = GS_STATE_140,
+         Format('after %d frames the checker did not re-fire - state %d, want '
+                + '%d. The delay is stored and never counted',
+                [EVENT_BEGIN_FROM_SPAWN, GS, GS_STATE_140]));
+
+    { And it does not keep firing: the re-fire arms a delay of 0. }
+    GS := GS_PLAY;
+    for I := 1 to 20 do
+      R.TickDelay(Sc, P, GS);
+    Want(GS = GS_PLAY,
+         'the checker kept re-firing - a delay of 0 must not count down');
+
+    Log.Add(Format('event delay: %d opcode-4 records in stage 14, re-fires '
+                   + 'after %d frames', [Fours, EVENT_BEGIN_FROM_SPAWN]));
+  finally
+    R.Free;
+    Sc.Free;
+  end;
+  Result := Bad;
+end;
+
 { The typewriter and the two icons, from MessageBox_Update @ 0x00456038.
 
   Driven from the SHIPPED script rather than from a hand-made string, so the
@@ -8854,6 +8943,7 @@ begin
   Inc(Bad, TestContinueLoadsSave(Log, GetTempDir));
   Inc(Bad, TestPauseFlow(Log));
   Inc(Bad, TestTypewriter(Log, GameDir));
+  Inc(Bad, TestEventDelay(Log, GameDir));
 
   Result := Bad;
   Log.Add('');
