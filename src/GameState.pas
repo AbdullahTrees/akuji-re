@@ -200,7 +200,12 @@ var
   { 0x0046CEF8. Which of NEW GAME / CONTINUE the title menu chose, and reset
     to 0 by the game-over screen on its way back to the title. }
   TitleSubMode: Integer = 0;                // p_TitleSubMode    0x0046CEF8
-  PauseMenuIndex: Integer = 0;              // p_MenuIndex       0x0046CF88
+  { p_MenuIndex @ 0x0046CF88 - ONE variable, shared by the title menu, the
+    options screen and the pause menu. It was named MenuIndex and
+    Title.pas kept a private FIndex beside it whose comment claimed to be this
+    same address, so the two menus each had their own copy of a counter the
+    original shares. Renamed to what it is. }
+  MenuIndex: Integer = 0;                   // p_MenuIndex       0x0046CF88
   SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  0x0046D2C0
   Input: TInputState;                       // p_InputState      0x0046CC58
   { p_KeyMap 0x0046CEA8. DDDD1Init copies Settings.KeyMap into this on the way
@@ -302,8 +307,8 @@ end;
 
 procedure EnterPause;
 begin
-  SavedMenuIndex := PauseMenuIndex;
-  PauseMenuIndex := 0;
+  SavedMenuIndex := MenuIndex;
+  MenuIndex := 0;
   SavedGameState := GameStateValue;
   GameStateValue := GS_PAUSE;
 end;

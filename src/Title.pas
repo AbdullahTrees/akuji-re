@@ -93,7 +93,6 @@ type
   TTitleScreen = class
   private
     FSubMode: Integer;
-    FIndex: Integer;          // p_MenuIndex 0x0046CF88, shared with the pause menu
     FOnSound: TSoundEvent;
     FOnResetState: TNotifyProc;
     FOnResetOpening: TNotifyProc;
@@ -114,7 +113,10 @@ type
     procedure Draw(C: TCanvas; F: TGameFont; BgMenu, BgOptions: TBitmap);
 
     property SubMode: Integer read FSubMode;
-    property Index: Integer read FIndex;
+    function GetIndex: Integer;
+  public
+    { p_MenuIndex, the shared global - see GameState.pas. }
+    property Index: Integer read GetIndex;
     property OnSound: TSoundEvent read FOnSound write FOnSound;
     { GameState_Reset(mode 0), and the opening's two counters. Callbacks
       because neither belongs to this unit. }
@@ -258,14 +260,14 @@ begin
   if ScreenPhase = 0 then
   begin
     ScreenPhase := 1;
-    PauseMenuIndex := 0;
+    MenuIndex := 0;
   end;
 
   if ConfirmPressed(Inp) then
   begin
     { Swallow the press so the resumed game does not also see it. }
     Inp.ButtonLatch[0] := True;
-    case PauseMenuIndex of
+    case MenuIndex of
       PAUSE_CONTINUE: AGameState := SavedGameState;
       PAUSE_RESTART:  AGameState := GS_TITLE_INIT;
       PAUSE_QUIT:     AGameState := GS_QUIT;
@@ -279,7 +281,7 @@ begin
   begin
     Inp.ButtonLatch[PAUSE_CANCEL_BUTTON] := True;
     { The index FormKeyDown stashed, not the pause cursor. }
-    PauseMenuIndex := SavedMenuIndex;
+    MenuIndex := SavedMenuIndex;
     AGameState := SavedGameState;
     Result := False;
     Exit;
@@ -290,11 +292,11 @@ begin
   begin
     if Inp.AxisY <> 0 then
       PlayPauseSound(PAUSE_SND_MOVE);
-    Inc(PauseMenuIndex, Inp.AxisY);
-    if PauseMenuIndex < 0 then
-      PauseMenuIndex := PAUSE_ITEMS - 1;
-    if PauseMenuIndex > PAUSE_ITEMS - 1 then
-      PauseMenuIndex := 0;
+    Inc(MenuIndex, Inp.AxisY);
+    if MenuIndex < 0 then
+      MenuIndex := PAUSE_ITEMS - 1;
+    if MenuIndex > PAUSE_ITEMS - 1 then
+      MenuIndex := 0;
   end;
 end;
 
@@ -311,7 +313,7 @@ begin
   F.TextOutCentered(C, PAUSE_ROW_Y[1], 'RESET', ScreenW, 2);
   F.TextOutCentered(C, PAUSE_ROW_Y[2], 'EXIT', ScreenW, 2);
 
-  I := PauseMenuIndex;
+  I := MenuIndex;
   if (I < 0) or (I > PAUSE_ITEMS - 1) then I := 0;
   Y := (I * PAUSE_CURSOR_MUL + PAUSE_CURSOR_ADD) * PAUSE_CURSOR_SCALE;
   F.TextOutCentered(C, Y, '<         >', ScreenW, 1);
@@ -367,10 +369,15 @@ begin
   Reset;
 end;
 
+function TTitleScreen.GetIndex: Integer;
+begin
+  Result := MenuIndex;
+end;
+
 procedure TTitleScreen.Reset;
 begin
   FSubMode := TSM_MENU;
-  FIndex := 0;
+  MenuIndex := 0;
 end;
 
 procedure TTitleScreen.PlaySound(Index: Integer);
@@ -381,7 +388,7 @@ end;
 
 procedure TTitleScreen.MenuConfirm;
 begin
-  case FIndex of
+  case MenuIndex of
     0, 1:
       begin
         { The original does SEVEN things here, and this used to do two.
@@ -395,15 +402,15 @@ begin
           FOnResetState;
         GameStateValue := GS_PLAYER_INIT;
         ScreenPhase := 0;
-        FSubMode := FIndex;
-        FIndex := 0;
+        FSubMode := MenuIndex;
+        MenuIndex := 0;
         if Assigned(FOnResetOpening) then
           FOnResetOpening;
       end;
     2:
       begin
         PlaySound(SND_OK);
-        FIndex := 0;
+        MenuIndex := 0;
         FSubMode := TSM_OPTIONS;
       end;
     3:
@@ -420,7 +427,7 @@ begin
     SND_NG if it is not - which is the only place in the menus that says no.
     The unlock bytes are system.dat +0x2C..+0x32, and Ending.pas is what
     fills them in. }
-  if FIndex = Ord(orOmake) then
+  if MenuIndex = Ord(orOmake) then
   begin
     Sel := Settings.GallerySel;
     if (Sel >= 0) and (Sel <= High(Settings.Unknown2C))
@@ -438,11 +445,11 @@ begin
 
   { Row 9 leaves, and the original returns to the menu with the cursor on
     OPTION - index 2, not 0. }
-  if FIndex = OPT_ROW_EXIT then
+  if MenuIndex = OPT_ROW_EXIT then
   begin
     PlaySound(SND_OK);
     FSubMode := TSM_MENU;
-    FIndex := 2;
+    MenuIndex := 2;
   end;
 end;
 
@@ -475,7 +482,7 @@ begin
   if Delta = 0 then Exit;
   { Each row clamps to the range the original enforces; out-of-range moves are
     swallowed rather than clipped, matching its "if out of range then delta:=0". }
-  case TOptionRow(FIndex) of
+  case TOptionRow(MenuIndex) of
     orLevel:
       if (Settings.GameLevel + Delta >= LEVEL_MIN) and
          (Settings.GameLevel + Delta <= LEVEL_MAX) then
@@ -509,9 +516,9 @@ begin
             BEFORE the index is wrapped, so it sounds even on the move that
             wraps around the ends. }
           PlaySound(SND_PI);
-          FIndex := FIndex + MoveY;
-          if FIndex < 0 then FIndex := High(MENU_ITEMS);
-          if FIndex > High(MENU_ITEMS) then FIndex := 0;
+          MenuIndex := MenuIndex + MoveY;
+          if MenuIndex < 0 then MenuIndex := High(MENU_ITEMS);
+          if MenuIndex > High(MENU_ITEMS) then MenuIndex := 0;
         end;
         if Confirm then
         begin
@@ -536,9 +543,9 @@ begin
             but which branch each sits on has not been read out. }
           PlaySound(SND_PI);
           Limit := Ord(High(TOptionRow));
-          FIndex := FIndex + MoveY;
-          if FIndex < 0 then FIndex := Limit;
-          if FIndex > Limit then FIndex := 0;
+          MenuIndex := MenuIndex + MoveY;
+          if MenuIndex < 0 then MenuIndex := Limit;
+          if MenuIndex > Limit then MenuIndex := 0;
         end;
         if Confirm then
           { Same again: rows 0..7 are silent on confirm, row 8 plays SND_OK
@@ -551,7 +558,7 @@ begin
       if Confirm then
       begin
         FSubMode := TSM_OPTIONS;
-        FIndex := Ord(orOmake);
+        MenuIndex := Ord(orOmake);
       end;
   end;
 end;
@@ -572,7 +579,7 @@ begin
           C.Draw(0, 0, BgMenu);
         for I := Low(MENU_ITEMS) to High(MENU_ITEMS) do
           F.TextOut(C, MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I], 2);
-        F.TextOut(C, MENU_CURSOR_X, (FIndex * 2 + $11) * 8, '>', 1);
+        F.TextOut(C, MENU_CURSOR_X, (MenuIndex * 2 + $11) * 8, '>', 1);
         F.TextOut(C, 0, $D8, CREDIT_TEXT, 0);
       end;
 
@@ -589,7 +596,7 @@ begin
           else
             F.TextOut(C, OPT_LABEL_X, $38 + I * $10, OPT_LABELS[I], 2);
         DrawValues(C, F);
-        F.TextOut(C, OPT_CURSOR_X, (FIndex * 2 + 7) * 8, OPT_CURSOR, 1);
+        F.TextOut(C, OPT_CURSOR_X, (MenuIndex * 2 + 7) * 8, OPT_CURSOR, 1);
       end;
   end;
 end;

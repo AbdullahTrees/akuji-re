@@ -424,7 +424,7 @@ begin
     box all step through it - and the two menu cursors. }
   ScreenPhase := 0;
   TitleSubMode := 0;
-  PauseMenuIndex := 0;
+  MenuIndex := 0;
   SavedMenuIndex := 0;
 
   if FSprites <> nil then
