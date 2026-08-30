@@ -633,6 +633,9 @@ begin
   DrawHud;
   FDialogue.Draw(DDDD1.Canvas, FFont,
                  PixelOf(FSession.Pool.Field(0, EF_POS_Y)));
+  { Sprite bucket 8, which 0x00464D30 draws after the HUD and the message box
+    rather than with the rest. Nothing shipped reaches it - see DrawTop. }
+  FSession.Sprites.DrawTop(DDDD1.Canvas, FSurfaces);
 end;
 
 { Load_Stage_Assets @ 0x00465A1C. The record's rec[0] selects the surface set,

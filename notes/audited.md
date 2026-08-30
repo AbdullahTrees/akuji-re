@@ -186,6 +186,7 @@ identified because an audited function called them and the answer mattered.
 |---|---|---|
 | 0x00407D44 | `Trim` | skips bytes < 0x21 from the front, drops them from the back, Copies the middle |
 | 0x0044DC48 | the fader's start | writes +4/+0xC/+0xD and sets +8 to 0x78 only when both arguments are 0 - the fade-IN asymmetry `TDDDD.StartFade` reproduces |
+| 0x0044D1E0 | the sprite depth sort | buckets every VISIBLE sprite by its depth (+0x34), walking the pool from the LAST slot down. 0x00464D30 then draws buckets 1..7 ascending and bucket 8 after the HUD - so low depth is drawn first and ends up behind, and bucket 0 is never drawn at all |
 | 0x0044DAE0 | `TileMap_DefineTile` | pins the tile component's layout: TileW at +0x6028, TileH at +0x602C, so +0x6034/+0x6038 are its ScrollX/ScrollY |
 
 ## Audited before this table existed

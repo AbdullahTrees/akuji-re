@@ -7853,6 +7853,106 @@ begin
       + 'runs its three phases');
 end;
 
+{ Sprite draw ORDER, from 0x0044D1E0 and 0x00464D30.
+
+  The buckets are drawn in ASCENDING depth - low first, so low ends up BEHIND -
+  and the type table makes the consequence concrete: the player is depth 4
+  while signs, save statues and mana stones are 1, doors and orbs 2, monsters
+  3. Drawing them the other way round puts the scenery on top of Akuji, which
+  is what was reported.
+
+  Bucket 0 is never drawn at all; the original's loop starts at 1, and
+  Entity_Destroy zeroes EF_DEPTH, so 0 means destroyed or inert. Within one
+  bucket the pool is walked from the LAST slot down, so a lower slot number
+  draws later and therefore in front. }
+function TestSpriteOrder(Log: TStrings): Integer;
+var
+  Bad, I: Integer;
+  Pool: TSpritePool;
+  Sign, Door, Player, Dead, Hidden, Other: Integer;
+  Order: TSpriteOrder;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+  function PosOf(Handle: Integer): Integer;
+  var
+    K: Integer;
+  begin
+    Result := -1;
+    for K := 0 to High(Order) do
+      if Order[K] = Handle then
+        Exit(K);
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- the sprite draw order ---');
+
+  Pool := TSpritePool.Create;
+  try
+    { Allocated in this order on purpose: the player takes a LOWER slot than
+      the sign, so slot order alone would draw it first. Only depth may decide. }
+    Player := Pool.AllocSprite(0);
+    Sign   := Pool.AllocSprite(0);
+    Door   := Pool.AllocSprite(0);
+    Dead   := Pool.AllocSprite(0);
+    Hidden := Pool.AllocSprite(0);
+    Other  := Pool.AllocSprite(0);
+
+    Pool.SetDepth(Player, 4);   Pool.SetVisible(Player, True);
+    Pool.SetDepth(Sign, 1);     Pool.SetVisible(Sign, True);
+    Pool.SetDepth(Door, 2);     Pool.SetVisible(Door, True);
+    Pool.SetDepth(Dead, 0);     Pool.SetVisible(Dead, True);
+    Pool.SetDepth(Hidden, 3);   Pool.SetVisible(Hidden, False);
+    Pool.SetDepth(Other, 1);    Pool.SetVisible(Other, True);
+
+    Order := Pool.DrawOrder;
+
+    Want(PosOf(Player) >= 0, 'the player is not drawn at all');
+    Want(PosOf(Sign) >= 0, 'the sign is not drawn at all');
+
+    { The bug, stated as the thing the player sees. }
+    Want(PosOf(Player) > PosOf(Sign),
+         Format('the sign (depth 1) is drawn at %d and the player (depth 4) '
+           + 'at %d - the player must be drawn LATER so it appears in FRONT',
+           [PosOf(Sign), PosOf(Player)]));
+    Want(PosOf(Player) > PosOf(Door),
+         'the door (depth 2) is drawn after the player (depth 4)');
+    Want(PosOf(Door) > PosOf(Sign),
+         'the door (depth 2) is drawn before the sign (depth 1)');
+
+    Want(PosOf(Dead) = -1,
+         'a depth-0 sprite was drawn - bucket 0 is never drawn, and '
+         + 'Entity_Destroy zeroes EF_DEPTH');
+    Want(PosOf(Hidden) = -1, 'an invisible sprite was drawn');
+
+    { Within one bucket: the pool is walked backwards, so the HIGHER slot
+      number is emitted first and the lower one draws in front. }
+    Want(PosOf(Other) < PosOf(Sign),
+         Format('within depth 1, slot %d was drawn before slot %d - the '
+           + 'original walks the pool from the last slot down',
+           [Sign, Other]));
+
+    Want(Length(Order) = 4,
+         Format('%d sprites in the order, want 4 - two are excluded',
+                [Length(Order)]));
+
+    Log.Add(Format('draw order: %d sprites, player at position %d of %d',
+                   [Length(Order), PosOf(Player), Length(Order)]));
+  finally
+    Pool.Free;
+  end;
+  Result := Bad;
+end;
+
 { The event delay: Event_Begin's second argument is a COUNTDOWN.
 
   0x00464D30 decrements 0x0046D028 once a frame and, when it reaches zero,
@@ -8944,6 +9044,7 @@ begin
   Inc(Bad, TestPauseFlow(Log));
   Inc(Bad, TestTypewriter(Log, GameDir));
   Inc(Bad, TestEventDelay(Log, GameDir));
+  Inc(Bad, TestSpriteOrder(Log));
 
   Result := Bad;
   Log.Add('');

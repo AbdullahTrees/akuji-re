@@ -47,7 +47,15 @@ const
     full is real behaviour rather than a guard. }
   SPRITE_POOL_SIZE = 256;
 
+  { The depth buckets 0x00464D30 draws, and the two it treats specially. }
+  SPRITE_DEPTH_FIRST     = 1;   { bucket 0 is never drawn }
+  SPRITE_DEPTH_MAIN_LAST = 7;
+  SPRITE_DEPTH_TOP       = 8;   { drawn after the HUD, not with the rest }
+
 type
+  { The slot numbers to draw, already in order - see DrawOrder. }
+  TSpriteOrder = array of Integer;
+
   TSpriteSlot = record
     Used:    Boolean;
     Visible: Boolean;
@@ -83,7 +91,9 @@ type
     procedure SetDepth(Handle, Depth: Integer); override;
 
     { Draws every visible sprite, shallowest depth last. }
+    function DrawOrder: TSpriteOrder;
     procedure DrawAll(Dest: TCanvas; ASurfaces: TSurfaceSet);
+    procedure DrawTop(Dest: TCanvas; ASurfaces: TSurfaceSet);
 
     function LiveCount: Integer;
   end;
@@ -214,28 +224,74 @@ begin
       Inc(Result);
 end;
 
+{ THE DRAW ORDER, and it was inverted.
+
+  0x0044D1E0 buckets every visible sprite by its depth, and 0x00464D30 then
+  draws the buckets in ASCENDING order:
+
+      for (i = 1; i != 8; i++) FUN_0044D31C(sprites, i);
+      ...
+      if (*p_GameState != 10) FUN_0044D31C(sprites, 8);
+
+  so a LOW depth is drawn first and ends up BEHIND, and a high depth is drawn
+  last and ends up in front. This drew `MaxDepth downto 0`, which is exactly
+  backwards, and the type table says what that costs: the player is depth 4
+  while signs, save statues and mana stones are 1, doors and orbs 2, and
+  monsters 3. Every one of them was landing on top of Akuji.
+
+  BUCKET 0 IS NEVER DRAWN. The original's loop starts at 1, and that is not an
+  oversight - Entity_Destroy zeroes EF_DEPTH, so depth 0 is the destroyed and
+  the inert. Types 18 and 20 carry it and have no sprite at all.
+
+  WITHIN a bucket the original walks the pool from the LAST slot to the first,
+  so a lower slot number draws later and therefore in front of a higher one at
+  the same depth. }
+function TSpritePool.DrawOrder: TSpriteOrder;
+var
+  Depth, I, N: Integer;
+begin
+  SetLength(Result, SPRITE_POOL_SIZE);
+  N := 0;
+  for Depth := SPRITE_DEPTH_FIRST to SPRITE_DEPTH_MAIN_LAST do
+    for I := SPRITE_POOL_SIZE - 1 downto 0 do
+      if FSlots[I].Used and FSlots[I].Visible
+         and (FSlots[I].Depth = Depth) then
+      begin
+        Result[N] := I;
+        Inc(N);
+      end;
+  SetLength(Result, N);
+end;
+
 procedure TSpritePool.DrawAll(Dest: TCanvas; ASurfaces: TSurfaceSet);
 var
-  Depth, I: Integer;
-  MaxDepth: Integer;
+  Order: TSpriteOrder;
+  I: Integer;
 begin
   if (FFrames = nil) or (ASurfaces = nil) then
     Exit;
+  Order := DrawOrder;
+  for I := 0 to High(Order) do
+    FFrames.Draw(Dest, ASurfaces, FSlots[Order[I]].AnimId,
+                 FSlots[Order[I]].X, FSlots[Order[I]].Y);
+end;
 
-  MaxDepth := 0;
-  for I := 0 to SPRITE_POOL_SIZE - 1 do
-    if FSlots[I].Used and (FSlots[I].Depth > MaxDepth) then
-      MaxDepth := FSlots[I].Depth;
-
-  { Deepest first, so the shallowest ends up on top. Entity_UpdateAll's
-    DEPTH_BY_SCREEN_Y types get their depth from screen Y, which is what makes
-    something lower on the screen draw in front. }
-  for Depth := MaxDepth downto 0 do
-    for I := 0 to SPRITE_POOL_SIZE - 1 do
-      if FSlots[I].Used and FSlots[I].Visible
-         and (FSlots[I].Depth = Depth) then
-        FFrames.Draw(Dest, ASurfaces, FSlots[I].AnimId,
-                     FSlots[I].X, FSlots[I].Y);
+{ Bucket 8, which 0x00464D30 draws AFTER the HUD and the message box rather
+  than with the others - the only sprite layer that sits over the interface.
+  No shipped record places the one type that carries depth 8 (type 13), so
+  nothing reaches this today; it exists so that the layer is where the original
+  puts it rather than folded into the pass above. }
+procedure TSpritePool.DrawTop(Dest: TCanvas; ASurfaces: TSurfaceSet);
+var
+  I: Integer;
+begin
+  if (FFrames = nil) or (ASurfaces = nil) then
+    Exit;
+  for I := SPRITE_POOL_SIZE - 1 downto 0 do
+    if FSlots[I].Used and FSlots[I].Visible
+       and (FSlots[I].Depth = SPRITE_DEPTH_TOP) then
+      FFrames.Draw(Dest, ASurfaces, FSlots[I].AnimId,
+                   FSlots[I].X, FSlots[I].Y);
 end;
 
 end.
