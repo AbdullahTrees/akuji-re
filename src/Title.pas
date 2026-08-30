@@ -387,6 +387,8 @@ begin
 end;
 
 procedure TTitleScreen.MenuConfirm;
+var
+  Chosen: Integer;
 begin
   case MenuIndex of
     0, 1:
@@ -396,13 +398,29 @@ begin
           sub-mode records which of NEW GAME / CONTINUE was chosen, then the
           cursor, and then the OPENING's slide and timer are both zeroed -
           which is what makes the cutscene start from its first slide rather
-          than wherever a previous run left it. }
+          than wherever a previous run left it.
+
+          THE INDEX IS READ INTO A TEMPORARY FIRST, and that ordering is the
+          whole fix for "CONTINUE starts a new game". The original does:
+
+              uVar3 = *p_MenuIndex;         <- saved BEFORE the reset
+              GameState_Reset(form, 0);
+              *p_GameState    = 0x28;
+              *p_TitleSubMode = uVar3;      <- the saved copy, not a reload
+
+          because GameState_Reset ZEROES p_MenuIndex. Reading the index after
+          the reset always yields 0, which is NEW GAME, whichever row the
+          cursor was on. This code read it afterwards and so could never
+          record a continue. It became reachable when MenuIndex stopped being
+          a private field and became the shared global the original has - the
+          merge was right, and this ordering is the rest of that same fact. }
         PlaySound(SND_OK);
+        Chosen := MenuIndex;
         if Assigned(FOnResetState) then
           FOnResetState;
         GameStateValue := GS_PLAYER_INIT;
         ScreenPhase := 0;
-        FSubMode := MenuIndex;
+        FSubMode := Chosen;
         MenuIndex := 0;
         if Assigned(FOnResetOpening) then
           FOnResetOpening;

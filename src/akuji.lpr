@@ -7853,6 +7853,127 @@ begin
       + 'runs its three phases');
 end;
 
+{ The reset callback is what makes this test real. GameState_Reset zeroes the
+  shared MenuIndex, so a confirm that reads the index AFTER the reset always
+  sees NEW GAME. The first version of this test left OnResetState unassigned
+  and passed against the broken code - a double that omits the very state the
+  code under test reads cannot see the defect. }
+type
+  TResetSpy = class
+    Fired: Boolean;
+    procedure Reset;
+  end;
+
+procedure TResetSpy.Reset;
+begin
+  Fired := True;
+  { Exactly what TGameSession.ResetState does to the shared cursor. }
+  MenuIndex := 0;
+end;
+
+{ CONTINUE must LOAD, and the reported bug is that it starts a new game.
+
+  Game_StartOrLoad @ 0x00462F40 is one function for both, separated only by
+  p_TitleSubMode, so the whole path has to be driven end to end: the title
+  screen's own confirm sets the sub-mode, and only then does the loader read
+  data\save.dat over the defaults it has just written. Testing the loader
+  alone would pass while the menu handed it the wrong mode, which is exactly
+  the shape of this bug. }
+function TestContinueLoadsSave(Log: TStrings; const ScratchDir: string): Integer;
+var
+  Bad, GS: Integer;
+  T: TTitleScreen;
+  P: TPlayerState;
+  Cfg: TGameSettings;
+  Host: TStartHost;
+  Spy: TResetSpy;
+  SaveName: string;
+  F: TFileStream;
+
+  procedure Want(Cond: Boolean; const What: string);
+  begin
+    if not Cond then
+    begin
+      Log.Add('  FAIL: ' + What);
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('--- CONTINUE loads the save ---');
+
+  { The menu half. Down once from NEW GAME is CONTINUE, and confirming it must
+    leave the sub-mode at 1 - which is the only thing the loader looks at. }
+  T := TTitleScreen.Create;
+  Spy := TResetSpy.Create;
+  try
+    T.OnResetState := Spy.Reset;
+    MenuIndex := 0;
+    T.Update(1, 0, False);
+    Want(T.Index = 1,
+         Format('one press of down left the cursor on %d, want CONTINUE at 1',
+                [T.Index]));
+    T.Update(0, 0, True);
+    Want(Spy.Fired, 'confirming did not run GameState_Reset');
+    Want(T.SubMode = 1,
+         Format('confirming CONTINUE left the sub-mode at %d, want 1 - at 0 '
+           + 'the loader starts a new game instead. The index must be read '
+           + 'BEFORE GameState_Reset, which zeroes it', [T.SubMode]));
+  finally
+    Spy.Free;
+    T.Free;
+  end;
+
+  { The loader half, against a save that cannot be confused with a new game:
+    a stage no new game starts on, and an ability a new game clears. }
+  SaveName := IncludeTrailingPathDelimiter(ScratchDir) + 'save.dat';
+  FillChar(P, SizeOf(P), 0);
+  P.SavedStage := 7;
+  P.Head[ABILITY_DASH] := 1;
+  P.MusicTrack := 1;
+  F := TFileStream.Create(SaveName, fmCreate);
+  try
+    F.WriteBuffer(P, SizeOf(P));
+  finally
+    F.Free;
+  end;
+
+  Host := TStartHost.Create;
+  try
+    FillChar(Cfg, SizeOf(Cfg), 0);
+    FillChar(P, SizeOf(P), 0);
+    GS := 0;
+    GameStartOrLoad(P, Cfg, smContinue, Host, True, SaveName, GS);
+    Want(Cfg.CurrentStage = 7,
+         Format('CONTINUE resumed at stage %d, want the saved stage 7 - '
+           + 'stage %d is where a NEW GAME starts',
+           [Cfg.CurrentStage, START_STAGE]));
+    Want(P.Head[ABILITY_DASH] = 1,
+         'CONTINUE cleared the dash ability - the defaults were written over '
+         + 'the load instead of under it');
+
+    { And the other direction, or the test above would pass on a loader that
+      always loads. }
+    FillChar(Cfg, SizeOf(Cfg), 0);
+    FillChar(P, SizeOf(P), 0);
+    GS := 0;
+    GameStartOrLoad(P, Cfg, smNewGame, Host, True, SaveName, GS);
+    Want(Cfg.CurrentStage = START_STAGE,
+         Format('NEW GAME started at stage %d, want %d - it read the save',
+                [Cfg.CurrentStage, START_STAGE]));
+    Want(P.Head[ABILITY_DASH] = 0,
+         'NEW GAME kept the saved dash ability');
+  finally
+    Host.Free;
+  end;
+
+  Log.Add(Format('continue: sub-mode 1, resumed stage %d, dash %d',
+                 [7, 1]));
+  Result := Bad;
+end;
+
 { Ending_Update @ 0x00463624: the completion percentage, the rank, and the two
   sets of persistent flags it banks.
 
@@ -8366,6 +8487,7 @@ begin
   Inc(Bad, TestDialogue(Log, GameDir));
   Inc(Bad, TestConfirmAndGameOver(Log));
   Inc(Bad, TestEnding(Log));
+  Inc(Bad, TestContinueLoadsSave(Log, GetTempDir));
 
   Result := Bad;
   Log.Add('');
