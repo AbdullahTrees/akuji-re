@@ -14,9 +14,10 @@ Every number here comes from a tool in `tools/`, not from memory.
 |---|---|---|
 | game-layer functions with executable Pascal | 149 / 149 | `implemented.py` |
 | entity handlers differentially verified against the binary | 296 cases, 0 disagree | `emudiff.py` |
-| game functions read-audited and frozen | 15 (7 matched, 8 needed a fix) | `audited.py` |
-| ... verified by emudiff instead (entity handlers) | 75 | `audited.py` |
-| ... unchecked - unproven, not suspect | 59 | `audited.py --list` |
+| game functions tracked, one row each | 149 | `audited.md` |
+| ... read-audited and FROZEN | 15 (7 MATCHES, 8 FIXED) | `audited.py` |
+| ... EMUDIFF - entity handlers, machine-checked | 75 | `audited.py` |
+| ... UNVERIFIED - unproven, not suspect | 59 | `audited.py --list` |
 | const tables pinned to the image by VALUE | 187 | `--selftest-entities` |
 | table lengths corroborated from OUTSIDE the table | 171 / 180 | `table_extents.py` |
 | behavioural self-tests / assertions | 13 modes, 218 | `check.sh` |

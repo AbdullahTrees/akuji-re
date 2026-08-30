@@ -6,6 +6,26 @@ Object Pascal — cross-platform because Free Pascal is, not via any porting lay
 
 Read sections 1–4 before touching anything.
 
+> ## BEFORE YOU EDIT ANY PASCAL FUNCTION
+>
+> **Check `notes/audited.md` first.** It has one row per game-layer function
+> and the STATUS column is the answer:
+>
+>     grep -i '<address or name>' notes/audited.md
+>
+> * `MATCHES` or `FIXED` — **FROZEN. Do not edit it.** Name it, quote the
+>   disassembly that proves the defect, and **ask the user. Approval is
+>   required before the edit**, per change. See section 3a.
+> * `EMUDIFF` — an entity handler. Edit it, then re-run
+>   `python tools/emudiff.py handler_live`.
+> * `UNVERIFIED` — free to change. This is most of them, and it is not a
+>   defect list.
+>
+> This check comes BEFORE the edit, not after. `tools/audited.py` will catch a
+> frozen function that changed, but by then the work is done and has to be
+> unpicked — and the point of the rule is that the verification is more
+> expensive than the edit that destroys it.
+
 ---
 
 ## 1. Status
@@ -154,9 +174,10 @@ Clear mis-decoded bytes *before* the entry too. Assume more are still hidden.
 
 ## 3a. AN AUDITED FUNCTION IS FROZEN
 
-**`notes/audited.md` lists every function whose Pascal has been read against a
-fresh decompile. Once a function is in that list as MATCHES or FIXED, no other
-piece of work may change it.**
+**`notes/audited.md` has one row for every game-layer function - all 149 - and
+the STATUS column says what evidence exists for it. A function whose status is
+MATCHES or FIXED has been read against a fresh decompile, and no other piece of
+work may change it.**
 
 This is not a style preference. Those functions went through two passes: a
 first one that too often wrote the SPECIFICATION into Pascal - a comment
@@ -183,6 +204,17 @@ So the rule, and it has no expiry:
 
 Comments and formatting inside an audited function are NOT frozen - behaviour
 is. Improving a comment needs no approval.
+
+### How to check, every time
+
+Before touching any function in `src/`:
+
+    grep -i 'DrawHud' notes/audited.md        # or the 0x00... address
+
+The STATUS column decides. MATCHES and FIXED are frozen; EMUDIFF means re-run
+the differential sweep afterwards; UNVERIFIED is free. `notes/audited.md` is one
+row per function over the whole 149, so "it is not in the list" is not an
+answer — every game-layer function is in it.
 
 `tools/audited.py` enforces this rather than trusting anyone to remember it. It
 fingerprints every frozen implementation with comments stripped and whitespace
