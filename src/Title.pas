@@ -539,8 +539,8 @@ begin
   if MenuIndex = Ord(orOmake) then
   begin
     Sel := Settings.GallerySel;
-    if (Sel >= 0) and (Sel <= High(Settings.Unknown2C))
-       and (Settings.Unknown2C[Sel] = 1) then
+    if (Sel >= 0) and (Sel <= High(Settings.GalleryUnlocked))
+       and (Settings.GalleryUnlocked[Sel] = 1) then
     begin
       if Assigned(FOnGallery) then
         FOnGallery(Sel);
@@ -599,7 +599,7 @@ begin
   begin
     Val(8, OMAKE_NAMES[Settings.GallerySel], 2);
     { The unlock marker, at its own x and with its own variant. }
-    if Settings.Unknown2C[Settings.GallerySel] = 1 then
+    if Settings.GalleryUnlocked[Settings.GallerySel] = 1 then
       F.TextOut(C, OMAKE_MARK_X, $38 + 8 * $10, TEXT_ON, 0)
     else
       F.TextOut(C, OMAKE_MARK_X, $38 + 8 * $10, TEXT_OFF, 2);

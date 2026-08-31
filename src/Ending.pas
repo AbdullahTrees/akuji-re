@@ -200,7 +200,7 @@ begin
     previously unlocked entry is never taken away by a worse run. }
   for I := 0 to GALLERY_COUNT - 1 do
     if P.Progress[GALLERY_FIRST_FLAG + I] <> 0 then
-      S.Unknown2C[I] := 1;
+      S.GalleryUnlocked[I] := 1;
 end;
 
 function EndingTimeText(ElapsedSec: Integer): string;

@@ -116,7 +116,11 @@ type
     Unknown1E: array[0..5] of Byte;  // +0x1E..+0x23
     Volume: Integer;         // +0x24  0..10, SE VOLUME
     GallerySel: Integer;     // +0x28  0..6
-    Unknown2C: array[0..6] of Byte;  // +0x2C..+0x32  gallery unlock flags
+    { The SEVEN GALLERY FLAGS, one per omake entry - not unidentified bytes.
+      Title_MainMenu indexes this by GallerySel and draws ON or OFF from it,
+      and Ending.pas copies Progress[1186..1192] into it when a run ends.
+      It was called Unknown2C while this comment already said what it was. }
+    GalleryUnlocked: array[0..6] of Byte;  // +0x2C..+0x32
     Pad33: Byte;
     InputDevice: Integer;    // +0x34  from system.ini [device] input
   end;

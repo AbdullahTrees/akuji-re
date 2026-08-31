@@ -3762,7 +3762,7 @@ begin
   Off('TGameSettings.Unknown1E', PtrUInt(@G.Unknown1E) - PtrUInt(@G), $1E);
   Off('TGameSettings.Volume', PtrUInt(@G.Volume) - PtrUInt(@G), $24);
   Off('TGameSettings.GallerySel', PtrUInt(@G.GallerySel) - PtrUInt(@G), $28);
-  Off('TGameSettings.Unknown2C', PtrUInt(@G.Unknown2C) - PtrUInt(@G), $2C);
+  Off('TGameSettings.GalleryUnlocked', PtrUInt(@G.GalleryUnlocked) - PtrUInt(@G), $2C);
   Off('TGameSettings.InputDevice', PtrUInt(@G.InputDevice) - PtrUInt(@G), $34);
 
   Log.Add('46 field offsets and 4 record sizes checked');
@@ -9609,15 +9609,15 @@ begin
   FillChar(P, SizeOf(P), 0);
   P.Progress[GALLERY_FIRST_FLAG + 3] := 1;
   EndingApplyUnlocks(S, P);
-  Want(S.Unknown2C[3] = 1, 'gallery flag 3 did not carry across');
+  Want(S.GalleryUnlocked[3] = 1, 'gallery flag 3 did not carry across');
   for I := 0 to GALLERY_COUNT - 1 do
     if I <> 3 then
-      Want(S.Unknown2C[I] = 0, Format('gallery entry %d unlocked itself', [I]));
+      Want(S.GalleryUnlocked[I] = 0, Format('gallery entry %d unlocked itself', [I]));
 
-  S.Unknown2C[5] := 1;
+  S.GalleryUnlocked[5] := 1;
   FillChar(P, SizeOf(P), 0);
   EndingApplyUnlocks(S, P);
-  Want(S.Unknown2C[5] = 1, 'a worse run took a gallery entry away');
+  Want(S.GalleryUnlocked[5] = 1, 'a worse run took a gallery entry away');
 
   Want(EndingTimeText(3725) = '01:02:05', 'the clock does not format h:mm:ss');
   { NOT '052%'. The format string is '%03d%%', which looks like C's zero-pad
