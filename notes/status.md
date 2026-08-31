@@ -75,6 +75,17 @@ for one global declared twice, `audited.py` for the ledger.
    sees: the component layer standing in for a DirectX suite, and the Lazarus
    `.lfm` where Delphi wants the `.dfm` we already hold decoded.
 
+   The port is also what unblocks **DIV-013, deleting our MIDI engine**.
+   `kbgm32.dll` is PE32 i386 and this build is PE32+ x86-64, so a 64-bit
+   process cannot load it and the music had to be reimplemented -
+   `KbgmPlayer.pas`, `MidiFile.pas` and `MidiOut.pas`, 1100 lines standing in
+   for a DLL call. Delphi 6 x86 is 32-bit, so the plan there is to write
+   `KbgmPlayer.pas` out and declare the thirteen KBGM exports
+   `external 'kbgm32.dll'` directly. The published interface already matches
+   them one for one. It matters beyond fidelity: the game-over screen leaves
+   when the music stops, so today its length is decided by our engine's idea
+   of a track rather than the DLL's.
+
 Long tail: type 1's `EF_STATE` 10 (the one differential disagreement), six
 handlers that fault in the emulator by calling through an unplaced component
 pointer, `ScreenPhase` 1 in `Ending.pas` (unobserved - no session has reached

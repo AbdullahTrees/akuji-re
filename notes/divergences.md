@@ -239,3 +239,75 @@ rather than a line, but it must then say what stands in for it.
   cannot be reproduced honestly in game code, because the value it wants is the
   component's, and faking the lag with a saved copy in the session would be
   invented logic standing in for a component that does not exist yet.
+
+## DIV-013 - the music engine is reimplemented, not the DLL
+
+- category: B
+- sites: none - src/KbgmPlayer.pas (679 lines), src/MidiFile.pas (409) and
+  src/MidiOut.pas stand in for the whole of it.
+- original: Kbgm32.dll, a third-party MIDI engine shipped beside the game. The
+  original wrapped it and the import table still names all thirteen exports:
+  KBGMOpen, KBGMClose, KBGMInit, KBGMLoadFile, KBGMFree, KBGMPlay, KBGMStop,
+  KBGMFadeIn, KBGMFadeOut, KBGMSetRepeat, KBGMSetVolume, KBGMSendSysx,
+  KBGMGetInfo.
+- Those names are the entire specification we have for it - there is no
+  documentation and we have not disassembled the DLL - so the interface in
+  KbgmPlayer.pas is shaped to them rather than invented. Underneath, MidiFile
+  parses the files and MidiOut sends to the system MIDI mapper through winmm,
+  where the original handed the file to KBGMLoadFile and never saw an event.
+- WHY IT IS NOT SIMPLY IMPORTED, which is what one would expect: kbgm32.dll is
+  PE32 i386 (machine 0x014C) and this build is PE32+ x86-64. A 64-bit process
+  cannot load a 32-bit DLL, so on the current FPC/Win64 toolchain importing is
+  impossible regardless of preference. That constraint disappears on the
+  Delphi 6 x86 target, which is 32-bit.
+- behaviour: AFFECTING, and not only audibly. GameOver_Update leaves its screen
+  when the music stops - FUN_00450FD0 wraps KBGMGetInfo - so how long our
+  engine thinks a track lasts decides how long the game-over screen is shown.
+  Anything that gates on IsPlaying inherits our timing rather than the DLL's.
+  Fades are ours too: KBGMFadeOut ramps 100 volume steps down over arg*50 ms
+  by the DLL's own arithmetic, and we reproduce that shape, not its output.
+- exit: THE PLAN IS TO DELETE THIS. On the Delphi 6 x86 build, write out
+  KbgmPlayer.pas and declare the thirteen exports `external 'kbgm32.dll'`
+  directly. The published interface already matches them one for one, so it is
+  a replacement of bodies rather than a redesign, and it removes MidiFile and
+  MidiOut from the music path with it. That is the faithful arrangement: the
+  original did not own a MIDI engine, it called one.
+
+## DIV-014 - the sound component is reimplemented, not the DirectSound one
+
+- category: B
+- sites: none - src/DDSDComponent.pas stands in for it, over SoundTable,
+  WaveFile, AudioMixer and AudioOut.
+- original: the third-party TDDSD DirectSound component, whose published
+  interface GmMain.lfm documents. Only DebugOption and ChannelCount are
+  streamed.
+- ChannelCount is 57, the executable holds exactly 57 sound-effect names in a
+  static array at 0x00468D50, and wav/ holds exactly 57 files - so a channel is
+  one DirectSound buffer holding one effect, not a voice in a pool. Slot number
+  and sound number are the same thing, which is why re-triggering a sound
+  restarts it rather than layering. That much is reproduced. What is not is the
+  device: the original used DirectSound buffers and winmm's mmio* readers,
+  where this mixes in software and plays through waveOut.
+- behaviour: NEUTRAL for game logic as far as anything traced - no game code
+  reads sound state back, unlike the music, which the game-over screen waits
+  on. Audibly different in mixing and latency.
+- exit: the presentation layer owning a real DirectSound path, or on the
+  Delphi 6 x86 target the original component itself if it can be obtained.
+
+## DIV-015 - input reads LCL virtual keys, not DirectInput scancodes
+
+- category: B
+- sites: none - src/DDIDComponent.pas stands in for it. DIV-002 covers the
+  separate matter of the menus being driven from FormKeyDown.
+- original: the TDDIDEX component, named "Joy" on the form, wrapping
+  DirectInput and reading raw DIK scancodes. The table was recovered from
+  DirectInput_Init @ 0x00453BDC: 0x2C..0x2E for Z X C, 0x1E..0x20 for A S D,
+  0x02..0x0B for the digits, 0x39 space, 0xC8..0xCD arrows, 0x47..0x51 numpad.
+- We map LCL virtual keys for the same physical keys. It is the same keyboard
+  but not the same table: a scancode is a POSITION and a VK is a LETTER.
+- behaviour: AFFECTING only on a non-QWERTY layout, where the original's Z and
+  ours are different physical keys. On QWERTY the two agree.
+- exit: a presentation layer that reads scancodes, at which point the recovered
+  DIK table is used directly and the mapping disappears. Also outstanding: the
+  item-select digits have no reader yet and are deliberately left unmapped
+  rather than guessed at.
