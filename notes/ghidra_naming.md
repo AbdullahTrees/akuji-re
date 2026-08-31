@@ -435,6 +435,35 @@ Ending_Update (the six phases and the unlock thresholds), Load_StageTable
 (the column gap), TFrm_main_AppIdle (the frame order), TList_Get (what its
 return type rests on).
 
+## Scope: the game's own code
+
+Delphi RTL and VCL internals are NOT worth naming beyond the handful that
+appear inside game functions and were making them unreadable - Delphi_Format,
+Delphi_Trim, Delphi_MakeRect, Delphi_StrClr and friends. Everything else the
+RTL does is FPC's job in the reconstruction and nobody will read it here. The
+effort belongs on 0x454790..0x4671FF and the game helpers clustered around
+0x451xxx.
+
+## Independent agreements, which are the only ones that count
+
+Five so far, all written into src/*.pas from the disassembly BEFORE this pass
+and none of them typed into Ghidra:
+
+- Ending.pas: gallery flags from Progress[1186..1192]; the code reads
+  Progress[+0x4A2]. Same for RANK_PCT 50/70/90 and RANK_TIME 1800.
+- Stages.pas: csv[0..7] to rec[0..7] then csv[8..15] to rec[11..18], with
+  rec[8..10] runtime scratch - exactly the gap Load_StageTable has.
+- Entities.pas: the two tile-probe globals are "NOT outputs: nothing outside
+  these two functions" - which is what LastProbeTileX/Y turn out to be.
+- Entities.pas: EntitiesOverlap builds box A unscaled and box B scaled, which
+  is precisely what Entity_BoxesOverlap does.
+- Entities.pas: CompareNZ is "Compare's twin, and NOT the same function - it
+  has no zero", fourteen bytes apart, and names Type 77 as the caller that
+  needs it. Both true.
+
+That direction is evidence. The reverse - Ghidra agreeing with names typed
+into it - is not. See the warning at the top.
+
 ## What is left
 
 - ~960 `DAT_`/`PTR_DAT_` symbols still unnamed. Only the ones whose meaning a
