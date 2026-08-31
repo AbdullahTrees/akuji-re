@@ -60,6 +60,14 @@ disassembly before trusting it.
 | throwaway locals | a single letter, as in a for-loop | `i`, `t`, `r`, `h` |
 
 A local that is a loop counter, a scratch temporary or a condition flag gets a
+single letter. **But check that it really is one first.** Ending_Update's slot
+was briefly `t` and holds two REAL values - the text fill colour and, in phase
+5, the rank index - so it is `FillOrRank`, a compound that says which is which
+at each site. A single letter on a slot that carries meaning hides the meaning;
+that is the opposite failure to naming a merged slot `SavedVX`, and both are
+wrong.
+
+A local that is a loop counter, a scratch temporary or a condition flag gets a
 single letter. Spending a descriptive name on one is worse than useless: it
 implies the value means something across the function when it does not, which
 is the same mistake `SavedVX` made in Player_Update. `i` for a counter, `t` for
@@ -294,6 +302,26 @@ Worth noting which direction that went: the Ghidra pass has mostly been the
 reconstruction teaching Ghidra, and this is the first case of it going the
 other way. It is also the only kind of agreement between the two that means
 anything - see the warning at the top.
+
+## Type the global CELLS, not just the records
+
+The single largest source of leftover noise was not names at all. Every
+`p_Name` cell holds the ADDRESS of something, and until the cell itself is
+typed, every read and write casts:
+
+    *(int *)p_ScreenPhase = 0;          becomes   *p_ScreenPhase = 0;
+    *(undefined4 *)Credits = 0;         becomes   *Credits = NULL;
+
+That appears in nearly every function that touches a global. ApplyAkujiTypes
+now types 26 int cells, 6 byte flags and 7 object-pointer cells alongside the
+records and tables.
+
+Note the pointee depth: an int cell takes `int` (the cell becomes `int *`), and
+an OBJECT cell takes a pointer (the cell becomes a pointer to a pointer),
+because the thing it addresses is itself a handle. Getting that wrong gives a
+type Ghidra silently refuses - `set_local_variable_type` reported "Type not
+found directly: void **" and left the variable untyped, which is worth knowing
+because it does not fail loudly.
 
 ## Ghidra cannot always be made to help
 

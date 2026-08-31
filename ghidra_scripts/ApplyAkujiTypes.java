@@ -361,6 +361,37 @@ public class ApplyAkujiTypes extends GhidraScript {
         typeCell(dtm, "p_SprGlide", i32);
         typeCell(dtm, "p_SprAirDash", i32);
         typeCell(dtm, "p_SprDeath", i32);
+
+        // SCALAR CELLS. These are why *(int *)p_ScreenPhase appears in every
+        // function that touches a global: the cell holds the address of an int
+        // and was never typed, so every read and write needed a cast. Typed,
+        // they read as *p_ScreenPhase.
+        String[] intCells = {
+            "p_GameState", "p_ScreenPhase", "p_TitleSubMode", "p_MenuIndex",
+            "p_SavedMenuIndex", "p_SavedGameState", "p_OpeningSlide",
+            "p_OpeningTimer", "p_EventId", "p_EventArg", "p_EventCursor",
+            "p_EventStepIndex", "p_MessageMode", "p_MessageReveal",
+            "p_MessagePageStart", "p_OverlayActive", "p_OverlayMode",
+            "p_RevealTimer", "p_AnswerIndex", "p_ScreenShakeTimer",
+            "p_EntitiesLive", "p_EntitiesDrawn", "p_SolidThreshold",
+            "p_KillTile", "p_LastFrameTime", "p_KeyMap",
+        };
+        for (String n : intCells) typeCell(dtm, n, i32);
+
+        // Byte flags, same problem.
+        String[] byteCells = {
+            "p_ScreenShakeOn", "p_OnTopOfSolid", "p_UseArchive",
+            "p_FullScreenOn", "p_WaitOn", "p_SoftwareVsync",
+        };
+        for (String n : byteCells) typeCell(dtm, n, ByteDataType.dataType);
+
+        // Cells holding an OBJECT pointer - one more indirection, so the
+        // pointee is itself a pointer.
+        String[] objCells = {
+            "p_Fader", "p_SpriteList", "p_BgAnime", "p_EndingSurface",
+            "p_PanelSurface", "p_TileBuffer", "p_MessageText",
+        };
+        for (String n : objCells) typeCell(dtm, n, dtm.getPointer(DataType.DEFAULT));
         typeCell(dtm, "p_EntityTypes", enttype);
 
         println("");
