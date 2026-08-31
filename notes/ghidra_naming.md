@@ -499,6 +499,29 @@ RTL does is FPC's job in the reconstruction and nobody will read it here. The
 effort belongs on 0x454790..0x4671FF and the game helpers clustered around
 0x451xxx.
 
+## Block A and block B: why the field names carry a slot number
+
+The twenty ints of block A (+0x20) and block B (+0x48) have no fixed meaning.
+Every entity type reads them as it likes and the player, slot 0, is just one
+more reader. The Pascal copes by declaring a separate constant set per type
+over the same offsets - PF_AIR_LATCH, EMIT_EVERY and EF_BLOCK_A + 1 are all
+$09 - but a Ghidra struct gets exactly one name per offset.
+
+The first pass named them all from the player's use, because Player_Update is
+where most of the reads are. That was a mistake, and type 21 is what exposed
+it: the handler tests `E->AirLatch < E->BlockB_AnimTimer` where AirLatch is an
+oscillation half-period and has nothing to do with being airborne. A reader
+who trusts the name mis-reads the function.
+
+So the block fields now carry the SLOT first and the player's use second:
+A1_AirLatch, A3_FallFrames, B0_AnimTimer, B4_JumpProbe. The prefix is the part
+that is always true. Seeing `E->A1_AirLatch` in a handler should prompt "what
+does THIS type keep in A[1]" rather than an answer.
+
+Do not tidy the prefixes away. State, A9_Dying, B0's timer, B1/B2's child refs
+and B3_Shots do hold across types, and they keep the prefix anyway so the
+block layout stays legible.
+
 ## Independent agreements, which are the only ones that count
 
 Sixteen so far, all written into src/*.pas from the disassembly BEFORE this

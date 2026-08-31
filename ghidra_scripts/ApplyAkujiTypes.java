@@ -93,23 +93,41 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(e, "AnimId");
         add(e, "Variant");
         add(e, "Flag1c_AnimFrame");
-        add(e, "State");
-        add(e, "AirLatch");
-        add(e, "Ridden_Landed");
-        add(e, "FallFrames");
-        add(e, "StateBefore");
-        add(e, "DebrisType_Riding");
-        add(e, "RideRef");
-        add(e, "LandFrames");
-        add(e, "JumpHeld");
-        add(e, "Dying");
-        add(e, "BlockB_AnimTimer");
-        add(e, "ChildA_AirVx");
-        add(e, "ChildB_Charge");
-        add(e, "Shots");
-        add(e, "JumpProbe");
-        add(e, "DashFrames");
-        add(e, "HasJumped");
+        // ---- block A, ten ints at +0x20, and block B, ten at +0x48 ----
+        // These twenty slots have NO fixed meaning. Each entity type reads
+        // them as it likes, and the player - slot 0 - is just one more
+        // reader. The Pascal handles that by declaring a separate set of
+        // constants per type against the same offsets: PF_AIR_LATCH,
+        // EMIT_EVERY and EF_BLOCK_A + 1 are all $09.
+        //
+        // A Ghidra struct gets one name per offset, so the name must not
+        // pretend otherwise. These carry the SLOT first and the player's use
+        // second: A1_AirLatch is block A[1], which the player uses as an air
+        // latch and type 21 uses as an oscillation half-period. Reading
+        // `E->A1_AirLatch` in a handler should prompt "what does THIS type
+        // keep in A[1]", which the bare name AirLatch actively discouraged.
+        //
+        // Do not drop the prefixes to tidy them up. State, A9_Dying, B0's
+        // anim timer, B1/B2's child refs and B3_Shots are the only ones with
+        // a meaning that holds across types, and even those get the prefix so
+        // the block layout stays readable at a glance.
+        add(e, "State");                 // A[0], per-type state - universal
+        add(e, "A1_AirLatch");
+        add(e, "A2_Ridden_Landed");
+        add(e, "A3_FallFrames");
+        add(e, "A4_StateBefore");
+        add(e, "A5_DebrisType_Riding");
+        add(e, "A6_RideRef");
+        add(e, "A7_LandFrames");
+        add(e, "A8_JumpHeld");
+        add(e, "A9_Dying");
+        add(e, "B0_AnimTimer");
+        add(e, "B1_ChildA_AirVx");
+        add(e, "B2_ChildB_Charge");
+        add(e, "B3_Shots");
+        add(e, "B4_JumpProbe");
+        add(e, "B5_DashFrames");
+        add(e, "B6_HasJumped");
         add(e, "Field64");
         add(e, "Field68");
         add(e, "Field6C");
