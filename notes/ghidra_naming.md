@@ -218,6 +218,23 @@ parameter is `E`, typed `int *`, which makes the decompiler index it the way
 our own constants do: `E[8]` IS `EF_STATE = $08`, `E[5]` is `EF_ANIM_ID`,
 `E[0x1e]` is `EF_POS_X`. The two projects now read the same.
 
+## One local can be several source variables
+
+Player_Update's `Scratch` is the clearest case. Ghidra shows ONE slot; our
+Pascal declares four locals there - SavedVX, Slot, Frames, W - and the compiler
+merged them. Over the function that slot holds the saved VelX, then spawn slots
+from Entity_Spawn, then tile-collide results, then p_DirX[Facing], then the
+weapon index.
+
+It was briefly named `SavedVX`, which is right for the first use and a false
+claim about the other five. Renamed `Scratch`, with a decompiler comment at
+0x004585A8 listing what it carries and where. **When a local is reused across
+roles, name it neutrally and comment it** - a confident wrong name in five
+places is worse than an honest vague one.
+
+`Blocked` in the same function is packed rather than reused: bit 0 is the X
+result and bit 8 the Y, which is why it reads back as `Blocked._1_1_`.
+
 ## Two things that will bite the next person
 
 **Ghidra renumbers `iVarN` after every rename.** Rename `iVar1` and the old

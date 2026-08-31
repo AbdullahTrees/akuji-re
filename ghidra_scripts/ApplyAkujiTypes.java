@@ -289,6 +289,14 @@ public class ApplyAkujiTypes extends GhidraScript {
         typeCell(dtm, "p_MidiNames", anyPtr);
         typeCell(dtm, "p_TextTable", anyPtr);
         typeCell(dtm, "p_OpeningImageIds", i32);
+        // The player sprite tables, confirmed by their strides: 0x14 per
+        // facing is five ints (SPR_GROUND, SPR_AIR), 0x10 is four (SPR_GLIDE),
+        // 8 is two (SPR_AIRDASH), and the flat pair is SPR_DEATH.
+        typeCell(dtm, "p_SprGround", i32);
+        typeCell(dtm, "p_SprAir", i32);
+        typeCell(dtm, "p_SprGlide", i32);
+        typeCell(dtm, "p_SprAirDash", i32);
+        typeCell(dtm, "p_SprDeath", i32);
 
         println("");
         println("===== DONE - remember to save the project =====");
