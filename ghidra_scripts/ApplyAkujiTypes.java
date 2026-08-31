@@ -225,10 +225,14 @@ public class ApplyAkujiTypes extends GhidraScript {
         i(ev, 0x20, "BlockedBy");
         DataType evrec = put(dtm, ev, 0x24);
 
-        StructureDataType li = new StructureDataType("TLifeIcon", 0);
+        StructureDataType li = new StructureDataType("TIconAnim", 0);
         add(li, "X"); add(li, "Frame"); add(li, "Timer");
         DataType lifeicon = put(dtm, li, 0x0C);
 
+        // An animated icon's state - X, Frame, Timer. NOT life-specific: it is
+        // an ARRAY, and MessageBox_Update drives [1] as the wait-for-key and
+        // yes/no prompt animation while HUD_Draw drives [0] as the life icon.
+        // It was briefly named TLifeIcon for the first use found.
         // The sprite object the sprite list holds. Only the fields the game
         // touches are named; the rest of the object is left undefined, which
         // is fine because it is only ever reached through a pointer.
@@ -324,7 +328,7 @@ public class ApplyAkujiTypes extends GhidraScript {
         typeCell(dtm, "p_InputState", input);
         typeCell(dtm, "p_Settings", settings);
         typeCell(dtm, "p_EventTable", dtm.getPointer(evrec));
-        typeCell(dtm, "p_LifeIcon", lifeicon);
+        typeCell(dtm, "p_IconAnim", lifeicon);
 
         // Cells holding the address of a flat int table. Typing them turns
         // *(int *)(p_X + i * 4) into p_X[i].

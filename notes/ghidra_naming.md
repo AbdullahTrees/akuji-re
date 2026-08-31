@@ -274,6 +274,24 @@ The rule that falls out: **the semantic name beats the table-column or
 range-marker name**, and aliases have to be followed. `EF_TYPEF_04 = EF_HP`
 runs the other way and was already right.
 
+## Ghidra cannot always be made to help
+
+Three shapes defeat typing, and the answer to each is a name plus a comment,
+not a forced type:
+
+- **Mid-record pointers.** Entity_TakeProjectileHits walks the pool with a
+  pointer to each entity's State field - base + 0x20 - so `ShotState[-6]` is
+  Alive and `ShotState - 8` is the record base. Typing it TEntity * would be
+  wrong by 0x20. Named for where it points, with the index map in a comment.
+- **Merged locals.** Player_Update's `Scratch` is four source variables in one
+  slot. See above.
+- **Phantom parameters.** Game_StartOrLoad, Ending_Update and Opening_Update
+  were all typed as taking two arguments and take none; the "uses" were one
+  passing the phantom to the next. That single wrong arity produced AppIdle's
+  whole extraout_EDX chain. Fixing arity at the root cleared it - which is the
+  cheap version of the calling-convention problem, and worth trying before
+  reaching for conventions.
+
 ## Findings the typing pass turned up
 
 Making the code readable made three things visible that were not before:
