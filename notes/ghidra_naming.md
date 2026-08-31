@@ -363,21 +363,33 @@ not a forced type:
 
 ## Findings the typing pass turned up
 
-**The input path has no dead zone, and the game reads two of twelve axes.**
-Input_ReadJoyState (0x00454648, renamed from Input_ReadAxes, which named only
-half of it) copies a DIJOYSTATE from Dev+0x1B8. The offsets prove the layout:
-eight sign-reduced fields at 0x1B8..0x1D4 and four raw at 0x1D8..0x1E4, which
-is exactly lX,lY,lZ,lRx,lRy,lRz + rglSlider[2] + rgdwPOV[4], contiguous and
-correctly sized.
+**The input block is a Win32 DIJOYSTATE, and the game reads two of its
+twelve axes.** Dev+0x1B8 is the structure
+IDirectInputDevice8::GetDeviceState fills under the c_dfDIJoystick format:
+lX, lY, lZ, lRx, lRy, lRz, rglSlider[2], rgdwPOV[4], rgbButtons[32] - 80
+bytes. The binary states that size rather than implying it: Input_PollDevice
+zeroes the block with FillChar(Dev + 0x1B8, 0x50).
 
-The eight axes go through Input_Sign (0x00454630), which returns -1, 0 or +1
-with NO threshold - so on an analog stick the faintest drift reads as full
-deflection. The four POVs are copied raw, correctly, since a POV is a
-direction in hundredths of a degree rather than a magnitude.
+Getting this from the documented structure rather than from the offsets fixed
+a mistake. A first pass read the eight sign-reduced ints and four raw ones as
+the whole thing and put a 256-byte key array after them; in fact the array at
+0x1E8 is rgbButtons[32], INSIDE the joystate. Two documented details then stop
+being magic numbers: Input_IsKeyDown's `> 0x7F` is MSDN's "the high-order bit
+is set if the button is down", and the POVs are copied raw because a POV is a
+direction in hundredths of a degree with -1 as centre, so signing one would
+turn centre into "left".
+
+The eight axes go through Input_Sign (0x00454630), which returns -1, 0 or +1.
+A dead zone DOES exist - Input_ApplyDeadZone, keyed on
+TInputDevice.RangePercent - but no instruction writes that field and the form
+sets only DebugOption on TDDIDEX, so it is an identity. (An earlier version of
+this entry said there was no dead zone in the path at all. There is one; it is
+switched off.)
 
 AppIdle, the only caller, reads Out[0] and Out[1] - sign(lX) and sign(lY) -
 and nothing else. Sliders and hats are dead weight. This game is played on two
-digital axes.
+digital axes, and the keyboard path fakes them by driving lX/lY to the
++-0x7FFF extremes a fully deflected stick would report.
 
 Making the code readable made three things visible that were not before:
 

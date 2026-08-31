@@ -298,6 +298,108 @@ public class ApplyAkujiTypes extends GhidraScript {
             }
         }
 
+        // ---- TJoyState = the Win32 DIJOYSTATE, from dinput.h ----
+        // This is not inferred from offsets. It is the documented Windows
+        // structure IDirectInputDevice8::GetDeviceState fills when the data
+        // format is c_dfDIJoystick, quoted from MSDN:
+        //
+        //   typedef struct DIJOYSTATE {
+        //       LONG  lX;             // usually left-right on the stick
+        //       LONG  lY;             // usually forward-back
+        //       LONG  lZ;             // often the throttle
+        //       LONG  lRx, lRy, lRz;  // rotations; lRz is often the rudder
+        //       LONG  rglSlider[2];   // the old u- and v-axes
+        //       DWORD rgdwPOV[4];     // POV hats
+        //       BYTE  rgbButtons[32];
+        //   } DIJOYSTATE, *LPDIJOYSTATE;
+        //
+        //   24 + 8 + 16 + 32 = 80 bytes = 0x50
+        //
+        // and the binary agrees to the byte: FUN_00454158 zeroes the block
+        // with Delphi_FillChar(Dev + 0x1B8, 0x50), keeps a stack mirror of
+        // exactly that shape - six LONGs, a pair, four, then 32 bytes - and
+        // copies it back with a 0x14-dword move.
+        //
+        // Two documented details the code depends on:
+        //
+        //   rgbButtons: "The high-order bit of the byte is set if the
+        //   corresponding button is down". That is exactly Input_IsKeyDown's
+        //   `> 0x7F` test - it is the DirectInput convention, not a magic
+        //   number.
+        //
+        //   rgdwPOV: "the position is indicated in hundredths of a degree
+        //   clockwise from north", centre normally -1. A POV is therefore a
+        //   DIRECTION, not a magnitude, which is why Input_ReadJoyState
+        //   copies the four hats raw while signing all eight axes - signing a
+        //   hat would turn its -1 centre into "left" and 27000 into "right".
+        //
+        // Field names below drop the array brackets Ghidra cannot express;
+        // Slider0/1, POV0..3 and Buttons are rglSlider, rgdwPOV, rgbButtons.
+        StructureDataType joy = new StructureDataType("TJoyState", 0);
+        add(joy, "lX");
+        add(joy, "lY");
+        add(joy, "lZ");
+        add(joy, "lRx");
+        add(joy, "lRy");
+        add(joy, "lRz");
+        add(joy, "Slider0");
+        add(joy, "Slider1");
+        add(joy, "POV0");
+        add(joy, "POV1");
+        add(joy, "POV2");
+        add(joy, "POV3");
+        joy.add(new ArrayDataType(ByteDataType.dataType, 32, 1), 32, "Buttons", null);
+        DataType joyT = put(dtm, joy, 0x50);
+
+        // ---- TInputDevice ----
+        // The component's own object. Only the fields the game layer or
+        // FUN_00454158 actually touch are named; the rest is left as filler
+        // rather than guessed at.
+        //
+        // KeyBind1/KeyBind2 are two 32-entry tables of scan codes, one per
+        // virtual button - the keyboard path ORs local key state through both
+        // into Buttons, so each button has two bindings. RangePercent scales
+        // the synthesised axis extremes (+-0x7FFF, the DirectInput full
+        // deflection) by a percentage.
+        StructureDataType dev = new StructureDataType("TInputDevice", 0x228);
+        i(dev, 0x2c, "DIKeyboard");
+        i(dev, 0x30, "DIDevice0");
+        dev.replaceAtOffset(0x78, new ArrayDataType(IntegerDataType.dataType, 32, 4),
+                            128, "KeyBind1", null);
+        dev.replaceAtOffset(0x118, new ArrayDataType(IntegerDataType.dataType, 32, 4),
+                            128, "KeyBind2", null);
+        dev.replaceAtOffset(0x1b8, joyT, 0x50, "Joy", null);
+        i(dev, 0x220, "RangePercent");
+        i(dev, 0x224, "ActiveKind");
+        DataType devT = put(dtm, dev, 0x228);
+        DataType devPtr = dtm.getPointer(devT);
+        DataType joyPtr = dtm.getPointer(joyT);
+
+        // Apply BY ADDRESS, never by name. Setting a prototype renames the
+        // function to whatever identifier the string carries, so a wrong
+        // address silently retypes AND renames the wrong code - which has
+        // happened twice here. See notes/ghidra_naming.md.
+        Function rjs = getFunctionAt(toAddr(0x00454648));   // Input_ReadJoyState
+        if (rjs != null && rjs.getParameterCount() > 1) {
+            rjs.getParameter(0).setDataType(devPtr, SourceType.USER_DEFINED);
+            rjs.getParameter(0).setName("Dev", SourceType.USER_DEFINED);
+            rjs.getParameter(1).setDataType(joyPtr, SourceType.USER_DEFINED);
+            rjs.getParameter(1).setName("Out", SourceType.USER_DEFINED);
+            println("  Input_ReadJoyState(TInputDevice *, TJoyState *)");
+        }
+        Function ikd = getFunctionAt(toAddr(0x004546c4));   // Input_IsKeyDown
+        if (ikd != null && ikd.getParameterCount() > 1) {
+            ikd.getParameter(0).setDataType(devPtr, SourceType.USER_DEFINED);
+            ikd.getParameter(0).setName("Dev", SourceType.USER_DEFINED);
+            println("  Input_IsKeyDown(TInputDevice *, int)");
+        }
+        Function poll = getFunctionAt(toAddr(0x00454158));  // the device poll
+        if (poll != null && poll.getParameterCount() > 0) {
+            poll.getParameter(0).setDataType(devPtr, SourceType.USER_DEFINED);
+            poll.getParameter(0).setName("Dev", SourceType.USER_DEFINED);
+            println("  poll @ 0x00454158 (TInputDevice *, ...)");
+        }
+
         println("");
         println("functions:");
         int done = 0, skipped = 0;
