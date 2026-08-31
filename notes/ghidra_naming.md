@@ -522,10 +522,54 @@ Do not tidy the prefixes away. State, A9_Dying, B0's timer, B1/B2's child refs
 and B3_Shots do hold across types, and they keep the prefix anyway so the
 block layout stays legible.
 
+## The CompareStr trap - read the instructions, not the listing
+
+Every string comparison in this binary decompiles WRONG, in the same way, and
+it is the single most dangerous artifact in the project.
+
+Delphi compiles `if S = T then` as a call to the RTL helper @LStrCmp followed
+by a `jne`. The helper reports its answer in the FLAGS, not in EAX. Ghidra
+models it as an ordinary function whose result is discarded, so the following
+branch has no visible condition - and the decompiler fills that hole with
+WHATEVER BOOLEAN IT HAS LYING AROUND, usually one computed dozens of lines
+earlier for something unrelated.
+
+The shape to recognise:
+
+    Delphi_CompareStr(a, b);        <- result apparently thrown away
+    if ((bool)uVar9) { ... }        <- uVar9 assigned far above, from nothing
+                                       to do with strings
+
+Read that as `if a = b then { ... }`. Some sites are even more obviously
+broken - MessageBox_Update has `bVar10 = true; Delphi_CompareStr(...); if
+(!bVar10)`, which as written is dead code and is in fact a live branch.
+
+26 functions in the binary call CompareStr and discard the result. FOUR are
+ours: TFrm_main_DDDD1Init, EventScript_Execute, Events_SpawnNearCamera and
+MessageBox_Update. All four were checked against the instructions and all four
+are already correct in src/, but two of them only because an earlier session
+hit the same trap and fixed it - EventRunner's music arm still carries the
+comment "this used to pass True unconditionally and ignore both".
+
+What the four actually test, so nobody has to re-derive it:
+
+  DDDD1Init          [disp] fullscreen = 'on'          (case-SENSITIVE)
+  EventScript_Execute  column 15 = '1' -> store track
+                       column 13 = '0' -> play once, else loop (both branches
+                       call Kbgm_FadePlay; only the loop argument differs)
+  Events_SpawnNearCamera  ParamA[6] against '/', 'A', 'M', 'R', 'J', '*' -
+                       six consecutive string constants at 0x00454EB4..0x00454EF0
+  MessageBox_Update    the markers \w \e \k \n and the full-width
+                       space 0x81 0x40
+
+If a fifth site ever turns up, disassemble it. `objdump -D -b binary -m i386
+--adjust-vma=0x400C00 --start-address=0x... akuji_ver101/akuji.exe` is enough:
+look for `call` immediately followed by a conditional jump.
+
 ## Independent agreements, which are the only ones that count
 
-Twenty-eight so far, all written into src/*.pas from the disassembly BEFORE
-this pass and none of them typed into Ghidra:
+Thirty so far, all written into src/*.pas from the disassembly BEFORE this
+pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
   Progress[+0x4A2]. Same for RANK_PCT 50/70/90 and RANK_TIME 1800.
@@ -614,6 +658,13 @@ this pass and none of them typed into Ghidra:
   when system.ini is missing". All of that holds, and the section/ident split
   is confirmed twice over - once from ReadString's register convention and
   once from the SHIPPED system.ini, which is data rather than code.
+- EventRunner.pas: the music sub-op stores the track when column 15 is '1'
+  and loops unless column 13 is '0'. The binary has an if/else where BOTH
+  arms call Kbgm_FadePlay and only the loop argument differs, which is exactly
+  what the Pascal's single call with a computed loop flag collapses to.
+- EventRunner.pas: ParamA's six letters '*', '/', 'A', 'M', 'R', 'J', and the
+  note that "every one of the 692 records carries one of the six letters".
+  There are exactly six string constants, consecutive, at 0x00454EB4.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
