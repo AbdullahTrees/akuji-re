@@ -374,11 +374,25 @@ up in the input unit within an hour and they needed opposite methods:
     the API.
 
   * The 40-entry KeyBind tables are the AUTHOR'S OWN, and are fully derivable
-    from the binary. Input_SetKeyBinding indexes them as
-    Dev + Which * 0xA0 + 0x78, so the stride is 40 ints; 0x78 + 0xA0 = 0x118
-    and 0x118 + 0xA0 = 0x1B8, the joystate, so they tile the gap exactly; and
-    Input_IsVirtualDown is called with indices up to 0x27, which needs the
-    extra eight. Three independent facts, no external reference.
+    from the binary. DirectInput_Init clears them with a nested loop running
+    `while (iVar2 != 0x28)` over two tables - the count stated outright - and
+    Input_SetKeyBinding's 0xA0 stride, the 0x78 + 0xA0 = 0x118 and
+    0x118 + 0xA0 = 0x1B8 tiling, and Input_IsVirtualDown's 0x27 indices all
+    agree with it.
+
+    The same function then writes the DEFAULTS, which decode the eight
+    direction indices without any reasoning about axis folding at all:
+    KeyBind1[0x20..0x23] are the arrow keys and KeyBind2[0x20..0x27] are
+    numpad 8 2 4 6 7 9 1 3 - the four cardinals then the four corners, in
+    that order.
+
+  * A THIRD case sits between the two. The vtable slot numbers (+0x1C
+    Acquire, +0x24 GetDeviceState, +0x64 Poll) come from dinput.h's
+    declaration order. MSDN's interface pages list members ALPHABETICALLY, so
+    fetching one does not confirm a slot - that has to come from the header,
+    or be corroborated internally from behaviour, as the Acquire/GetDeviceState
+    retry pairing does here. Knowing which kind of page you are reading is
+    part of the method.
 
 The tell is whose code fills the memory. A block a Win32 function writes needs
 the API; a block only this program writes can be pinned from strides, bounds

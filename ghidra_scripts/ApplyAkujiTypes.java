@@ -352,35 +352,54 @@ public class ApplyAkujiTypes extends GhidraScript {
         DataType joyT = put(dtm, joy, 0x50);
 
         // ---- TInputDevice ----
-        // The component's own object. Only the fields the game layer or
-        // FUN_00454158 actually touch are named; the rest is left as filler
-        // rather than guessed at.
+        // Laid out from DirectInput_Init (0x00453BDC), which creates or
+        // initialises every one of these fields, plus Input_PollDevice which
+        // consumes them. Offsets below 0x28 are still the component's own and
+        // are left as filler rather than guessed at.
         //
-        // KeyBind1/KeyBind2 are two FORTY-entry tables of scan codes, one
-        // per virtual input, and every input has two bindings - the keyboard
-        // path ORs the local key state through both.
+        //   0x28  IDirectInput8 itself - DirectInputCreateA's result.
+        //         vtable +0x0C is CreateDevice, +0x10 EnumDevices.
+        //   0x2C  keyboard device      } both get SetDataFormat (+0x2C) and
+        //   0x30  mouse device         } SetCooperativeLevel (+0x34) at init
+        //   0x34  a TList of joystick GUIDs, built during enumeration
+        //   0x38  the joystick devices, indexed [Kind - 2] by
+        //         Input_PollDevice - its `0x30 + Kind * 4` is this array. The
+        //         extent is pinned from OUTSIDE: KeyBind1 starts at 0x78, so
+        //         there is room for exactly 16.
+        //   0x78  KeyBind1[40], 0x118 KeyBind2[40]
+        //   0x1B8 the DIJOYSTATE
+        //   0x208 how many joysticks were found
+        //   0x20C 18 per-joystick flag bytes
+        //   0x21F set around EnumDevices to steer the callback
+        //   0x220 RangePercent, 0x224 ActiveKind
         //
-        // Forty, not thirty-two, and this one IS derivable from the binary
-        // with no external reference. Input_SetKeyBinding addresses them as
-        // Dev + Which * 0xA0 + 0x78, and 0xA0 is 40 ints; 0x78 + 0xA0 is
-        // 0x118 and 0x118 + 0xA0 is 0x1B8, the start of the joystate, so the
-        // pair fills 0x78..0x1B7 exactly. Input_IsVirtualDown confirms it
-        // from the other side by being called with indices up to 0x27.
+        // FORTY entries per bind table is not inferred here either -
+        // DirectInput_Init clears them with a nested loop that runs
+        // `while (iVar2 != 0x28)` over two tables.
         //
-        //   0..31   the 32 rgbButtons
-        //   32..39  up, down, left, right and the four diagonals, which the
-        //           keyboard path folds into lX/lY at +-0x7FFF
-        //
-        // RangePercent is the dead-zone percentage Input_ApplyDeadZone reads.
-        // Nothing writes it, so the dead zone is off.
+        // The eight direction inputs at bind indices 0x20..0x27 are confirmed
+        // by their DEFAULTS, which that function writes literally:
+        //   KeyBind1[0x20..0x23] = 0xC8 0xD0 0xCB 0xCD   up down left right
+        //   KeyBind2[0x20..0x27] = 0x48 0x50 0x4B 0x4D 0x47 0x49 0x4F 0x51
+        //                          numpad 8 2 4 6 7 9 1 3
+        // Numpad 7/9/1/3 are the corners, so indices 0x24..0x27 are up-left,
+        // up-right, down-left, down-right - the same order the axis folding
+        // implies, arrived at independently.
         StructureDataType dev = new StructureDataType("TInputDevice", 0x228);
+        i(dev, 0x28, "DInput");
         i(dev, 0x2c, "DIKeyboard");
-        i(dev, 0x30, "DIDevice0");
+        i(dev, 0x30, "DIMouse");
+        i(dev, 0x34, "JoyList");
+        dev.replaceAtOffset(0x38, new ArrayDataType(IntegerDataType.dataType, 16, 4),
+                            64, "DIJoystick", null);
         dev.replaceAtOffset(0x78, new ArrayDataType(IntegerDataType.dataType, 40, 4),
                             160, "KeyBind1", null);
         dev.replaceAtOffset(0x118, new ArrayDataType(IntegerDataType.dataType, 40, 4),
                             160, "KeyBind2", null);
         dev.replaceAtOffset(0x1b8, joyT, 0x50, "Joy", null);
+        i(dev, 0x208, "JoyCount");
+        arr(dev, 0x20c, 0x12, "JoyFlags");
+        b(dev, 0x21f, "EnumPass");
         i(dev, 0x220, "RangePercent");
         i(dev, 0x224, "ActiveKind");
         DataType devT = put(dtm, dev, 0x228);
