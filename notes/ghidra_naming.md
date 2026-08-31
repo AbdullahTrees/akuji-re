@@ -414,6 +414,20 @@ The tell is whose code fills the memory. A block a Win32 function writes needs
 the API; a block only this program writes can be pinned from strides, bounds
 and the addresses either side of it.
 
+**The default controls, recovered end to end.** DirectInput_Init writes the
+bind tables; DDDD1Init seeds Settings.KeyMap to 0, 1, 2, 3; AppIdle reads
+Button[i] as Input_IsKeyDown(Dev, KeyMap[i]). Those KeyMap values are BIND
+INDICES, so the chain resolves to:
+
+    Button 0   Z  or Space      Button 2   C
+    Button 1   X  or Escape     Button 3   A
+    directions arrow keys, or numpad 8/2/4/6 with 7/9/1/3 for the diagonals
+
+Every scan code checked against dinput.h's DIK_ defines rather than recalled.
+It corroborates two readings made elsewhere without any of this: AppIdle's
+pause hotkey is Button[2], and type 65 waits on the rising edge of Button[1] -
+which this says are C and X.
+
 **The input block is a Win32 DIJOYSTATE, and the game reads two of its
 twelve axes.** Dev+0x1B8 is the structure
 IDirectInputDevice8::GetDeviceState fills under the c_dfDIJoystick format:
