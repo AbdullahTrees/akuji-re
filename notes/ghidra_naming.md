@@ -634,14 +634,30 @@ those cite the TABLE address (0x46Cxxx) while what needs naming is the
 POINTER CELL (0x0046Dxxx) that holds it, so they cannot be mined
 mechanically - each still needs its handler read.
 
-Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
-entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
-effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign),
-21 (the platform), 22, 24 (the key items), 25, 26 (the GET popup),
-27 (the save point), 28 (unplaced), 29 (the proximity idle), 32 (the
-emitter), 33 (the explosion), 36 (the falling item), 37 (the dropper),
-30 (the patroller), 31/35 (the floater and its telegraph), 34 (its shot),
-38/39 (the turret and its beam).
+Done so far: 2..16, 21..30, 31..56, 58, 59, 60..65, 77, 79. Named by role
+where the role is established: the item, switch, sign, save point, key items,
+GET popup, emitter, explosion, launch pad, hopper, slammer, crumbling
+platform, chaser, spitter, bouncer, lunger, patrolling turret, homer, the
+three bosses and their fireballs, the proximity bloom, the diver, the fleer,
+the ceiling dropper, the gunner.
+
+STILL TO DO: types 66..76, 78, 80, and type 1 (the player, which is large).
+Also Events_SpawnNearCamera's remaining locals, Load_Sprite_Sheets, DDDD1Init.
+
+Recurring shapes worth knowing before reading a new one:
+
+- Facing is a signed SPEED in types 21, 30, 41 and 50, and a PHASE or
+  oscillator in types 24, 42, 49, 52, 54, 58 and 65. It is an actual heading
+  in only a minority of handlers.
+- A handler with a state it writes but has no arm for is waiting on a CHILD:
+  types 31 (state 3, child 35), 38 (state 4, child 39), 50 (states 3 and 4,
+  child 39).
+- `(x >> 5 ^ x >> 0x1f) - (x >> 0x1f)` after a `+ 0x1f` is abs(dx) in tiles -
+  the wake test in types 46, 49 and 59.
+- A difficulty table entry of -1 disables the thing it counts: types 42 and
+  56 both guard with `-1 <`.
+- Only types 52 and 54 pace themselves off their own current HP.
+- Only types 40 and 65 read the input state.
 
 ## What is left
 
