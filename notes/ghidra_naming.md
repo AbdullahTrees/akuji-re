@@ -320,6 +320,12 @@ Making the code readable made three things visible that were not before:
 - **Entity_PlayerTouch returns an uninitialised byte.** local_34 is declared,
   never assigned, returned. Every caller ignores it, so nothing depends on the
   garbage - but it is not a "did it touch" boolean and must not be read as one.
+- **Entity_BoxesOverlap returns a boolean Ghidra dropped.** It was typed void
+  while Rect_Overlap's result sits in AL, so every caller looked like it was
+  ignoring the answer. The asymmetry inside it is real and deliberate: box A
+  is built unscaled, box B scaled by ScaleX/ScaleY - which is exactly what
+  Entities.pas does with EntityBox(A, 1, 1) against EntityBox(B, ScaleX,
+  ScaleY).
 - **Player_TakeDamage takes an int, not an entity.** It was in the script's
   entity list by mistake, and the wrong type surfaced immediately at the call
   site as `Player_TakeDamage((TEntity *)0x1)`. Entity_PlayerTouch calls it with
@@ -408,7 +414,9 @@ Input_ReadAxes, EntityUpdate_Type76, Delphi_Trim, Delphi_Format,
 Delphi_MakeRect, Delphi_StrClr, Delphi_StrArrayClr, Delphi_StrLen,
 Delphi_StrAsg, Delphi_ClassCreate, Delphi_DynArraySetLength, Delphi_Random.
 
-Globals: p_EntityTypes, p_SpriteList, p_IconAnim, p_LifeIconX,
+Also Delphi_StrCatN, TileMap_Create, Delphi_DynArraySetLength.
+
+Globals: p_TileBuffer, p_EntityTypes, p_SpriteList, p_IconAnim, p_LifeIconX,
 p_StageGoalTable, p_MessageTable, p_MessageText, p_PromptFrameX,
 p_AnswerIndex, p_HitSoundTable, p_BgAnime, p_EndingSurface, p_TileBuffer,
 p_EntitiesLive, p_EntitiesDrawn, p_LevelNames, p_LevelVariants, p_KeyNames,
