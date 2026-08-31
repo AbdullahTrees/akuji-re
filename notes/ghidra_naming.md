@@ -51,6 +51,17 @@ bugs, not guessed:
     00484fb4  OnTopOfSolid
     00484ef4  SolidThreshold
     00484ef8  KillTile
+    0046d154  p_MidiNames        the playlist; +8 is index 2, gameover
+    0046d1f0  p_PanelSurface     the power-up panel picture
+    0046d35c  p_SpriteList       the 256-entry TList GameState_Reset walks
+    0046d314  p_ScreenShakeOn    byte
+    0046ced0  p_ScreenShakeTimer
+    0046cc98  p_MessagePageStart the message box's five, all cleared together
+    0046cf24  p_MessageReveal    by GameState_Reset
+    0046cf28  p_MessageMode
+    0046cd00  p_OverlayActive
+    0046cda0  p_OverlayMode
+    0046cba4  p_RevealTimer
 
 ## Functions renamed
 
@@ -61,6 +72,13 @@ bugs, not guessed:
     0045114c  Compare              returns 0, -1 if B < A, +1 if A < B
     00402ac4  Delphi_Random
     0044d31c  SpritePool_DrawBucket
+    00450cbc  Kbgm_StopOrFade      the six music wrappers. Kbgm_IsPlaying is
+    00450f14  Kbgm_Play            the one the game-over screen waits on, and
+    00450f74  Kbgm_FadePlay        it tail-calls a KBGMGetInfo predicate
+    00450fd0  Kbgm_IsPlaying
+    00450edc  Kbgm_RememberCurrent the power-up panel's save/restore pair
+    00450ef0  Kbgm_ResumeRemembered
+    0044dc48  Fader_StartFade
 
 ## Prototypes set
 
@@ -84,7 +102,23 @@ read from the DEFINITION or a call site every time, never assumed:
     Terrain_Configure(TileMap, Surface, TerrainId)
     Load_Stage_Assets(Form, StageRow)      Load_Surface_Textures(Form, SetIndex)
     Load_Sprite_Sheets(Form, SetIndex)     SpritePool_DrawBucket(Pool, Depth)
-    Delphi_Random(N)
+    Delphi_Random(N)                       Fader_StartFade(Fader, Mode, FadeOut)
+    Kbgm_StopOrFade(Device, FadeSeconds)   Kbgm_Play/FadePlay(Device, Name, Loop)
+
+## Locals named
+
+    Angle_Between            Dx, Dy, Base, Step, I
+    Rect_Overlap             BoxA, BoxB, Overlaps
+    Entity_IsOffScreen       PixelX, PixelY, Off
+    Camera_ShouldScrollY     PixelY, LayerPixelY
+    Camera_ApplyMoveX/Y      OriginBefore, OriginAfter
+    Entity_CheckKillTiles    Row, RowsLeft, Tile
+    GameOver_Update          Rect, MusicPlaying, Confirm
+    EventScript_AdvanceStep  FlagIndex, Alternatives, StepText, FlagText, Chosen
+
+Entity_CheckKillTiles reuses its scratch ints - iVar3 is both the bottom row
+and the column cursor - so only the three unambiguous ones were named. A wrong
+name inside a loop is worse than iVar3.
 
 `Entity_SolidCollideX/Y` takes the entity AND a slot, and the body works off
 the SLOT - the entity argument is unused. Named `E` anyway, because that is
