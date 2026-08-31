@@ -729,7 +729,7 @@ look for `call` immediately followed by a conditional jump.
 
 ## Independent agreements, which are the only ones that count
 
-Thirty-six so far, all written into src/*.pas from the disassembly BEFORE
+Thirty-seven so far, all written into src/*.pas from the disassembly BEFORE
 this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -855,6 +855,12 @@ this pass and none of them typed into Ghidra:
   Solid 2), only X guards on Delta <> 0, and only Y sets OnTopOfSolid,
   EF_RIDDEN and a PushX that includes the layer scroll. The constants match
   too - SOLID_PHASE_VULN $5C, SOLID_TOP_TOLERANCE 8, scan range 0x21..0xFF.
+- Dialogue.pas: the power-up panel is dismissed by the MUSIC finishing, and
+  "without the stop the looping stage music keeps IsPlaying true forever and
+  the overlay never closes". Overlay_Update's gate is exactly Kbgm_IsPlaying,
+  and the not-playing branch is what calls EventScript_AdvanceStep. The Pascal
+  had the mechanism and the failure mode - it hit that softlock and diagnosed
+  it - before the gate function had a name here.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
