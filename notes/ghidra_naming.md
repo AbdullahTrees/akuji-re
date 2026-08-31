@@ -235,6 +235,28 @@ places is worse than an honest vague one.
 `Blocked` in the same function is packed rather than reused: bit 0 is the X
 result and bit 8 the Y, which is why it reads back as `Blocked._1_1_`.
 
+## Typing a generic function: TList_Get
+
+The awkward case. `TList.Get` is a VCL method returning an untyped pointer, so
+typing its return `TSprite *` looks like it asserts something false about a
+generic container - and it would, if the assertion were about TList.
+
+It is not. Every call site in the binary passes `p_SpriteList`: 20 of 20
+across the whole export, and the two that look different are GameState_Reset
+hoisting the same pointer into a local. So the type is a statement about how
+THIS PROGRAM uses the function, which is exactly what a decompilation should
+record.
+
+Two things make that honest rather than convenient:
+
+- it was **measured** before being applied, not assumed from the one function
+  that happened to be open;
+- a decompiler comment on the function says what the type rests on, so the
+  next person can see it is wrong the moment a second list appears.
+
+The alternative - typing the local at each call site - fails here anyway,
+because Ghidra merges those locals with unrelated uses in the same function.
+
 ## Aliases are how the field names went wrong twice
 
 Both mistakes in the struct came from the same blind spot: our constants name

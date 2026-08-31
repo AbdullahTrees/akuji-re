@@ -229,7 +229,33 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(li, "X"); add(li, "Frame"); add(li, "Timer");
         DataType lifeicon = put(dtm, li, 0x0C);
 
+        // The sprite object the sprite list holds. Only the fields the game
+        // touches are named; the rest of the object is left undefined, which
+        // is fine because it is only ever reached through a pointer.
+        StructureDataType sp = new StructureDataType("TSprite", 0x40);
+        i(sp, 0x1C, "AnimId");
+        i(sp, 0x2C, "X");
+        i(sp, 0x30, "Y");
+        i(sp, 0x34, "Depth");
+        b(sp, 0x3D, "Visible");
+        DataType sprite = put(dtm, sp, 0x40);
+
         DataType entPtr = dtm.getPointer(ent);
+
+        // TList.Get is generic in the VCL, but in THIS binary every one of its
+        // call sites passes p_SpriteList - checked across the whole export, 20
+        // of 20 - so typing the return TSprite * is correct here rather than a
+        // convenient lie. If a second list is ever read through it, this is
+        // wrong at that site and the comment on the function says so.
+        Function tlg = getFunctionAt(toAddr(0x0044cfb8));
+        if (tlg != null) {
+            try {
+                tlg.setReturnType(dtm.getPointer(sprite), SourceType.USER_DEFINED);
+                println("  TList_Get returns TSprite *");
+            } catch (Exception ex) {
+                println("  SKIP TList_Get return: " + ex.getMessage());
+            }
+        }
 
         println("");
         println("functions:");
