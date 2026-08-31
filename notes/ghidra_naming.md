@@ -398,6 +398,35 @@ triple is the Delphi try/finally SEH frame, whose only reader is the OS
 unwinder. A script CAN set conventions; the right Ghidra convention name for
 Borland register has not been confirmed, so nothing has been forced yet.
 
+## Named in the second pass
+
+Functions: TileMap_TileAt, TileMap_SetTile, TileMap_Create, TileMap_Draw,
+SpritePool_SortByDepth, SpritePool_DrawBucket, Fader_Tick, Fader_StartFade,
+BgAnime_Tick, Credits_Create, Credits_Tick, Surface_AppendEntry,
+Game_OnOffText, Game_RGB, Sound_Channel, Sound_SetVolume, Input_IsKeyDown,
+Input_ReadAxes, EntityUpdate_Type76, Delphi_Trim, Delphi_Format,
+Delphi_MakeRect, Delphi_StrClr, Delphi_StrArrayClr, Delphi_StrLen,
+Delphi_StrAsg, Delphi_ClassCreate, Delphi_DynArraySetLength, Delphi_Random.
+
+Globals: p_EntityTypes, p_SpriteList, p_IconAnim, p_LifeIconX,
+p_StageGoalTable, p_MessageTable, p_MessageText, p_PromptFrameX,
+p_AnswerIndex, p_HitSoundTable, p_BgAnime, p_EndingSurface, p_TileBuffer,
+p_EntitiesLive, p_EntitiesDrawn, p_LevelNames, p_LevelVariants, p_KeyNames,
+p_OmakeNames, p_RankNames, p_EndingTexts, p_EndingTextIds,
+p_EndingImageIds, p_EndingSlideSeconds, p_SprGround, p_SprAir, p_SprGlide,
+p_SprAirDash, p_SprDeath, p_SprKnockback, LastProbeTileX, LastProbeTileY.
+
+Comments carrying what a name cannot: Player_Update (the merged Scratch
+slot), Entity_UpdateAll (the sprite record offsets and the state guards),
+Entity_Spawn (the slot ranges and the two ten-int clears), Entity_Destroy
+(why it must free the sprite), Entity_PlayerTouch (the uninitialised
+return), Entity_TakeProjectileHits (the mid-record pointer's index map),
+Entity_SolidCollideY (branchless abs, scan ranges), Entity_TileCollideY
+(what Scrolling selects), EventScript_Execute (the opcode map),
+Ending_Update (the six phases and the unlock thresholds), Load_StageTable
+(the column gap), TFrm_main_AppIdle (the frame order), TList_Get (what its
+return type rests on).
+
 ## What is left
 
 - ~960 `DAT_`/`PTR_DAT_` symbols still unnamed. Only the ones whose meaning a
