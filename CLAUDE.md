@@ -224,6 +224,27 @@ The exception is a decode that genuinely needs several functions in view at once
 - opcode 9 needed the touch handlers plus the shipped data together - and even
 there, write each one before moving on rather than deferring all of them.
 
+## 3c. NEVER LEAVE A MUTANT BINARY ON DISK
+
+`src/akuji.exe` is the file the user plays. A mutation check builds a
+DELIBERATELY BROKEN game into it, and every second between that build and the
+rebuild-after-restore is a second the user can launch it.
+
+That is not hypothetical. On 2026-08-31 a session was played against a mutant
+whose `TPlayerState` had `Lives` and `MaxLives` swapped, and the bug report -
+no music, no game-over screen - sent me hunting through the music engine, the
+playlist, the save file and the game-over wiring. All of it was fine. The
+binary was not.
+
+So: **restore and rebuild in the SAME command as the mutation run**, never in
+the next one. Chain it - `mutate && build && run; restore && build` - so no
+turn boundary, no tool result, and no user message can land in between. If a
+mutation run is interrupted, rebuild before doing anything else.
+
+And when a bug report arrives, check `src/akuji.exe` is newer than the sources
+and the tree is clean BEFORE reading any code. It is one command and it would
+have saved the whole hunt.
+
 ## 11a. Gotcha: unit names can shadow LazUtils and break LCL
 
 A unit called `Maps.pas` broke the build with
