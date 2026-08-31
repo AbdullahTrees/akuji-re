@@ -274,6 +274,29 @@ The rule that falls out: **the semantic name beats the table-column or
 range-marker name**, and aliases have to be followed. `EF_TYPEF_04 = EF_HP`
 runs the other way and was already right.
 
+## Findings the typing pass turned up
+
+Making the code readable made three things visible that were not before:
+
+- **TEntityType's columns name themselves.** Entity_Spawn copies every column
+  of the 0x48-byte type record into a named entity field, so the table's
+  layout is evidence from the binary rather than a name carried over: AnimId,
+  Hp, Depth, TouchKind, Class, ScreenSpace, VulnKind, +0x1C (never copied,
+  so still unnamed), NoDrop, HitSound, CullOffscreen, BoxPctX/Y, InsetPctX/Y,
+  Solid, TileOfsX/Y. It also confirms the "crossover" Entities.pas noted:
+  column 1 goes to Hp and column 2 to Depth.
+- **Entity_PlayerTouch returns an uninitialised byte.** local_34 is declared,
+  never assigned, returned. Every caller ignores it, so nothing depends on the
+  garbage - but it is not a "did it touch" boolean and must not be read as one.
+- **Player_TakeDamage takes an int, not an entity.** It was in the script's
+  entity list by mistake, and the wrong type surfaced immediately at the call
+  site as `Player_TakeDamage((TEntity *)0x1)`. Entity_PlayerTouch calls it with
+  1 for touch kind 1 and 2 for kind 7.
+
+The last one is the pattern worth noting: a wrong type does not hide, it shows
+up as an absurd cast at the first call site. Reading the callers after a typing
+pass is how you check the pass.
+
 ## Two things that will bite the next person
 
 **Ghidra renumbers `iVarN` after every rename.** Rename `iVar1` and the old

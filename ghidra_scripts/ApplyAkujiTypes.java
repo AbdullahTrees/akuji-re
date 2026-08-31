@@ -240,6 +240,21 @@ public class ApplyAkujiTypes extends GhidraScript {
         b(sp, 0x3D, "Visible");
         DataType sprite = put(dtm, sp, 0x40);
 
+        // The entity type table, stride 0x48. Every column is named by where
+        // Entity_Spawn COPIES it into the entity, which is evidence from the
+        // binary rather than a name carried over from the reconstruction -
+        // TEntityType is a raw int array on our side. +0x1C is the one column
+        // Entity_Spawn does not copy, so it stays unnamed.
+        StructureDataType et = new StructureDataType("TEntityType", 0);
+        add(et, "AnimId");    add(et, "Hp");        add(et, "Depth");
+        add(et, "TouchKind"); add(et, "Class");     add(et, "ScreenSpace");
+        add(et, "VulnKind");  add(et, "Field1C");   add(et, "NoDrop");
+        add(et, "HitSound");  add(et, "CullOffscreen");
+        add(et, "BoxPctX");   add(et, "BoxPctY");   add(et, "InsetPctX");
+        add(et, "InsetPctY"); add(et, "Solid");     add(et, "TileOfsX");
+        add(et, "TileOfsY");
+        DataType enttype = put(dtm, et, 0x48);
+
         DataType entPtr = dtm.getPointer(ent);
 
         // TList.Get is generic in the VCL, but in THIS binary every one of its
@@ -274,7 +289,7 @@ public class ApplyAkujiTypes extends GhidraScript {
                 n.equals("Entity_Destroy") || n.equals("Entity_SpawnDebris") ||
                 n.equals("Entity_MaybeDropItem") || n.equals("Entity_UpdateDying") ||
                 n.equals("Entity_PlayerTouch") || n.equals("Entity_TakeProjectileHits") ||
-                n.equals("Player_TakeDamage") || n.equals("Entity_TouchPickup") ||
+                n.equals("Entity_TouchPickup") ||
                 n.equals("Entity_TouchLife") || n.equals("Entity_TouchHeal");
             if (!isHandler && !isEntityFn) continue;
             Parameter[] pp = f.getParameters();
@@ -290,6 +305,16 @@ public class ApplyAkujiTypes extends GhidraScript {
             }
         }
         println("  TEntity * applied to " + done + " functions, " + skipped + " skipped");
+        // NOT Player_TakeDamage: it takes an int damage amount, not an entity.
+        // Entity_PlayerTouch calls it as Player_TakeDamage(1) for touch kind 1
+        // and (2) for kind 7. It was in this list by mistake and the wrong
+        // type showed up at the call site as (TEntity *)0x1.
+        Function ptd = getFunctionAt(toAddr(0x00458138));
+        if (ptd != null && ptd.getParameterCount() > 0) {
+            ptd.getParameter(0).setDataType(IntegerDataType.dataType, SourceType.USER_DEFINED);
+            ptd.getParameter(0).setName("Amount", SourceType.USER_DEFINED);
+            println("  Player_TakeDamage(int Amount) - not an entity");
+        }
 
         println("");
         println("global pointer cells:");
@@ -328,6 +353,7 @@ public class ApplyAkujiTypes extends GhidraScript {
         typeCell(dtm, "p_SprGlide", i32);
         typeCell(dtm, "p_SprAirDash", i32);
         typeCell(dtm, "p_SprDeath", i32);
+        typeCell(dtm, "p_EntityTypes", enttype);
 
         println("");
         println("===== DONE - remember to save the project =====");
