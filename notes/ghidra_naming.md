@@ -709,7 +709,7 @@ look for `call` immediately followed by a conditional jump.
 
 ## Independent agreements, which are the only ones that count
 
-Thirty-five so far, all written into src/*.pas from the disassembly BEFORE
+Thirty-six so far, all written into src/*.pas from the disassembly BEFORE
 this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -829,6 +829,12 @@ this pass and none of them typed into Ghidra:
   exactly - and this is the strongest kind of agreement available, because a
   BUG is not something a plausible reimplementation would invent. Anyone
   writing a glide from scratch writes the clamp correctly.
+- Entities.pas: "Entity_SolidCollideX/Y ... the pair is NOT symmetric", and
+  then lists the three ways. Diffing the two decompiles finds exactly those
+  three and no others: softness is per axis (X skips Solid 1, Y skips
+  Solid 2), only X guards on Delta <> 0, and only Y sets OnTopOfSolid,
+  EF_RIDDEN and a PushX that includes the layer scroll. The constants match
+  too - SOLID_PHASE_VULN $5C, SOLID_TOP_TOLERANCE 8, scan range 0x21..0xFF.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
