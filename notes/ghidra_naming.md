@@ -516,6 +516,11 @@ and none of them typed into Ghidra:
   has no zero", fourteen bytes apart, and names Type 77 as the caller that
   needs it. Both true.
 
+- EntityHandlers.pas: types 9 and 13 are the only two that also run in
+  GS_PLAY_ALT - both handlers test state 0x3C or 100 and no other does.
+- EntityHandlers.pas: type 13 has "POS_Y += VEL_Y on two separate lines - so
+  debris falls at double the rate". It does, in states 1, 2 and 3.
+
 That direction is evidence. The reverse - Ghidra agreeing with names typed
 into it - is not. See the warning at the top.
 
