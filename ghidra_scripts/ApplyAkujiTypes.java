@@ -356,18 +356,30 @@ public class ApplyAkujiTypes extends GhidraScript {
         // FUN_00454158 actually touch are named; the rest is left as filler
         // rather than guessed at.
         //
-        // KeyBind1/KeyBind2 are two 32-entry tables of scan codes, one per
-        // virtual button - the keyboard path ORs local key state through both
-        // into Buttons, so each button has two bindings. RangePercent scales
-        // the synthesised axis extremes (+-0x7FFF, the DirectInput full
-        // deflection) by a percentage.
+        // KeyBind1/KeyBind2 are two FORTY-entry tables of scan codes, one
+        // per virtual input, and every input has two bindings - the keyboard
+        // path ORs the local key state through both.
+        //
+        // Forty, not thirty-two, and this one IS derivable from the binary
+        // with no external reference. Input_SetKeyBinding addresses them as
+        // Dev + Which * 0xA0 + 0x78, and 0xA0 is 40 ints; 0x78 + 0xA0 is
+        // 0x118 and 0x118 + 0xA0 is 0x1B8, the start of the joystate, so the
+        // pair fills 0x78..0x1B7 exactly. Input_IsVirtualDown confirms it
+        // from the other side by being called with indices up to 0x27.
+        //
+        //   0..31   the 32 rgbButtons
+        //   32..39  up, down, left, right and the four diagonals, which the
+        //           keyboard path folds into lX/lY at +-0x7FFF
+        //
+        // RangePercent is the dead-zone percentage Input_ApplyDeadZone reads.
+        // Nothing writes it, so the dead zone is off.
         StructureDataType dev = new StructureDataType("TInputDevice", 0x228);
         i(dev, 0x2c, "DIKeyboard");
         i(dev, 0x30, "DIDevice0");
-        dev.replaceAtOffset(0x78, new ArrayDataType(IntegerDataType.dataType, 32, 4),
-                            128, "KeyBind1", null);
-        dev.replaceAtOffset(0x118, new ArrayDataType(IntegerDataType.dataType, 32, 4),
-                            128, "KeyBind2", null);
+        dev.replaceAtOffset(0x78, new ArrayDataType(IntegerDataType.dataType, 40, 4),
+                            160, "KeyBind1", null);
+        dev.replaceAtOffset(0x118, new ArrayDataType(IntegerDataType.dataType, 40, 4),
+                            160, "KeyBind2", null);
         dev.replaceAtOffset(0x1b8, joyT, 0x50, "Joy", null);
         i(dev, 0x220, "RangePercent");
         i(dev, 0x224, "ActiveKind");

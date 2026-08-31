@@ -363,6 +363,27 @@ not a forced type:
 
 ## Findings the typing pass turned up
 
+**Where a struct comes from decides how you recover it.** Two structs turned
+up in the input unit within an hour and they needed opposite methods:
+
+  * TJoyState is a WINDOWS structure. No amount of staring at the binary gives
+    you rgbButtons' "high-order bit means down" or the POV's "hundredths of a
+    degree, -1 for centre" - those are documented facts about DIJOYSTATE, and
+    reading them off MSDN corrected a layout that had been inferred wrongly
+    from offsets alone. When a struct is filled by a Win32 call, go and read
+    the API.
+
+  * The 40-entry KeyBind tables are the AUTHOR'S OWN, and are fully derivable
+    from the binary. Input_SetKeyBinding indexes them as
+    Dev + Which * 0xA0 + 0x78, so the stride is 40 ints; 0x78 + 0xA0 = 0x118
+    and 0x118 + 0xA0 = 0x1B8, the joystate, so they tile the gap exactly; and
+    Input_IsVirtualDown is called with indices up to 0x27, which needs the
+    extra eight. Three independent facts, no external reference.
+
+The tell is whose code fills the memory. A block a Win32 function writes needs
+the API; a block only this program writes can be pinned from strides, bounds
+and the addresses either side of it.
+
 **The input block is a Win32 DIJOYSTATE, and the game reads two of its
 twelve axes.** Dev+0x1B8 is the structure
 IDirectInputDevice8::GetDeviceState fills under the c_dfDIJoystick format:
