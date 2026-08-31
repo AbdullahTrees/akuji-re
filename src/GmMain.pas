@@ -287,7 +287,19 @@ begin
 
       The shipped file parses cleanly under both readings, so this changes
       nothing for the game as distributed. }
-    Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'system.ini');
+    { DataDir, not ExtractFilePath(ParamStr(0)). In the original those are the
+      SAME directory - akuji.exe ships inside the game folder next to
+      system.ini - so the original's "beside the executable" and "the game
+      directory" are one place. This rebuild lives in src/ and locates the
+      game data with FindGameData, which is why every other path here goes
+      through DataDir; system.ini was the one that did not, and it sent the
+      read into src/ where no ini exists.
+
+      That mattered once StrToInt below became faithful: a missing key returns
+      '' and the one-argument StrToInt RAISES, so the mismatch surfaced as
+      an "'' is an invalid integer" box at start-up. The original is not
+      reachable through that path because its two directories coincide. }
+    Ini := TIniFile.Create(DataDir + 'system.ini');
     try
       Settings.FullScreenFlag :=
         Ord(Ini.ReadString('disp', 'fullscreen', '') = 'on');
