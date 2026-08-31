@@ -397,11 +397,29 @@ pass is how you check the pass.
 either re-decompile between renames or rename `iVar1` repeatedly and check the
 result. `local_XX` names are address-derived and stable.
 
-**Look the address up in `exports/functions/_index.txt` FIRST.** On 2026-08-31
-`Camera_ApplyMoveY`'s prototype was set on 0x0044d31c from memory - which is
-the sprite depth-bucket draw - renaming and re-typing the wrong function. It
-was caught by decompiling to check, and repaired. One grep would have
-prevented it.
+**`set_function_prototype` RENAMES the function.** The identifier inside the
+prototype string becomes the function's name. That makes a wrong address
+doubly destructive: it retypes AND renames whatever is there, and the damage
+is silent because the call reports success.
+
+This has now happened TWICE, the second time after the first was written up
+here:
+
+  * 2026-08-31 - `Camera_ApplyMoveY`'s prototype set on 0x0044d31c from
+    memory, which is the sprite depth-bucket draw.
+  * later the same day - `Input_ReadAxes`'s prototype set on 0x004546e8,
+    which is a unit-init stub. The real Input_ReadAxes is 0x00454648. The
+    result was two functions in the symbol tree both called Input_ReadAxes,
+    which is how the user spotted it, and a long comment about a 12-int
+    device snapshot sitting on a function that increments a counter.
+
+**Look the address up FIRST** - `grep` the name in
+`exports/functions/_index.txt`, or call `search_functions_by_name` and read
+the address back. Both incidents were one lookup away from not happening.
+
+**And check for duplicates afterwards.** `search_functions_by_name` on the
+name you just used should return exactly one address. If it returns two, one
+of them is a function you have just destroyed the name of.
 
 ## Types: run ghidra_scripts/ApplyAkujiTypes.java
 
