@@ -2920,8 +2920,19 @@ procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
                                       World: TEntityWorld);
 
-{ 0x0045A4F0. One table lookup. It takes no game state because it does not read
-  any - it is the only handler that runs identically whatever the game is doing. }
+{ 0x0045A4F0. One table lookup, indexed by the variant. It takes no game state
+  because it does not read any.
+
+  CORRECTED: this used to call it "the only handler that runs identically
+  whatever the game is doing". It is not. FOUR handlers have no game-state
+  guard - 16, 17, 19 and 25 - and this file declares all four with the same
+  one-argument signature, so the claim was refutable from two screens away.
+  17 and 19 are empty, so the pair that actually DOES something unguarded is
+  16 and 25.
+
+  Those two are the same function shape twice: write a sprite, then compute
+  GameState - GS_PLAY into EAX and return it, which nothing reads. See the
+  note on type 16 for why that dead subtraction is left as a comment. }
 procedure EntityUpdate_Type25(var E: TEntity);
 
 { 0x0045A540. The save point's idle animation. See SAVE_POINT_SPRITES for why

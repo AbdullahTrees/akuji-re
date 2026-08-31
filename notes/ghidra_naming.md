@@ -524,7 +524,7 @@ block layout stays legible.
 
 ## Independent agreements, which are the only ones that count
 
-Sixteen so far, all written into src/*.pas from the disassembly BEFORE this
+Twenty so far, all written into src/*.pas from the disassembly BEFORE this
 pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -570,6 +570,17 @@ pass and none of them typed into Ghidra:
   POSITION_SHIFT 5.
 - EntityHandlers.pas: type 28 "does nothing at all unless its variant is 0 -
   both the sprite and the animation are inside that test". Both are.
+- EntityHandlers.pas: type 24's frame counter "is compared against ZERO, so it
+  resets on the very frame it is incremented and the two frames alternate
+  every frame - vestigial rather than a speed control". The decompile bumps
+  B0_AnimTimer and tests `0 <`. Its EF_FACING-as-phase reading holds too, as
+  does the 16-entry flat table beside variant 8's 2-entry one.
+- EntityHandlers.pas: type 22 is "one sprite, and it can die - the only
+  difference from the sign is the Entity_UpdateDying call, whose result this
+  one also discards". Three lines, exactly that.
+- EntityHandlers.pas: type 26 is "the rising GET a collected pickup leaves,
+  its VARIANT saying which message to show". It rises 0x10 a frame and indexes
+  its table by Variant.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
@@ -598,7 +609,8 @@ mechanically - each still needs its handler read.
 Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
 entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
 effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign),
-21 (the platform), 28 (unplaced), 29 (the proximity idle).
+21 (the platform), 22, 24 (the key items), 25, 26 (the GET popup),
+27 (the save point), 28 (unplaced), 29 (the proximity idle).
 
 ## What is left
 
