@@ -524,8 +524,8 @@ block layout stays legible.
 
 ## Independent agreements, which are the only ones that count
 
-Twenty so far, all written into src/*.pas from the disassembly BEFORE this
-pass and none of them typed into Ghidra:
+Twenty-four so far, all written into src/*.pas from the disassembly BEFORE
+this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
   Progress[+0x4A2]. Same for RANK_PCT 50/70/90 and RANK_TIME 1800.
@@ -581,6 +581,26 @@ pass and none of them typed into Ghidra:
 - EntityHandlers.pas: type 26 is "the rising GET a collected pickup leaves,
   its VARIANT saying which message to show". It rises 0x10 a frame and indexes
   its table by Variant.
+- EntityHandlers.pas: the emitter's four block-A slots - EMIT_EVERY A[1],
+  EMIT_TOTAL A[2], EMIT_RADIUS A[3], EMIT_SOUND_EVERY A[4] - and the note that
+  "the exhaustion test is A[2] < B[1] AFTER the increment, so an emitter
+  configured for N spawns N + 1 times". Type 32 reads exactly those four and
+  has exactly that off-by-one. Entity_UpdateDying's two seedings, 8/2/1/2 and
+  4/32/4/1, are the two callers.
+- EntityHandlers.pas: type 6's "sprite ROW comes from block A[1], which
+  EntityUpdate_Type33_Explosion sets when it spawns one". Type 33 writes
+  A1_AirLatch = 0 on each of its six sparks - the claim names the caller from
+  inside the callee, which needed both functions read.
+- EntityHandlers.pas: type 33's "two speeds are drawn separately, so the
+  spread is an ellipse rather than a circle". Two independent Delphi_Random(3)
+  draws, one per axis.
+- EntityHandlers.pas: type 37 "divides AND takes the remainder, leaving the
+  quotient in EAX as a dead result". The decompile has `iVar1 = iVar2 / 5`
+  beside `Flag1c = iVar2 % 5`, and every one of the eight T37_ constants
+  matches to the value.
+- EntityHandlers.pas: type 36's "collision query and the move happen either
+  way, landed or not" - gravity is inside the State test, the probe and the
+  move are outside it.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
@@ -610,7 +630,8 @@ Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
 entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
 effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign),
 21 (the platform), 22, 24 (the key items), 25, 26 (the GET popup),
-27 (the save point), 28 (unplaced), 29 (the proximity idle).
+27 (the save point), 28 (unplaced), 29 (the proximity idle), 32 (the
+emitter), 33 (the explosion), 36 (the falling item), 37 (the dropper).
 
 ## What is left
 
