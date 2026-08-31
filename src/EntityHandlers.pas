@@ -490,6 +490,8 @@ const
 
   T21_TABLE_ADDR = $0046BE80;
   T21_SPRITE = 59;
+  { EF_STATE picks the axis, and the placement data is flush with these two
+    values: 12 records, arg 0 taking only 0 (ten times) and 1 (twice). }
   T21_AXIS_VERTICAL   = 0;
   T21_AXIS_HORIZONTAL = 1;
 
@@ -7917,7 +7919,15 @@ begin
     Exit;
 
   Inc(E.Raw[EF_BLOCK_B]);
-  { The half-period is block A[1], which ParamA's 'R' letter sets. }
+  { The half-period is block A[1]. CORRECTED: this used to credit ParamA's
+    'R' letter. Both 'M' and 'R' write that field, but every one of the 12
+    shipped type-21 placements uses 'M' - see tools/entity_usage.py --type 21.
+
+    'M' is also where the speed comes from, and it arrives disguised: the
+    letter writes EF_FACING := Arg(2) shl 3, meaning it as a heading in
+    eighths of the 64-step turn. Type 21 does not read it as a heading at all,
+    it adds it to a coordinate. The placements pass -4, so Facing holds -32,
+    which at POSITION_SHIFT 5 is exactly one pixel a frame. }
   if E.Raw[EF_BLOCK_B] > E.Raw[EF_BLOCK_A + 1] then
   begin
     E.Raw[EF_BLOCK_B] := 0;

@@ -501,7 +501,7 @@ effort belongs on 0x454790..0x4671FF and the game helpers clustered around
 
 ## Independent agreements, which are the only ones that count
 
-Thirteen so far, all written into src/*.pas from the disassembly BEFORE this
+Sixteen so far, all written into src/*.pas from the disassembly BEFORE this
 pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -540,6 +540,17 @@ pass and none of them typed into Ghidra:
   `return *p_GameState + -0x3c;`. This one is the strongest of the set: a dead
   result is invisible in behaviour, so nothing but reading the disassembly
   could have produced the claim.
+- EntityHandlers.pas: type 29 "animates at two speeds: ten ticks a frame
+  normally, four when the player's box overlaps its own, tested at three times
+  width and one times height. It also drops itself 2 pixels on its very first
+  frame." All four numbers hold, the drop being PosY += 0x40 at
+  POSITION_SHIFT 5.
+- EntityHandlers.pas: type 28 "does nothing at all unless its variant is 0 -
+  both the sprite and the animation are inside that test". Both are.
+- EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
+  and EF_FACING is "a speed here and not a heading". The handler adds Facing
+  to a coordinate and negates it on a timer, and the placement data's arg 0 is
+  flush at 0..1 - twelve records, no third value.
 
 That direction is evidence. The reverse - Ghidra agreeing with names typed
 into it - is not. See the warning at the top.
@@ -563,7 +574,8 @@ mechanically - each still needs its handler read.
 
 Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
 entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
-effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign).
+effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign),
+21 (the platform), 28 (unplaced), 29 (the proximity idle).
 
 ## What is left
 
