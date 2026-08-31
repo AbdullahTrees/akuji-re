@@ -709,7 +709,7 @@ look for `call` immediately followed by a conditional jump.
 
 ## Independent agreements, which are the only ones that count
 
-Thirty-four so far, all written into src/*.pas from the disassembly BEFORE
+Thirty-five so far, all written into src/*.pas from the disassembly BEFORE
 this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -824,6 +824,11 @@ this pass and none of them typed into Ghidra:
   running counter from 0, and spr001.dat's first line is the 32x32 character
   sheet, so id 0 is literally its top-left cell. The shipped data confirms a
   claim the Pascal made from the type table alone.
+- Player.pas: "Player_UpdateGlide clamps the VERTICAL velocity by writing the
+  HORIZONTAL one, twice", quoting both lines and both constants. It does,
+  exactly - and this is the strongest kind of agreement available, because a
+  BUG is not something a plausible reimplementation would invent. Anyone
+  writing a glide from scratch writes the clamp correctly.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
