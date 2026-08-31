@@ -21,6 +21,11 @@
  * BlockB_AnimTimer keeps its compound: +0x48 is the first of ten per-entity
  * timers and the only semantic name we have for it is the player's.
  *
+ * ALIASES COUNT TOO. Entities.pas declares EF_DEPTH = EF_TYPEF_08, an alias to
+ * another constant rather than to a literal, which a first pass missed - so
+ * +0x8C was briefly Typef08 when Entity_UpdateAll plainly uses it as the
+ * sprite depth, clamped 1..0xF0 when it is not -1. It is Depth.
+ *
  * Run from the Script Manager. Safe to re-run: types are replaced, not added.
  * ADD EVERY NEW STRUCT HERE as it is discovered, so one run brings the project
  * up to date with the reconstruction.
@@ -115,7 +120,7 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(e, "VelX");
         add(e, "VelY");
         add(e, "Facing");
-        add(e, "Typef08");
+        add(e, "Depth");
         add(e, "Hp");
         add(e, "Byte94");
         add(e, "ExtentX");

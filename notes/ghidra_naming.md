@@ -235,6 +235,23 @@ places is worse than an honest vague one.
 `Blocked` in the same function is packed rather than reused: bit 0 is the X
 result and bit 8 the Y, which is why it reads back as `Blocked._1_1_`.
 
+## Aliases are how the field names went wrong twice
+
+Both mistakes in the struct came from the same blind spot: our constants name
+some slots twice, and a first pass picked the wrong one.
+
+- `EF_BLOCK_A = $08` is a RANGE MARKER, "10 ints, zeroed on spawn"; `EF_STATE`
+  is the field. Same for `EF_TYPEF_0C`/`EF_TOUCH_KIND` and
+  `EF_TYPEF_20`/`EF_NO_DROP`.
+- `EF_DEPTH = EF_TYPEF_08` is an alias to another CONSTANT rather than to a
+  literal, so a regex looking for `= $XX` never saw it. +0x8C was briefly
+  `Typef08` when Entity_UpdateAll plainly uses it as the sprite depth, clamped
+  1..0xF0 when it is not -1.
+
+The rule that falls out: **the semantic name beats the table-column or
+range-marker name**, and aliases have to be followed. `EF_TYPEF_04 = EF_HP`
+runs the other way and was already right.
+
 ## Two things that will bite the next person
 
 **Ghidra renumbers `iVarN` after every rename.** Rename `iVar1` and the old
