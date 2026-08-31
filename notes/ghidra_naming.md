@@ -483,6 +483,26 @@ The last one is the pattern worth noting: a wrong type does not hide, it shows
 up as an absurd cast at the first call site. Reading the callers after a typing
 pass is how you check the pass.
 
+## Delphi Booleans: use bool in a prototype, BOOLEAN on a local
+
+A Delphi Boolean is ONE BYTE holding 0 or 1, returned in AL. Ghidra shows an
+untyped one as `char` and every test against it as `== ''`, which reads
+like a magic number and is not one.
+
+Typing them is worth doing - `if (AgainstPlayer)` and `!SkipSoft` beat
+`AgainstPlayer == ''` - but the two type-setting paths resolve the NAME
+differently:
+
+  in a prototype string   `bool` is correct and gives the one-byte type
+  on a local variable     `bool` resolves to /WinDef.h/BOOL, a FOUR-byte int.
+                          On a one-byte slot that yields `Hit._0_1_ = ' '`
+                          and a "variable defined which should be unmapped"
+                          warning. Pass BOOLEAN instead.
+
+Done so far: Entity_SolidCollideX and Entity_SolidCollideY, both returning
+Boolean with two Boolean parameters. Entity_IsOffScreen, Entity_UpdateDying
+and Input_IsKeyDown are the same shape and still untyped.
+
 ## Two things that will bite the next person
 
 **Ghidra renumbers `iVarN` after every rename.** Rename `iVar1` and the old
