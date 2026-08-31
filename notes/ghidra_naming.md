@@ -464,6 +464,26 @@ and none of them typed into Ghidra:
 That direction is evidence. The reverse - Ghidra agreeing with names typed
 into it - is not. See the warning at the top.
 
+## The handler tail: what actually remains
+
+Measured across the 77 EntityUpdate_Type* handlers: 186 distinct unnamed
+globals and 187 distinct locals, so roughly 2.4 of each per handler.
+
+The structs already did the heavy lifting - a typical handler now reads
+`E->State`, `E->VelX`, `p_EntityPool[slot].Facing` throughout, and what is
+left is its OWN tables: a sprite table indexed by animation frame, and one or
+two difficulty-keyed tables of speeds or delays. Those carry the meaning, so
+they are the half worth naming; the leftover iVarN are short-lived scratch
+whose role is obvious from the line they appear on.
+
+18 of the 77 already carry a substantial comment from earlier sessions, but
+those cite the TABLE address (0x46Cxxx) while what needs naming is the
+POINTER CELL (0x0046Dxxx) that holds it, so they cannot be mined
+mechanically - each still needs its handler read.
+
+Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
+entities in one handler), 60 (the ledge walker), 23 (the torch).
+
 ## What is left
 
 - ~960 `DAT_`/`PTR_DAT_` symbols still unnamed. Only the ones whose meaning a
