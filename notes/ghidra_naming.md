@@ -679,8 +679,8 @@ look for `call` immediately followed by a conditional jump.
 
 ## Independent agreements, which are the only ones that count
 
-Thirty-two so far, all written into src/*.pas from the disassembly BEFORE this
-pass and none of them typed into Ghidra:
+Thirty-four so far, all written into src/*.pas from the disassembly BEFORE
+this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
   Progress[+0x4A2]. Same for RANK_PCT 50/70/90 and RANK_TIME 1800.
@@ -785,6 +785,15 @@ pass and none of them typed into Ghidra:
   at 6, 11, 16, 21, 26, 31 and 36 - variant, both extents and all four box
   percentages". That arm exists, buried under the CompareStr artifact as a
   six-deep `if (!bVar9)` nest, and reads exactly those seven offsets.
+- AudioMixer.pas: "0x39 iterations, which is SOUND_COUNT". Sounds_LoadAll
+  really does loop 0x39 times, SoundTable.pas declares exactly 57 SND_
+  constants, and akuji_ver101/wav holds exactly 57 files - three sources, two
+  of them outside the code.
+- EntityHandlers.pas: the type 16 note says an untranslated entity "wears
+  sprite 0, which is Akuji standing". Load_Sprite_Sheets assigns ids as a
+  running counter from 0, and spr001.dat's first line is the 32x32 character
+  sheet, so id 0 is literally its top-left cell. The shipped data confirms a
+  claim the Pascal made from the type table alone.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
