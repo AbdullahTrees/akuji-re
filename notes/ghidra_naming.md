@@ -363,6 +363,22 @@ not a forced type:
 
 ## Findings the typing pass turned up
 
+**The input path has no dead zone, and the game reads two of twelve axes.**
+Input_ReadJoyState (0x00454648, renamed from Input_ReadAxes, which named only
+half of it) copies a DIJOYSTATE from Dev+0x1B8. The offsets prove the layout:
+eight sign-reduced fields at 0x1B8..0x1D4 and four raw at 0x1D8..0x1E4, which
+is exactly lX,lY,lZ,lRx,lRy,lRz + rglSlider[2] + rgdwPOV[4], contiguous and
+correctly sized.
+
+The eight axes go through Input_Sign (0x00454630), which returns -1, 0 or +1
+with NO threshold - so on an analog stick the faintest drift reads as full
+deflection. The four POVs are copied raw, correctly, since a POV is a
+direction in hundredths of a degree rather than a magnitude.
+
+AppIdle, the only caller, reads Out[0] and Out[1] - sign(lX) and sign(lY) -
+and nothing else. Sliders and hats are dead weight. This game is played on two
+digital axes.
+
 Making the code readable made three things visible that were not before:
 
 - **TEntityType's columns name themselves.** Entity_Spawn copies every column
