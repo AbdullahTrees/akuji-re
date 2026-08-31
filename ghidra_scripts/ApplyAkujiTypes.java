@@ -13,6 +13,14 @@
  * the field Entity_CheckKillTiles clears and the death timer PS_DYING counts.
  * Offsets with no name are Field<offset>, never a guess.
  *
+ * Where our own constants give a slot two names, the SEMANTIC one wins over a
+ * range marker: EF_BLOCK_A is "10 ints, zeroed on spawn" and EF_STATE is
+ * "block A[0]: per-type state", so +0x20 is State, not BlockA. Same for
+ * TouchKind over EF_TYPEF_0C and NoDrop over EF_TYPEF_20, both of which mark
+ * the start of a run copied from the type table rather than naming the field.
+ * BlockB_AnimTimer keeps its compound: +0x48 is the first of ten per-entity
+ * timers and the only semantic name we have for it is the player's.
+ *
  * Run from the Script Manager. Safe to re-run: types are replaced, not added.
  * ADD EVERY NEW STRUCT HERE as it is discovered, so one run brings the project
  * up to date with the reconstruction.
@@ -80,7 +88,7 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(e, "AnimId");
         add(e, "Variant");
         add(e, "Flag1c_AnimFrame");
-        add(e, "BlockA_State");
+        add(e, "State");
         add(e, "AirLatch");
         add(e, "Ridden_Landed");
         add(e, "FallFrames");
@@ -122,12 +130,12 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(e, "FieldBC");
         add(e, "FieldC0");
         add(e, "FieldC4");
-        add(e, "TouchKind_Typef0c");
+        add(e, "TouchKind");
         add(e, "Class");
         add(e, "ScreenSpace");
         add(e, "VulnKind");
         add(e, "FieldD8");
-        add(e, "NoDrop_Typef20");
+        add(e, "NoDrop");
         add(e, "HitSound");
         add(e, "CullOffscreen");
         add(e, "BoxPctX");

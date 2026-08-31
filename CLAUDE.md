@@ -224,6 +224,18 @@ The exception is a decode that genuinely needs several functions in view at once
 - opcode 9 needed the touch handlers plus the shipped data together - and even
 there, write each one before moving on rather than deferring all of them.
 
+## 3d. GHIDRA'S NAMES ARE OUR NAMES. THEY ARE NOT EVIDENCE.
+
+On 2026-08-31 the reconstruction's names, structs and prototypes were pushed
+INTO the Ghidra project. So the decompilation now uses our field names because
+we typed them there, not because anything confirmed them.
+
+**Never cite a Ghidra symbol as evidence for the Pascal.** `E->BlockA_State`
+agreeing with `EF_STATE` is not corroboration, it is an echo. Evidence is the
+raw disassembly, the bytes, or a differential test - the same standard as
+before. notes/ghidra_naming.md grades which names were read off behaviour and
+which were imported on trust.
+
 ## 3c. NEVER LEAVE A MUTANT BINARY ON DISK
 
 `src/akuji.exe` is the file the user plays. A mutation check builds a

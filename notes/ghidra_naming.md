@@ -8,6 +8,46 @@ Everything here was applied through the Ghidra MCP against
 `ghidra/Akuji_AIdecompAttempt`. **Ghidra must be saved** (File > Save) for any
 of it to survive; the MCP edits the open project, it does not commit it.
 
+## THE NAMES ARE NOW CIRCULAR EVIDENCE. Read this first.
+
+The goal is a decompilation that says what the BINARY does. These names came
+from the Pascal, so where the Pascal was wrong the decompilation is now wrong
+in the same direction - and worse, it looks corroborated.
+
+**Ghidra agreeing with src/*.pas proves nothing about either.** It agrees
+because the agreement was typed in on 2026-08-31. Anything that cites a field
+or function name here as evidence for the reconstruction is arguing in a
+circle. Only the disassembly, the raw bytes and a differential test are
+evidence.
+
+This is not theoretical. 0x0046D334 was recorded as "the save slot cursor" for
+a long time before it was proved to be the script step index - if this pass had
+run a week earlier, Ghidra would now assert p_SaveSlotCursor and the mistake
+would have looked confirmed by two independent projects.
+
+Names carry different weights, and it is worth knowing which is which:
+
+- **Read off behaviour, safe.** Compare (returns -1/0/+1 on its two arguments),
+  Angle_Between (the 64-step atan2), Delphi_StrLen, Game_RGB (r|g<<8|b<<16),
+  Surface_AppendEntry (appends a 6-dword entry and bumps a count),
+  SpritePool_DrawBucket, Delphi_MakeRect. These were confirmed by reading the
+  function, not by matching a name.
+- **Confirmed by a bug or an audit, safe.** p_EventStepIndex, p_ScreenPhase,
+  p_KillTile, p_Fader, Kbgm_IsPlaying - each was established while fixing
+  something that turned on getting it right.
+- **Imported from the Pascal on trust, UNVERIFIED.** Most TEntity field names.
+  They came from the EF_/PF_ constants, which were themselves read out of the
+  disassembly when the reconstruction was built - so they are not invented, but
+  no one re-checked them during this pass. The compound names (BlockA_State,
+  ChildA_AirVx, Ridden_Landed) are the weakest: they exist because the entity
+  and player constant sets disagree about that slot, and the name asserts both
+  meanings hold always, which for a union-like field is not obviously true.
+- **Honest gaps.** Field64, Field68, Field6C, FieldBC, FieldC0, FieldC4,
+  FieldD8 - offsets our constants never named, left as offsets.
+
+If a field name is load-bearing for a decision, re-derive it from the
+disassembly before trusting it.
+
 ## Conventions
 
 | kind | convention | example |
