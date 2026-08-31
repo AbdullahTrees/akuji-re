@@ -386,13 +386,29 @@ up in the input unit within an hour and they needed opposite methods:
     numpad 8 2 4 6 7 9 1 3 - the four cardinals then the four corners, in
     that order.
 
-  * A THIRD case sits between the two. The vtable slot numbers (+0x1C
-    Acquire, +0x24 GetDeviceState, +0x64 Poll) come from dinput.h's
-    declaration order. MSDN's interface pages list members ALPHABETICALLY, so
-    fetching one does not confirm a slot - that has to come from the header,
-    or be corroborated internally from behaviour, as the Acquire/GetDeviceState
-    retry pairing does here. Knowing which kind of page you are reading is
-    part of the method.
+  * A THIRD case sits between the two: COM vtable slots. These need the
+    HEADER, and the header is on this machine -
+    /c/msys64/mingw64/include/dinput.h. Count STDMETHOD declarations inside
+    the DECLARE_INTERFACE_ block, four bytes each, including the three
+    inherited IUnknown entries. Verified there:
+
+      IDirectInputA         +0x0C CreateDevice  +0x10 EnumDevices
+      IDirectInputDevice2A  +0x08 Release       +0x1C Acquire
+                            +0x20 Unacquire     +0x24 GetDeviceState
+                            +0x2C SetDataFormat +0x34 SetCooperativeLevel
+                            +0x64 Poll
+
+    MSDN's interface pages CANNOT do this - they list members alphabetically.
+    I fetched one intending to confirm slot order and it confirms nothing of
+    the kind; the numbers above were recalled and only later checked against
+    the real header. Recalled is not sourced, and the note said "from
+    dinput.h" before anyone had opened dinput.h.
+
+    Reading the header also fixed the interface NAME. The entry point is
+    DirectInputCreateA, which is the pre-8 API returning LPDIRECTINPUTA, so
+    this game uses IDirectInputA / IDirectInputDevice2A - not the
+    IDirectInput8 pair the comments originally claimed. The slots coincide
+    across the shared prefix, so nothing downstream was wrong.
 
 The tell is whose code fills the memory. A block a Win32 function writes needs
 the API; a block only this program writes can be pinned from strides, bounds
