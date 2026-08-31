@@ -191,6 +191,42 @@ the sprite depth-bucket draw - renaming and re-typing the wrong function. It
 was caught by decompiling to check, and repaired. One grep would have
 prevented it.
 
+## Types: run ghidra_scripts/ApplyAkujiTypes.java
+
+Naming alone leaves the decompilation unreadable, because an entity is an int
+array: `E[8]` is a number, not a field. The script defines the two types the
+reconstruction actually pins and applies them:
+
+- **TEntity**, 65 ints, 260 bytes - the 0x104 stride the pool is indexed by.
+  Field names come from the EF_ and PF_ constants; 59 of the 65 have one. The
+  six that do not are `Field64`, `Field68`, `Field6C`, `FieldBC`, `FieldC0`,
+  `FieldC4`, `FieldD8`, named for their offset rather than guessed at.
+  Where a slot carries an entity AND a player meaning the name keeps both -
+  `BlockB_AnimTimer` is the field Entity_CheckKillTiles clears and the death
+  timer PS_DYING counts, one slot with two jobs.
+- **TLayerInfo**, 8 ints, 32 bytes - OriginX, OriginY, DeltaX, DeltaY, TileW,
+  TileH, MapTilesX, MapTilesY.
+
+It applies `TEntity *` to all 74 handlers and to the player, camera and entity
+helpers, and types the `p_LayerInfo` cell. After it, `E[8]` reads as
+`E->BlockA_State` and `*(int *)(p_LayerInfo + 0x14)` as `p_LayerInfo->TileH`.
+
+Script Manager, find ApplyAkujiTypes, Run. Safe to re-run - types are replaced,
+not duplicated. Verified with tools/javac_check.sh.
+
+## A limitation worth knowing: calling conventions
+
+The MCP cannot set one - `set_function_prototype` rejects any prototype
+carrying `__fastcall`. This matters because Delphi's register convention passes
+the first three arguments in EAX, EDX and ECX, and Ghidra's default model
+expects the stack. The symptom is `in_ECX`, `extraout_EDX` and
+`CONCAT31(param_2 >> 8, 0xdf)` at call sites: the decompiler inventing storage
+to explain register traffic its prototype does not account for. Those are not
+variables from the source, and neither are `uStack_40`/`puStack_3c` - that
+triple is the Delphi try/finally SEH frame, whose only reader is the OS
+unwinder. A script CAN set conventions; the right Ghidra convention name for
+Borland register has not been confirmed, so nothing has been forced yet.
+
 ## What is left
 
 - ~960 `DAT_`/`PTR_DAT_` symbols still unnamed. Only the ones whose meaning a
