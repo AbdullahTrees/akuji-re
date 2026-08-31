@@ -212,6 +212,10 @@ public class ApplyAkujiTypes extends GhidraScript {
         i(ev, 0x20, "BlockedBy");
         DataType evrec = put(dtm, ev, 0x24);
 
+        StructureDataType li = new StructureDataType("TLifeIcon", 0);
+        add(li, "X"); add(li, "Frame"); add(li, "Timer");
+        DataType lifeicon = put(dtm, li, 0x0C);
+
         DataType entPtr = dtm.getPointer(ent);
 
         println("");
@@ -256,6 +260,27 @@ public class ApplyAkujiTypes extends GhidraScript {
         typeCell(dtm, "p_InputState", input);
         typeCell(dtm, "p_Settings", settings);
         typeCell(dtm, "p_EventTable", dtm.getPointer(evrec));
+        typeCell(dtm, "p_LifeIcon", lifeicon);
+
+        // Cells holding the address of a flat int table. Typing them turns
+        // *(int *)(p_X + i * 4) into p_X[i].
+        DataType i32 = IntegerDataType.dataType;
+        typeCell(dtm, "p_LifeIconX", i32);
+        typeCell(dtm, "p_StageGoalTable", i32);
+        typeCell(dtm, "p_SprKnockback", i32);
+        typeCell(dtm, "p_DirX", i32);
+        typeCell(dtm, "p_DirY", i32);
+        typeCell(dtm, "p_OpeningSlideSeconds", i32);
+        typeCell(dtm, "p_OpeningTextIds", i32);
+
+        // Cells holding the address of a table of POINTERS - surfaces, the
+        // tilemaps, the midi playlist, the text table.
+        DataType anyPtr = dtm.getPointer(DataType.DEFAULT);
+        typeCell(dtm, "p_Surfaces", anyPtr);
+        typeCell(dtm, "p_TileMaps", anyPtr);
+        typeCell(dtm, "p_MidiNames", anyPtr);
+        typeCell(dtm, "p_TextTable", anyPtr);
+        typeCell(dtm, "p_OpeningImageIds", i32);
 
         println("");
         println("===== DONE - remember to save the project =====");

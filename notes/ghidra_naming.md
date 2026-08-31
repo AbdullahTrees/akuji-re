@@ -216,6 +216,14 @@ It also types the global pointer CELLS: p_LayerInfo, p_EntityPool,
 p_PlayerState, p_InputState, p_Settings and p_EventTable. Typing p_EntityPool
 is what turns `p_EntityPool + slot * 0x104` into an ordinary array index.
 
+It also types **TLifeIcon** (X, Frame, Timer) and the global TABLE cells. That
+last group is the difference between `*(int *)(p_Surfaces + 4)` and
+`p_Surfaces[1]`: a `p_` cell holds an address, so giving the cell a pointee
+type makes every use an index. Applied to the int tables - p_LifeIconX,
+p_StageGoalTable, p_SprKnockback, p_DirX, p_DirY, p_OpeningSlideSeconds,
+p_OpeningTextIds, p_OpeningImageIds - and to the pointer tables p_Surfaces,
+p_TileMaps, p_MidiNames and p_TextTable.
+
 EVERY NEW STRUCT GOES IN THIS SCRIPT as it is discovered, so a single run
 brings the project up to date with whatever the reconstruction has learned.
 
