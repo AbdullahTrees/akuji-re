@@ -524,7 +524,7 @@ block layout stays legible.
 
 ## Independent agreements, which are the only ones that count
 
-Twenty-four so far, all written into src/*.pas from the disassembly BEFORE
+Twenty-six so far, all written into src/*.pas from the disassembly BEFORE
 this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -601,6 +601,14 @@ this pass and none of them typed into Ghidra:
 - EntityHandlers.pas: type 36's "collision query and the move happen either
   way, landed or not" - gravity is inside the State test, the probe and the
   move are outside it.
+- EntityHandlers.pas: type 31 is "a floating attacker. Six states, three
+  difficulty tables, and a child entity that drives the transition this
+  handler cannot make itself." All three counts hold, and the missing
+  transition is exactly state 3 - type 31 writes state 3 and has no arm for
+  it. Type 35 is the child, and it writes state 4 back onto its owner.
+- EntityHandlers.pas: the same shape turns up again in type 38, whose missing
+  arm is state 4 and whose child is type 39. Neither was known when the
+  type 31 note was written.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
@@ -631,7 +639,9 @@ entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
 effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign),
 21 (the platform), 22, 24 (the key items), 25, 26 (the GET popup),
 27 (the save point), 28 (unplaced), 29 (the proximity idle), 32 (the
-emitter), 33 (the explosion), 36 (the falling item), 37 (the dropper).
+emitter), 33 (the explosion), 36 (the falling item), 37 (the dropper),
+30 (the patroller), 31/35 (the floater and its telegraph), 34 (its shot),
+38/39 (the turret and its beam).
 
 ## What is left
 
