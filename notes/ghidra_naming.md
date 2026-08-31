@@ -62,6 +62,11 @@ bugs, not guessed:
     0046cd00  p_OverlayActive
     0046cda0  p_OverlayMode
     0046cba4  p_RevealTimer
+    0046d320  p_LifeIcon           +0 x, +4 frame, +8 timer
+    0046d098  p_LifeIconX          the four x values 19, 38, 57, 38
+    0046d2b4  p_StageGoalTable     12 entries, indexed by TargetIndex +0x11DC
+    0046d094  p_OpeningSlideSeconds  per-slide duration, x0x3C for frames
+    0046ce88  p_OpeningTextIds     indexes into p_TextTable
 
 ## Functions renamed
 
@@ -79,6 +84,11 @@ bugs, not guessed:
     00450edc  Kbgm_RememberCurrent the power-up panel's save/restore pair
     00450ef0  Kbgm_ResumeRemembered
     0044dc48  Fader_StartFade
+    00407d44  Delphi_Trim          the RTL helpers that appear everywhere;
+    00408a30  Delphi_Format        Trim and Format are named in the HUD_Draw
+    0040e9dc  Delphi_MakeRect      audit, MakeRect builds every draw rect
+    00406aa8  Game_RGB             r, g, b -> TColor, which is BGR. Dialogue.pas
+                                   documents it off the DrawTextOutlined sites
 
 ## Prototypes set
 
@@ -114,7 +124,25 @@ read from the DEFINITION or a call site every time, never assumed:
     Camera_ApplyMoveX/Y      OriginBefore, OriginAfter
     Entity_CheckKillTiles    Row, RowsLeft, Tile
     GameOver_Update          Rect, MusicPlaying, Confirm
-    EventScript_AdvanceStep  FlagIndex, Alternatives, StepText, FlagText, Chosen
+    EventScript_AdvanceStep  FlagIndex, Alternatives, StepText, FlagText,
+                             Chosen, Part, Index
+    HUD_Draw                 Goal, CounterText, CounterTrimmed, CounterLine,
+                             Hours, Minutes, Seconds, TimeText
+    Opening_Update           Rect, BmpPath, QdaName, SlideImageId,
+                             StillRunning, MusicPlaying
+    Events_SpawnNearCamera   CamTileX, CamTileY - which is DIV-012 made
+                             visible: the camera tile comes from the TILE
+                             COMPONENT's scroll, not the layer origin
+
+HUD_Draw's local_1c is deliberately unnamed: it is the counter for the
+'%3d/%-3d' format AND the rect for every sprite draw afterwards. Same storage,
+two jobs, so any name is wrong half the time.
+
+## The 74 entity handlers
+
+Every `EntityUpdate_TypeNN` takes exactly one argument and it is the entity.
+All 74 single-argument handlers are now `(int * E)`, with the four that return
+a value (Type16, 25, 34, 37) keeping `int`. Type17 and Type19 take none.
 
 Entity_CheckKillTiles reuses its scratch ints - iVar3 is both the bottom row
 and the column cursor - so only the three unambiguous ones were named. A wrong
@@ -123,6 +151,32 @@ name inside a loop is worse than iVar3.
 `Entity_SolidCollideX/Y` takes the entity AND a slot, and the body works off
 the SLOT - the entity argument is unused. Named `E` anyway, because that is
 what every caller passes.
+
+## Self, and what is NOT a method
+
+This is Object Pascal, so a method's first parameter is `Self` in EAX and the
+declared parameters start at EDX. Where that is what is happening, the
+parameter is named `Self`: `TDDSD_PlaySound`, `Kbgm_Play`, `Kbgm_FadePlay`,
+`Kbgm_StopOrFade`, `Fader_StartFade`, `GameState_Reset`, `Load_Stage_Assets`,
+`Load_Surface_Textures`, `Load_Sprite_Sheets`, `SpritePool_DrawBucket`. Their
+callers pass an instance out of a form field - `*(int *)(*(int *)MainForm +
+0x2dc)` is the TDDSD - so `TDDSD_PlaySound(Self, SoundId, Restart)` is really
+a two-argument method, and naming the first `Device` hid that.
+
+**The entity handlers are NOT methods**, and it is worth writing down why,
+because they look like they should be:
+
+- NONE of the 76 `EntityUpdate_Type*` functions dispatch through a vtable on
+  their argument. Not one.
+- the argument is indexed at +0x14, +0x18, +0x1c, +0x20, +0x24, +0x48, +0x4c,
+  +0x78, +0x7c, +0x88 - the TEntity field offsets, not an object's.
+- callers pass `p_EntityPool + slot * 0x104`, an address INSIDE a flat record
+  array. An array of objects would be an array of pointers.
+
+So `TEntity` is a record and these are plain procedures over it. Their
+parameter is `E`, typed `int *`, which makes the decompiler index it the way
+our own constants do: `E[8]` IS `EF_STATE = $08`, `E[5]` is `EF_ANIM_ID`,
+`E[0x1e]` is `EF_POS_X`. The two projects now read the same.
 
 ## Two things that will bite the next person
 
