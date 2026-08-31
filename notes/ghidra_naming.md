@@ -501,8 +501,8 @@ effort belongs on 0x454790..0x4671FF and the game helpers clustered around
 
 ## Independent agreements, which are the only ones that count
 
-Five so far, all written into src/*.pas from the disassembly BEFORE this pass
-and none of them typed into Ghidra:
+Thirteen so far, all written into src/*.pas from the disassembly BEFORE this
+pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
   Progress[+0x4A2]. Same for RANK_PCT 50/70/90 and RANK_TIME 1800.
@@ -520,6 +520,26 @@ and none of them typed into Ghidra:
   GS_PLAY_ALT - both handlers test state 0x3C or 100 and no other does.
 - EntityHandlers.pas: type 13 has "POS_Y += VEL_Y on two separate lines - so
   debris falls at double the rate". It does, in states 1, 2 and 3.
+- EntityHandlers.pas: type 11 "tops the death timer back up whenever it
+  reaches zero, so this never actually dies of it". The handler does exactly
+  that, and type 12 - written up as "the same loop one tick slower, WITHOUT
+  the timer" - indeed lacks the top-up. The distinction was recorded before
+  either function was decompiled here.
+- EntityHandlers.pas: type 14's ITEM_VARIANTS = 2 and ITEM_FRAMES = 4, from
+  the table-extent argument alone. The handler indexes
+  `Variant * 0x10 + Frame * 4`, a row stride of exactly four ints.
+- EntityHandlers.pas: type 14's ITEM_SETTLE_DROP = 0xA0 fires once on the
+  State 0 -> 1 edge. Confirmed to the constant.
+- EntityHandlers.pas: type 15 is "two states in sequence, in two separate ifs
+  - so the frame that sets state 2 also runs the state-2 arm". It is, and the
+  placement data explains WHY state 2 needs to be its own entry point: all 8
+  shipped placements carry a '/' ParamA that sets EF_STATE := 2 when the
+  progress flag is set, so a revisited switch spawns already thrown.
+- EntityHandlers.pas: type 16 "computes GameState - GS_PLAY into EAX and
+  returns, which nothing reads". The decompile is literally
+  `return *p_GameState + -0x3c;`. This one is the strongest of the set: a dead
+  result is invisible in behaviour, so nothing but reading the disassembly
+  could have produced the claim.
 
 That direction is evidence. The reverse - Ghidra agreeing with names typed
 into it - is not. See the warning at the top.
@@ -542,7 +562,8 @@ POINTER CELL (0x0046Dxxx) that holds it, so they cannot be mined
 mechanically - each still needs its handler read.
 
 Done so far: Type 77 (the boss), 79 (its attachments), 57 (four unrelated
-entities in one handler), 60 (the ledge walker), 23 (the torch).
+entities in one handler), 60 (the ledge walker), 23 (the torch), 2..13 (the
+effect and debris entities), 14 (the item), 15 (the switch), 16 (the sign).
 
 ## What is left
 

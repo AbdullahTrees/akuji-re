@@ -8540,9 +8540,28 @@ begin
   Variant := E.Raw[EF_VARIANT];
   Frame := E.Raw[EF_FLAG1C];
   { The original indexes without bounds checks and would read past the table on
-    a bad variant. Clamping instead of faulting is the one deviation here, and
-    it cannot change behaviour for any shipped placement: the data's range is
-    0..15 and the table is 16 rows. }
+    a bad variant. Clamping instead of faulting is the one deviation here.
+
+    CORRECTED. This used to claim the range was 0..15 against a 16-row table.
+    That is TYPE 24's table, not this one: type 14's is 2 rows of 4 frames -
+    eight ints at 0x0046BDA0, bounded above by type 24's table at 0x0046BDC0 -
+    and the disassembly agrees, indexing it as `Variant * 0x10 + Frame * 4`
+    with a row stride of four ints. The wrong table's dimensions were copied
+    in with the surrounding prose.
+
+    The clamp is still unreachable for shipped data, but for its own reason
+    rather than type 24's. `tools/entity_usage.py akuji_ver101 --type 14`
+    finds 122 placements over 32 stages, every one of them opcode 9, and
+    their ParamA programs are only two: `0014-*` 91 times, which carries no
+    argument and leaves the field as Entity_Spawn left it, and `0014-A-001`
+    31 times. Kind 'A' is the one that writes EF_VARIANT - see EventRunner's
+    dispatch on ParamA[6] - and its argument here is 1 in all 31. So the
+    shipped variants are exactly 0 and 1, against a 2-row table.
+
+    That is the corroboration from the other side, and it is worth more than
+    either half: the table's extent says two rows, and the placement data
+    independently uses two. Frame needs no such argument - only the line
+    below writes it, mod ITEM_FRAMES. }
   { DIVERGENCE DIV-011: the original does not check. }
   if (Variant < 0) or (Variant >= ITEM_VARIANTS) then
     Variant := 0;
