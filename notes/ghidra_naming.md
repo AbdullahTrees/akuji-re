@@ -656,7 +656,16 @@ Recurring shapes worth knowing before reading a new one:
   the wake test in types 46, 49 and 59.
 - A difficulty table entry of -1 disables the thing it counts: types 42 and
   56 both guard with `-1 <`.
-- Only types 52 and 54 pace themselves off their own current HP.
+- Pacing a timer off the entity's OWN current HP is common, not rare: types
+  31, 42, 52, 54 and 73 all do it, with different arithmetic each time
+  (Hp * 10, Hp / 0x28, Hp / 2, Hp >> 2, and a plain multiply). Wounding such
+  an enemy makes it act SOONER.
+
+  CORRECTED. This line first said "only types 52 and 54". That superlative
+  came from a type 54 comment written by an earlier session and was repeated
+  here without being checked; type 73 falsified it two handlers later. Any
+  "only N does X" claim in this file is worth re-testing whenever a new
+  handler is read - three such claims have now been wrong.
 - Only types 40 and 65 read the input state.
 
 ## What is left
