@@ -641,8 +641,10 @@ platform, chaser, spitter, bouncer, lunger, patrolling turret, homer, the
 three bosses and their fireballs, the proximity bloom, the diver, the fleer,
 the ceiling dropper, the gunner.
 
-STILL TO DO: types 66..76, 78, 80, and type 1 (the player, which is large).
-Also Events_SpawnNearCamera's remaining locals, Load_Sprite_Sheets, DDDD1Init.
+ALL 77 handlers with an arm are now named, tabled and commented.
+
+STILL TO DO: type 1 (the player, which is large and is the last one), plus
+Events_SpawnNearCamera's remaining locals, Load_Sprite_Sheets and DDDD1Init.
 
 Recurring shapes worth knowing before reading a new one:
 
@@ -666,7 +668,15 @@ Recurring shapes worth knowing before reading a new one:
   here without being checked; type 73 falsified it two handlers later. Any
   "only N does X" claim in this file is worth re-testing whenever a new
   handler is read - three such claims have now been wrong.
-- Only types 40 and 65 read the input state.
+- Only types 40 and 65 read the input state (re-checked against every handler
+  through 80, unlike the HP claim above).
+- A child that writes a state back onto its owner is the game's main
+  composition device, not a special case: types 35, 39, 68, 74, 75 and 78 all
+  do it, and types 31, 38, 50, 73 and 77 all depend on one. Type 35 and type
+  75 are near-duplicates of each other, and type 73 uses one of each.
+- One type serving two or three unrelated things by Variant or State is
+  common: 55 (fireball/trail), 66 (anchor/satellite), 68 (hazard/prize),
+  70 (walker/stander), 72 (faller/flyer/trail), 74 (muzzle/shot), 80.
 
 ## What is left
 
