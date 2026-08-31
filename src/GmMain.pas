@@ -261,13 +261,38 @@ begin
     LoadSettings(DataDir);
 
     { system.ini sits beside the EXE, not in data\. Two fields, and both
-      overwrite what system.dat just supplied. }
+      overwrite what system.dat just supplied.
+
+      The section/ident split was read off the register convention - EDX is
+      ReadString's Section and ECX its Ident - and the SHIPPED system.ini
+      confirms it from the data side: it carries [disp] fullscreen and
+      [device] input, exactly those two pairs and nothing else.
+
+      Both reads are now byte-faithful. They used to be written defensively
+      and neither deviation was recorded:
+
+        * fullscreen was compared as LowerCase(Trim(s)) = 'on'. The original
+          calls @LStrCmp at 0x004656D8 and branches on the flags it sets -
+          a byte-exact, case-SENSITIVE compare against 'on'. So 'ON', 'On'
+          and ' on ' all give WINDOWED in the original and gave fullscreen
+          here. Removed.
+
+        * input was parsed with StrToIntDef(..., 0). The original calls
+          StrToInt at 0x00465708 with nothing in EDX, so it is the
+          one-argument form, which RAISES on anything it cannot parse -
+          including the empty string ReadString returns when system.ini or
+          the key is missing. Reproduced: a missing or malformed
+          [device] input takes the original down at start-up and now takes
+          this down too. That is not a bug we are entitled to fix.
+
+      The shipped file parses cleanly under both readings, so this changes
+      nothing for the game as distributed. }
     Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'system.ini');
     try
       Settings.FullScreenFlag :=
-        Ord(LowerCase(Trim(Ini.ReadString('disp', 'fullscreen', ''))) = 'on');
+        Ord(Ini.ReadString('disp', 'fullscreen', '') = 'on');
       Settings.InputDevice :=
-        StrToIntDef(Trim(Ini.ReadString('device', 'input', '')), 0);
+        StrToInt(Ini.ReadString('device', 'input', ''));
     finally
       Ini.Free;
     end;

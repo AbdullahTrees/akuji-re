@@ -524,7 +524,7 @@ block layout stays legible.
 
 ## Independent agreements, which are the only ones that count
 
-Twenty-six so far, all written into src/*.pas from the disassembly BEFORE
+Twenty-eight so far, all written into src/*.pas from the disassembly BEFORE
 this pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -609,6 +609,11 @@ this pass and none of them typed into Ghidra:
 - EntityHandlers.pas: the same shape turns up again in type 38, whose missing
   arm is state 4 and whose child is type 39. Neither was known when the
   type 31 note was written.
+- GmMain.pas: system.ini is read from beside the EXE with [disp] fullscreen
+  and [device] input, both overriding system.dat, and fullscreen "only stands
+  when system.ini is missing". All of that holds, and the section/ident split
+  is confirmed twice over - once from ReadString's register convention and
+  once from the SHIPPED system.ini, which is data rather than code.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
