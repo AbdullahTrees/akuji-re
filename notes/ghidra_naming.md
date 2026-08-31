@@ -57,6 +57,13 @@ disassembly before trusting it.
 | entity parameter | `E`, typed `int *` so `E[0x1f]` indexes the record in ints | `Camera_ApplyMoveY(int * E, ...)` |
 | other parameters | the name our Pascal gives the same argument | `Delta`, `Scrolling`, `SkipSoft` |
 | locals | the Pascal local's name where the roles line up | `Dx`, `Dy`, `Base`, `Step` |
+| throwaway locals | a single letter, as in a for-loop | `i`, `t`, `r`, `h` |
+
+A local that is a loop counter, a scratch temporary or a condition flag gets a
+single letter. Spending a descriptive name on one is worse than useless: it
+implies the value means something across the function when it does not, which
+is the same mistake `SavedVX` made in Player_Update. `i` for a counter, `t` for
+a slot that carries two unrelated values, `r` for a random draw.
 
 `p_` for pointer cells is not decoration. The original reaches most of its
 state through a pointer held in a fixed cell, so `p_LayerInfo` is the CELL and
