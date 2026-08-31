@@ -195,6 +195,10 @@ public class ApplyAkujiTypes extends GhidraScript {
         b(inp, 0x34, "AnyPressed");
         DataType input = put(dtm, inp, 0x38);
 
+        // Unknown2C is GalleryUnlocked: Title_MainMenu indexes it by
+        // GallerySel and draws ON or OFF from it, and Ending.pas already
+        // describes +0x2C..+0x32 as the seven gallery flags. Our record still
+        // calls it Unknown2C; the name here follows the evidence.
         StructureDataType gs = new StructureDataType("TGameSettings", 0x38);
         i(gs, 0x0, "CurrentStage");
         i(gs, 0x4, "GameLevel");
@@ -208,7 +212,7 @@ public class ApplyAkujiTypes extends GhidraScript {
         arr(gs, 0x1E, 6, "Unknown1E");
         i(gs, 0x24, "Volume");
         i(gs, 0x28, "GallerySel");
-        arr(gs, 0x2C, 7, "Unknown2C");
+        arr(gs, 0x2C, 7, "GalleryUnlocked");
         i(gs, 0x34, "InputDevice");
         DataType settings = put(dtm, gs, 0x38);
 

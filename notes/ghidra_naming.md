@@ -274,6 +274,19 @@ The rule that falls out: **the semantic name beats the table-column or
 range-marker name**, and aliases have to be followed. `EF_TYPEF_04 = EF_HP`
 runs the other way and was already right.
 
+## One place the two projects now disagree, on purpose
+
+`TGameSettings +0x2C` is `GalleryUnlocked` in Ghidra and `Unknown2C` in
+GameState.pas. The evidence is not in doubt - Title_MainMenu indexes it by
+GallerySel and draws ON or OFF from it, and Ending.pas copies
+Progress[1186..1192] into it when a run finishes, which our own declaration
+already says in a trailing comment. The Pascal keeps the placeholder name only
+because TGameSettings is a MATCHES row and therefore frozen: renaming the field
+needs approval and a matching change in --selftest-layouts.
+
+Worth renaming there too. Until then this file is the record that the two
+names are the same field.
+
 ## Ghidra cannot always be made to help
 
 Three shapes defeat typing, and the answer to each is a name plus a comment,
