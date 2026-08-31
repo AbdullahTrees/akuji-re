@@ -206,6 +206,18 @@ reconstruction actually pins and applies them:
   timer PS_DYING counts, one slot with two jobs.
 - **TLayerInfo**, 8 ints, 32 bytes - OriginX, OriginY, DeltaX, DeltaY, TileW,
   TileH, MapTilesX, MapTilesY.
+- **TPlayerState**, 0x11E4 - the whole of save.dat. Head[10], Progress[0x1195]
+  and the twenty named ints from SavedStage +0x11A0 to Difficulty +0x11E0.
+- **TInputState**, 0x38, and **TGameSettings**, 0x38 - both fully witnessed,
+  and both MATCHES rows in audited.md.
+- **TEventRecord**, 0x24 - the stride the event table is indexed by.
+
+It also types the global pointer CELLS: p_LayerInfo, p_EntityPool,
+p_PlayerState, p_InputState, p_Settings and p_EventTable. Typing p_EntityPool
+is what turns `p_EntityPool + slot * 0x104` into an ordinary array index.
+
+EVERY NEW STRUCT GOES IN THIS SCRIPT as it is discovered, so a single run
+brings the project up to date with whatever the reconstruction has learned.
 
 It applies `TEntity *` to all 74 handlers and to the player, camera and entity
 helpers, and types the `p_LayerInfo` cell. After it, `E[8]` reads as

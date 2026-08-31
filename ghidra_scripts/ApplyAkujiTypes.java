@@ -1,17 +1,21 @@
 /* Give Ghidra the types the reconstruction recovered.
  *
- * The decompilation stays unreadable while an entity is an int array: E[8] is
- * a number, not a field. This defines TEntity and TLayerInfo from the offsets
- * src/Entities.pas and src/Player.pas pin, applies TEntity* to every handler
- * that takes one, and types the layer pointer cell - after which E[8] reads as
- * E->BlockA_State and *(int *)(p_LayerInfo + 0x14) reads as p_LayerInfo->TileH.
+ * The decompilation stays unreadable while the game's records are int arrays:
+ * E[8] is a number, not a field. This defines every struct src/*.pas pins the
+ * layout of, applies them to the functions and the global pointer cells, and
+ * turns E[8] into E->BlockA_State and p_EntityPool + slot * 0x104 into an
+ * ordinary array index.
  *
- * Field names come from the EF_ and PF_ constants. Where one slot carries both
- * an entity and a player meaning the name keeps both, because it really is one
- * slot with two jobs - BlockB_AnimTimer is the field Entity_CheckKillTiles
- * clears and the death timer PS_DYING counts.
+ * Field names come from the units that own each record - the EF_/PF_ constants
+ * for TEntity, the +0xNNN annotations for the rest, which tools/layout_lock.py
+ * asserts at runtime. Where one entity slot carries both an entity and a player
+ * meaning the name keeps both, because that is what it is: BlockB_AnimTimer is
+ * the field Entity_CheckKillTiles clears and the death timer PS_DYING counts.
+ * Offsets with no name are Field<offset>, never a guess.
  *
  * Run from the Script Manager. Safe to re-run: types are replaced, not added.
+ * ADD EVERY NEW STRUCT HERE as it is discovered, so one run brings the project
+ * up to date with the reconstruction.
  */
 //@category Akuji
 //@menupath Tools.Apply Akuji Types
@@ -20,17 +24,52 @@ import ghidra.program.model.data.*;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import ghidra.program.model.address.Address;
-import java.util.*;
 
 public class ApplyAkujiTypes extends GhidraScript {
 
     private void add(Structure s, String name) {
         s.add(IntegerDataType.dataType, 4, name, null);
     }
+    private void i(Structure s, int off, String name) {
+        s.replaceAtOffset(off, IntegerDataType.dataType, 4, name, null);
+    }
+    private void b(Structure s, int off, String name) {
+        s.replaceAtOffset(off, ByteDataType.dataType, 1, name, null);
+    }
+    private void arr(Structure s, int off, int count, String name) {
+        s.replaceAtOffset(off, new ArrayDataType(ByteDataType.dataType, count, 1),
+                          count, name, null);
+    }
+    private void ints(Structure s, int off, int count, String name) {
+        s.replaceAtOffset(off, new ArrayDataType(IntegerDataType.dataType, count, 4),
+                          count * 4, name, null);
+    }
+
+    private DataType put(DataTypeManager dtm, Structure s, int want) {
+        Structure r = (Structure) dtm.addDataType(s, DataTypeConflictHandler.REPLACE_HANDLER);
+        String ok = (r.getLength() == want) ? "ok" : ("WRONG, want " + want);
+        println("  " + r.getName() + ": " + r.getLength() + " bytes (" + ok + ")");
+        return r;
+    }
+
+    private void typeCell(DataTypeManager dtm, String symbol, DataType pointee) {
+        DataType ptr = dtm.getPointer(pointee);
+        for (Symbol s : currentProgram.getSymbolTable().getSymbols(symbol)) {
+            Address a = s.getAddress();
+            try {
+                clearListing(a, a.add(3));
+                createData(a, ptr);
+                println("  " + symbol + " @ " + a + " -> " + ptr.getName());
+            } catch (Exception ex) {
+                println("  SKIP " + symbol + ": " + ex.getMessage());
+            }
+        }
+    }
 
     @Override
     protected void run() throws Exception {
         DataTypeManager dtm = currentProgram.getDataTypeManager();
+        println("structs:");
 
         StructureDataType e = new StructureDataType("TEntity", 0);
         add(e, "Slot");
@@ -98,28 +137,87 @@ public class ApplyAkujiTypes extends GhidraScript {
         add(e, "Solid");
         add(e, "TileOfsX");
         add(e, "TileOfsY");
-        Structure ent = (Structure) dtm.addDataType(e, DataTypeConflictHandler.REPLACE_HANDLER);
-        println("TEntity: " + ent.getLength() + " bytes (want 260)");
+        DataType ent = put(dtm, e, 0x104);
 
         StructureDataType l = new StructureDataType("TLayerInfo", 0);
-        add(l, "OriginX");
-        add(l, "OriginY");
-        add(l, "DeltaX");
-        add(l, "DeltaY");
-        add(l, "TileW");
-        add(l, "TileH");
-        add(l, "MapTilesX");
-        add(l, "MapTilesY");
-        Structure lay = (Structure) dtm.addDataType(l, DataTypeConflictHandler.REPLACE_HANDLER);
-        println("TLayerInfo: " + lay.getLength() + " bytes (want 32)");
+        add(l, "OriginX");  add(l, "OriginY");  add(l, "DeltaX");  add(l, "DeltaY");
+        add(l, "TileW");    add(l, "TileH");    add(l, "MapTilesX"); add(l, "MapTilesY");
+        DataType lay = put(dtm, l, 0x20);
+
+        StructureDataType ps = new StructureDataType("TPlayerState", 0x11E4);
+        arr(ps, 0x0, 10, "Head");
+        arr(ps, 0xA, 4501, "Progress");
+        b(ps, 0x119F, "Pad119F");
+        i(ps, 0x11A0, "SavedStage");
+        i(ps, 0x11A4, "SpawnX");
+        i(ps, 0x11A8, "SpawnY");
+        i(ps, 0x11AC, "ScrollX");
+        i(ps, 0x11B0, "ScrollY");
+        i(ps, 0x11B4, "Lives");
+        i(ps, 0x11B8, "MaxLives");
+        i(ps, 0x11BC, "ElapsedSec");
+        i(ps, 0x11C0, "Field11C0");
+        i(ps, 0x11C4, "Counter");
+        i(ps, 0x11C8, "EventCounter");
+        i(ps, 0x11CC, "Weapon");
+        i(ps, 0x11D0, "JumpStrength");
+        i(ps, 0x11D4, "MusicTrack");
+        i(ps, 0x11D8, "SpawnFacing");
+        i(ps, 0x11DC, "TargetIndex");
+        i(ps, 0x11E0, "Difficulty");
+        DataType play = put(dtm, ps, 0x11E4);
+
+        StructureDataType inp = new StructureDataType("TInputState", 0x38);
+        i(inp, 0x0, "AxisX");
+        i(inp, 0x4, "AxisY");
+        i(inp, 0x8, "HeldX");
+        i(inp, 0xC, "HeldY");
+        b(inp, 0x10, "Moving");
+        b(inp, 0x11, "AxisYNegative");
+        i(inp, 0x14, "RepeatTimer");
+        i(inp, 0x18, "HoldTimer");
+        arr(inp, 0x1C, 4, "Button");
+        arr(inp, 0x20, 4, "ButtonLatch");
+        ints(inp, 0x24, 4, "ButtonRepeat");
+        b(inp, 0x34, "AnyPressed");
+        DataType input = put(dtm, inp, 0x38);
+
+        StructureDataType gs = new StructureDataType("TGameSettings", 0x38);
+        i(gs, 0x0, "CurrentStage");
+        i(gs, 0x4, "GameLevel");
+        ints(gs, 0x8, 4, "KeyMap");
+        b(gs, 0x18, "SoftwareVsyncFlag");
+        b(gs, 0x19, "WaitOnFlag");
+        b(gs, 0x1A, "FullScreenFlag");
+        b(gs, 0x1B, "DebugLogFlag");
+        b(gs, 0x1C, "ExtraDoor1");
+        b(gs, 0x1D, "ExtraDoor2");
+        arr(gs, 0x1E, 6, "Unknown1E");
+        i(gs, 0x24, "Volume");
+        i(gs, 0x28, "GallerySel");
+        arr(gs, 0x2C, 7, "Unknown2C");
+        i(gs, 0x34, "InputDevice");
+        DataType settings = put(dtm, gs, 0x38);
+
+        StructureDataType ev = new StructureDataType("TEventRecord", 0x24);
+        i(ev, 0x00, "Opcode");
+        b(ev, 0x04, "InWindow");
+        b(ev, 0x05, "Active");
+        i(ev, 0x08, "EntitySlot");
+        i(ev, 0x0C, "ParamA");
+        i(ev, 0x10, "TileX");
+        i(ev, 0x14, "TileY");
+        i(ev, 0x18, "ParamB");
+        i(ev, 0x1C, "NeedsFlag");
+        i(ev, 0x20, "BlockedBy");
+        DataType evrec = put(dtm, ev, 0x24);
 
         DataType entPtr = dtm.getPointer(ent);
-        DataType layPtr = dtm.getPointer(lay);
 
-        // Every function whose first argument is an entity.
+        println("");
+        println("functions:");
         int done = 0, skipped = 0;
-        FunctionManager fm = currentProgram.getFunctionManager();
-        for (Function f : fm.getFunctions(true)) {
+        for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
             String n = f.getName();
             boolean isHandler = n.startsWith("EntityUpdate_Type");
             boolean isEntityFn =
@@ -131,29 +229,33 @@ public class ApplyAkujiTypes extends GhidraScript {
                 n.equals("Entity_TileEdgeDistX") || n.equals("Entity_TileEdgeDistY") ||
                 n.equals("Entity_TileCollideX") || n.equals("Entity_TileCollideY") ||
                 n.equals("Entity_Destroy") || n.equals("Entity_SpawnDebris") ||
-                n.equals("Entity_MaybeDropItem") || n.equals("Entity_UpdateDying");
+                n.equals("Entity_MaybeDropItem") || n.equals("Entity_UpdateDying") ||
+                n.equals("Entity_PlayerTouch") || n.equals("Entity_TakeProjectileHits") ||
+                n.equals("Player_TakeDamage") || n.equals("Entity_TouchPickup") ||
+                n.equals("Entity_TouchLife") || n.equals("Entity_TouchHeal");
             if (!isHandler && !isEntityFn) continue;
-            Parameter[] ps = f.getParameters();
-            if (ps.length == 0) { skipped++; continue; }
+            Parameter[] pp = f.getParameters();
+            if (pp.length == 0) { skipped++; continue; }
             try {
-                ps[0].setDataType(entPtr, SourceType.USER_DEFINED);
-                if (ps[0].getName() == null || ps[0].getName().startsWith("param_"))
-                    ps[0].setName("E", SourceType.USER_DEFINED);
+                pp[0].setDataType(entPtr, SourceType.USER_DEFINED);
+                if (pp[0].getName() == null || pp[0].getName().startsWith("param_"))
+                    pp[0].setName("E", SourceType.USER_DEFINED);
                 done++;
             } catch (Exception ex) {
-                println("SKIP " + n + ": " + ex.getMessage());
+                println("  SKIP " + n + ": " + ex.getMessage());
                 skipped++;
             }
         }
-        println("entity pointer applied to " + done + " functions, " + skipped + " skipped");
+        println("  TEntity * applied to " + done + " functions, " + skipped + " skipped");
 
-        // The layer pointer CELL holds the address of the record.
-        for (Symbol s : currentProgram.getSymbolTable().getSymbols("p_LayerInfo")) {
-            Address a = s.getAddress();
-            clearListing(a, a.add(3));
-            createData(a, layPtr);
-            println("p_LayerInfo at " + a + " typed as TLayerInfo *");
-        }
+        println("");
+        println("global pointer cells:");
+        typeCell(dtm, "p_LayerInfo", lay);
+        typeCell(dtm, "p_EntityPool", ent);
+        typeCell(dtm, "p_PlayerState", play);
+        typeCell(dtm, "p_InputState", input);
+        typeCell(dtm, "p_Settings", settings);
+        typeCell(dtm, "p_EventTable", dtm.getPointer(evrec));
 
         println("");
         println("===== DONE - remember to save the project =====");
