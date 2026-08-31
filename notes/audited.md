@@ -264,15 +264,43 @@ commits and every integer in `save.dat` read a byte early, because the
 `Assert` that would have caught it was in an `initialization` section and FPC
 compiles assertions out without `-Sa`.
 
-`PARTIAL` is honest here rather than aspirational - a 65-int entity record is
-not placed field by field in one sitting, and the row says which parts were.
+### What confirms a layout
+
+Two independent things, and neither alone is enough:
+
+1. **The size is pinned from OUTSIDE the record** - the stride in
+   `base + index * 0x104`, the byte count of a file read, a table entry size.
+   Never by adding up our own fields, which proves only that we can add.
+2. **Every field offset is witnessed** by at least one reference in the
+   disassembly. That is what a `// +0xNNN` on a declaration means; it is a
+   claim about evidence, not a note to the reader.
+
+A size check alone cannot do it: `Lives` and `MaxLives` swapped is a record of
+exactly the right length that misreads every save.
+
+### What locks it down
+
+- `--selftest-layouts` asserts all four sizes and all 46 witnessed offsets at
+  runtime, computed as `PtrUInt(@R.Field) - PtrUInt(@R)`.
+- `tools/layout_lock.py` checks that suite is COMPLETE - annotate a field and
+  forget the assertion, or assert an offset the declaration no longer claims,
+  and the gate fails. Without it the suite is a snapshot, not a lock.
+- **Nothing here may be an `Assert`.** This project does not pass `-Sa`, so
+  assertions are compiled out. Three size guards were `Assert`s in
+  `initialization` sections and had never run once - proved on 2026-08-31 by
+  falsifying `SizeOf(TEntity)` to 999 and watching the suite pass. All three
+  are ordinary comparisons now, and a falsified one exits 217 rather than 0.
+
+`PARTIAL` still means the record is only partly WITNESSED - a 65-int entity
+record is not placed field by field in one sitting. It no longer means
+unlocked: every offset the declarations do claim is asserted.
 
 | record | unit | status | what was compared |
 |---|---|---|---|
-| `TPlayerState` | PlayerState.pas | PARTIAL | the fields Game_StartOrLoad and HUD_Draw touch: Head[4..7] abilities, Progress from +10, SavedStage +0x11A0, SpawnX/Y +0x11A4/+0x11A8, Lives +0x11B4, MaxLives +0x11B8, ElapsedSec +0x11BC, Counter +0x11C4, Weapon +0x11CC, JumpStrength +0x11D0, MusicTrack +0x11D4, TargetIndex +0x11DC, Difficulty +0x11E0. The SIZE is pinned independently: save.dat is exactly 0x11E4 bytes and startup checks it |
-| `TInputState` | GameState.pas | PARTIAL | every offset read out of AppIdle: AxisX +0, AxisY +4, HeldX/Y +8/+0xC, Moving +0x10, RepeatTimer +0x14, HoldTimer +0x18, buttons +0x1C..0x1F, latches +0x20..0x23, repeats +0x24, AnyPressed +0x34. BACKWARD OUTSTANDING |
-| `TGameSettings` | GameState.pas | PARTIAL | 56 bytes, and every field placed from DDDD1Init and FormDestroy: stage +0, level +4, keymap +8..+0x14, the four flag bytes +0x18..+0x1B, volume +0x24, gallery +0x28, unlocks +0x2C..0x32, device +0x34. Round-tripped byte-exact by --selftest-settings. BACKWARD OUTSTANDING |
-| `TEntity` | Entities.pas | PARTIAL | stride 0x104 and the fields the audited functions touch - EF_SPRITE +0x10, EF_VARIANT +0x18, EF_STATE +0x20, EF_DEPTH, EF_EVENT_ID +0xB8. Not every one of the 65 ints has been placed |
+| `TPlayerState` | PlayerState.pas | PARTIAL | the fields Game_StartOrLoad and HUD_Draw touch: Head[4..7] abilities, Progress from +10, SavedStage +0x11A0, SpawnX/Y +0x11A4/+0x11A8, Lives +0x11B4, MaxLives +0x11B8, ElapsedSec +0x11BC, Counter +0x11C4, Weapon +0x11CC, JumpStrength +0x11D0, MusicTrack +0x11D4, TargetIndex +0x11DC, Difficulty +0x11E0. The SIZE is pinned independently: save.dat is exactly 0x11E4 bytes and startup checks it Locked: all 20 witnessed offsets asserted by --selftest-layouts. |
+| `TInputState` | GameState.pas | MATCHES | All twelve fields, every one an offset read out of AppIdle, ending at AnyPressed +0x34 - complete, not sampled. Locked by --selftest-layouts. EXTRAS: none - no field here that the original lacks. Note the size is NOT pinned from outside and cannot be: the original keeps this as a global block, not a file image or a strided array element, so only the offsets carry evidence and only the offsets are asserted. |
+| `TGameSettings` | GameState.pas | MATCHES | 56 bytes, pinned from outside because data/system.dat is a raw image of the record, and all fourteen witnessed fields placed from DDDD1Init and FormDestroy. Locked by --selftest-layouts; its size guard was a dead Assert until 2026-08-31. EXTRAS: one - Pad33, an explicit padding byte carrying +0x33, which nothing has been seen to touch and which exists only to put InputDevice at +0x34. Unknown1E and Unknown2C are placeholder NAMES for real unidentified bytes, not additions. |
+| `TEntity` | Entities.pas | PARTIAL | stride 0x104 and the fields the audited functions touch - EF_SPRITE +0x10, EF_VARIANT +0x18, EF_STATE +0x20, EF_DEPTH, EF_EVENT_ID +0xB8. Not every one of the 65 ints has been placed Locked: SizeOf and the 65-int Raw stride asserted by --selftest-layouts. |
 | `TEventRecord` | EventScripts.pas | UNVERIFIED |  |
 | `TEntityType` | Entities.pas | UNVERIFIED |  |
 | `TLayerInfo` | Entities.pas | UNVERIFIED |  |

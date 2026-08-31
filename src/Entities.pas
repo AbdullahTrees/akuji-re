@@ -2257,11 +2257,20 @@ end;
 initialization
   { The stride is not a design choice, it is what the original's
     `base + index * 0x104` requires. A layout slip here silently misaligns
-    every slot after the first, so fail loudly at startup - the same guard
-    TPlayerState uses against save.dat drifting. }
-  Assert(SizeOf(TEntity) = ENTITY_BYTES,
-         'TEntity must be exactly 0x104 bytes to match the original stride');
-  Assert(SizeOf(TEntityType) = $48,
-         'TEntityType must be exactly 0x48 bytes to match the type table');
+    every slot after the first, so fail loudly at startup.
+
+    NOT Assert. These were two Asserts, and FPC compiles assertions out unless
+    -Sa is passed, which this project does not pass - proved on 2026-08-31 by
+    falsifying one to SizeOf(TEntity) = 999 and watching the suite pass. They
+    had never run. TPlayerState's own guard had already been rewritten as a
+    plain raise for exactly this reason and these two were left behind.
+    --selftest-layouts checks the same sizes and every field offset besides. }
+  if SizeOf(TEntity) <> ENTITY_BYTES then
+    raise Exception.CreateFmt('TEntity is %d bytes; the original indexes the '
+      + 'pool as base + index * %d and the layout must match',
+      [SizeOf(TEntity), ENTITY_BYTES]);
+  if SizeOf(TEntityType) <> $48 then
+    raise Exception.CreateFmt('TEntityType is %d bytes; the type table steps '
+      + '0x48 per entry and the layout must match', [SizeOf(TEntityType)]);
 
 end.

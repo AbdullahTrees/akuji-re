@@ -421,8 +421,12 @@ end;
 
 initialization
   { data\system.dat is a raw image of this record, so a layout slip makes
-    every setting after the slip garbage. }
-  Assert(SizeOf(TGameSettings) = $38,
-         'TGameSettings must be exactly 56 bytes to match system.dat');
+    every setting after the slip garbage.
+
+    NOT Assert - FPC compiles those out without -Sa, which this project does
+    not pass, so the Assert that stood here had never run. See Entities.pas. }
+  if SizeOf(TGameSettings) <> $38 then
+    raise Exception.CreateFmt('TGameSettings is %d bytes; data/system.dat is '
+      + 'a raw image of it and must be 56', [SizeOf(TGameSettings)]);
 
 end.

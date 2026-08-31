@@ -76,6 +76,7 @@ run --selftest-script   "$GAME"
 run --selftest-stages   "$GAME"
 run --selftest-player   "$GAME"
 run --selftest-trace    "$GAME"
+run --selftest-layouts  "$GAME"
 run --selftest-entities "$GAME"
 run --selftest-runner   "$GAME"
 run --selftest-session  "$GAME"
@@ -159,6 +160,18 @@ rc=$?
 printf '  %-22s exit=%d  %s
 ' "const_immediates" "$rc"     "$(grep -E 'scalar constants checked' "$SCRATCH/consts.log" | tail -1)"
 [ $rc -ne 0 ] && { fail=1; grep -B1 'fold IS present' "$SCRATCH/consts.log" | head -8; }
+
+note ""
+note "=== every witnessed field offset is asserted somewhere that runs ==="
+# A `// +0xNNN` on a field is a claim that the disassembly was seen to touch
+# that offset, and a comment does not fail a build. This checks that
+# --selftest-layouts asserts every one of them, so annotating a new field and
+# forgetting the assertion is caught rather than becoming decoration.
+python "$REPO/tools/layout_lock.py" > "$SCRATCH/layout.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "layout_lock" "$rc" "$(tail -1 "$SCRATCH/layout.log")"
+[ $rc -ne 0 ] && { fail=1; cat "$SCRATCH/layout.log" | head -8; }
 
 note ""
 note "=== the frame loop still has the shape the real game has ==="

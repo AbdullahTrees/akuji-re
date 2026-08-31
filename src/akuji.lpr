@@ -3635,6 +3635,145 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  --selftest-layouts : the binary layouts, locked.
+
+  A record whose offsets must match the original's memory rots silently and
+  expensively. TPlayerState once sat a byte short for several commits and every
+  integer in save.dat read a byte early.
+
+  WHY THIS IS A TEST AND NOT AN Assert. The guard that should have caught that
+  was an Assert in an initialization section, and FPC COMPILES ASSERTIONS OUT
+  unless -Sa is passed, which this project does not pass - so it never ran once.
+  TPlayerState's guard was rewritten as a plain raise for that reason, but
+  TEntity, TEntityType and TGameSettings kept theirs, and on 2026-08-31 a
+  deliberately falsified Assert(SizeOf(TEntity) = 999) was confirmed not to
+  fire. Everything here is an ordinary comparison.
+
+  WHAT A CONFIRMED LAYOUT MEANS - two independent things:
+
+    the SIZE is pinned from OUTSIDE the record: the stride in
+    base + index * 0x104, the byte count of a file read, a table entry size.
+    Never by adding up our own fields, which proves only that we can add;
+
+    every FIELD offset is witnessed by at least one reference in the
+    disassembly, which is what the +0xNNN annotations on the declarations are.
+
+  A size check ALONE is not enough. Two fields can swap inside a record and
+  leave SizeOf untouched, and that is exactly the shape of failure that
+  misreads a save file. tools/layout_lock.py checks that every annotated field
+  has a line here, so adding a field without a check fails the gate.
+  --------------------------------------------------------------------------- }
+function SelfTestLayouts(Log: TStrings): Integer;
+var
+  Bad: Integer;
+  P: TPlayerState;
+  I: TInputState;
+  G: TGameSettings;
+  E: TEntity;
+
+  procedure Size(const Rec: string; Got, Want: Integer; const Pin: string);
+  begin
+    if Got <> Want then
+    begin
+      Log.Add(Format('FAILED: SizeOf(%s) is %d, want %d - %s',
+                     [Rec, Got, Want, Pin]));
+      Inc(Bad);
+    end;
+  end;
+
+  procedure Off(const What: string; Got, Want: PtrUInt);
+  begin
+    if Got <> Want then
+    begin
+      Log.Add(Format('FAILED: %s sits at +0x%x, want +0x%x - a field moved '
+        + 'inside the record and every later one moved with it',
+        [What, Int64(Got), Int64(Want)]));
+      Inc(Bad);
+    end;
+  end;
+
+begin
+  Bad := 0;
+  Log.Add('');
+  Log.Add('=== binary layouts ===');
+
+  Size('TPlayerState', SizeOf(TPlayerState), PLAYER_STATE_SIZE,
+       'save.dat is read and written as exactly this many bytes');
+  Size('TEntity', SizeOf(TEntity), ENTITY_BYTES,
+       'the original indexes the pool as base + index * 0x104');
+  Size('TEntityType', SizeOf(TEntityType), $48,
+       'the type table steps 0x48 bytes per entry');
+  Size('TGameSettings', SizeOf(TGameSettings), $38,
+       'data/system.dat is a raw image of this record');
+
+  if Length(E.Raw) * SizeOf(Integer) <> ENTITY_BYTES then
+  begin
+    Log.Add(Format('FAILED: TEntity.Raw holds %d ints = %d bytes, want %d',
+      [Length(E.Raw), Length(E.Raw) * SizeOf(Integer), ENTITY_BYTES]));
+    Inc(Bad);
+  end;
+
+  { TPlayerState }
+  Off('TPlayerState.Head', PtrUInt(@P.Head) - PtrUInt(@P), $0);
+  Off('TPlayerState.Progress', PtrUInt(@P.Progress) - PtrUInt(@P), $A);
+  Off('TPlayerState.Pad119F', PtrUInt(@P.Pad119F) - PtrUInt(@P), $119F);
+  Off('TPlayerState.SavedStage', PtrUInt(@P.SavedStage) - PtrUInt(@P), $11A0);
+  Off('TPlayerState.SpawnX', PtrUInt(@P.SpawnX) - PtrUInt(@P), $11A4);
+  Off('TPlayerState.SpawnY', PtrUInt(@P.SpawnY) - PtrUInt(@P), $11A8);
+  Off('TPlayerState.ScrollX', PtrUInt(@P.ScrollX) - PtrUInt(@P), $11AC);
+  Off('TPlayerState.ScrollY', PtrUInt(@P.ScrollY) - PtrUInt(@P), $11B0);
+  Off('TPlayerState.Lives', PtrUInt(@P.Lives) - PtrUInt(@P), $11B4);
+  Off('TPlayerState.MaxLives', PtrUInt(@P.MaxLives) - PtrUInt(@P), $11B8);
+  Off('TPlayerState.ElapsedSec', PtrUInt(@P.ElapsedSec) - PtrUInt(@P), $11BC);
+  Off('TPlayerState.Field11C0', PtrUInt(@P.Field11C0) - PtrUInt(@P), $11C0);
+  Off('TPlayerState.Counter', PtrUInt(@P.Counter) - PtrUInt(@P), $11C4);
+  Off('TPlayerState.EventCounter', PtrUInt(@P.EventCounter) - PtrUInt(@P), $11C8);
+  Off('TPlayerState.Weapon', PtrUInt(@P.Weapon) - PtrUInt(@P), $11CC);
+  Off('TPlayerState.JumpStrength', PtrUInt(@P.JumpStrength) - PtrUInt(@P), $11D0);
+  Off('TPlayerState.MusicTrack', PtrUInt(@P.MusicTrack) - PtrUInt(@P), $11D4);
+  Off('TPlayerState.SpawnFacing', PtrUInt(@P.SpawnFacing) - PtrUInt(@P), $11D8);
+  Off('TPlayerState.TargetIndex', PtrUInt(@P.TargetIndex) - PtrUInt(@P), $11DC);
+  Off('TPlayerState.Difficulty', PtrUInt(@P.Difficulty) - PtrUInt(@P), $11E0);
+
+  { TInputState }
+  Off('TInputState.AxisX', PtrUInt(@I.AxisX) - PtrUInt(@I), $0);
+  Off('TInputState.AxisY', PtrUInt(@I.AxisY) - PtrUInt(@I), $4);
+  Off('TInputState.HeldX', PtrUInt(@I.HeldX) - PtrUInt(@I), $8);
+  Off('TInputState.HeldY', PtrUInt(@I.HeldY) - PtrUInt(@I), $C);
+  Off('TInputState.Moving', PtrUInt(@I.Moving) - PtrUInt(@I), $10);
+  Off('TInputState.AxisYNegative', PtrUInt(@I.AxisYNegative) - PtrUInt(@I), $11);
+  Off('TInputState.RepeatTimer', PtrUInt(@I.RepeatTimer) - PtrUInt(@I), $14);
+  Off('TInputState.HoldTimer', PtrUInt(@I.HoldTimer) - PtrUInt(@I), $18);
+  Off('TInputState.Button', PtrUInt(@I.Button) - PtrUInt(@I), $1C);
+  Off('TInputState.ButtonLatch', PtrUInt(@I.ButtonLatch) - PtrUInt(@I), $20);
+  Off('TInputState.ButtonRepeat', PtrUInt(@I.ButtonRepeat) - PtrUInt(@I), $24);
+  Off('TInputState.AnyPressed', PtrUInt(@I.AnyPressed) - PtrUInt(@I), $34);
+
+  { TGameSettings }
+  Off('TGameSettings.CurrentStage', PtrUInt(@G.CurrentStage) - PtrUInt(@G), $0);
+  Off('TGameSettings.GameLevel', PtrUInt(@G.GameLevel) - PtrUInt(@G), $4);
+  Off('TGameSettings.KeyMap', PtrUInt(@G.KeyMap) - PtrUInt(@G), $8);
+  Off('TGameSettings.SoftwareVsyncFlag', PtrUInt(@G.SoftwareVsyncFlag) - PtrUInt(@G), $18);
+  Off('TGameSettings.WaitOnFlag', PtrUInt(@G.WaitOnFlag) - PtrUInt(@G), $19);
+  Off('TGameSettings.FullScreenFlag', PtrUInt(@G.FullScreenFlag) - PtrUInt(@G), $1A);
+  Off('TGameSettings.DebugLogFlag', PtrUInt(@G.DebugLogFlag) - PtrUInt(@G), $1B);
+  Off('TGameSettings.ExtraDoor1', PtrUInt(@G.ExtraDoor1) - PtrUInt(@G), $1C);
+  Off('TGameSettings.ExtraDoor2', PtrUInt(@G.ExtraDoor2) - PtrUInt(@G), $1D);
+  Off('TGameSettings.Unknown1E', PtrUInt(@G.Unknown1E) - PtrUInt(@G), $1E);
+  Off('TGameSettings.Volume', PtrUInt(@G.Volume) - PtrUInt(@G), $24);
+  Off('TGameSettings.GallerySel', PtrUInt(@G.GallerySel) - PtrUInt(@G), $28);
+  Off('TGameSettings.Unknown2C', PtrUInt(@G.Unknown2C) - PtrUInt(@G), $2C);
+  Off('TGameSettings.InputDevice', PtrUInt(@G.InputDevice) - PtrUInt(@G), $34);
+
+  Log.Add('46 field offsets and 4 record sizes checked');
+  Result := Bad;
+  if Bad = 0 then
+    Log.Add('OK - every record matches the offsets read out of the binary')
+  else
+    Log.Add('FAILED');
+end;
+
+{ ---------------------------------------------------------------------------
   --selftest-entities <gamedir> : Entity_UpdateAll.
 
   Three checks, and the first is the one that matters.
@@ -10646,6 +10785,8 @@ begin
         Result := SelfTestTrace(Log)
       else if ParamStr(1) = '--selftest-entities' then
         Result := SelfTestEntities(Log)
+      else if ParamStr(1) = '--selftest-layouts' then
+        Result := SelfTestLayouts(Log)
       else if ParamStr(1) = '--selftest-runner' then
         Result := SelfTestRunner(Log)
       else if ParamStr(1) = '--selftest-session' then
@@ -10697,6 +10838,7 @@ begin
      (ParamStr(1) = '--selftest-player') or
      (ParamStr(1) = '--selftest-trace') or
      (ParamStr(1) = '--selftest-entities') or
+     (ParamStr(1) = '--selftest-layouts') or
      (ParamStr(1) = '--selftest-runner') or
      (ParamStr(1) = '--selftest-session') or
      (ParamStr(1) = '--emudiff') then
