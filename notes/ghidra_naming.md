@@ -568,7 +568,7 @@ look for `call` immediately followed by a conditional jump.
 
 ## Independent agreements, which are the only ones that count
 
-Thirty so far, all written into src/*.pas from the disassembly BEFORE this
+Thirty-two so far, all written into src/*.pas from the disassembly BEFORE this
 pass and none of them typed into Ghidra:
 
 - Ending.pas: gallery flags from Progress[1186..1192]; the code reads
@@ -665,6 +665,15 @@ pass and none of them typed into Ghidra:
 - EventRunner.pas: ParamA's six letters '*', '/', 'A', 'M', 'R', 'J', and the
   note that "every one of the 692 records carries one of the six letters".
   There are exactly six string constants, consecutive, at 0x00454EB4.
+- EventRunner.pas: the spawn window is `Cam - 2 < tile < Cam + 12` on X and
+  `Cam - 2 < tile < Cam + 9.5` on Y, "fractional in the original and kept so".
+  The Y bound really is float - two x87 constants, 7.5 and 2.0, added at run
+  time - and X really is an integer 12. 7.5 is 240/32, the screen height in
+  tiles, which is why only that axis needed floating point.
+- EventRunner.pas: the unimplemented seventh ParamA form "reads seven fields
+  at 6, 11, 16, 21, 26, 31 and 36 - variant, both extents and all four box
+  percentages". That arm exists, buried under the CompareStr artifact as a
+  six-deep `if (!bVar9)` nest, and reads exactly those seven offsets.
 - EntityHandlers.pas: type 21's EF_STATE is an axis with exactly two values
   and EF_FACING is "a speed here and not a heading". The handler adds Facing
   to a coordinate and negates it on a timer, and the placement data's arg 0 is
