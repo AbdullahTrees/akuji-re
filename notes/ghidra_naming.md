@@ -633,6 +633,36 @@ Do not tidy the prefixes away. State, A9_Dying, B0's timer, B1/B2's child refs
 and B3_Shots do hold across types, and they keep the prefix anyway so the
 block layout stays legible.
 
+## The SetLength trap - the length is invisible
+
+Ghidra's signature for Delphi's DynArraySetLength helper does not include the
+new LENGTH, which the compiler pushes on the stack. Every call therefore
+renders as
+
+    Delphi_DynArraySetLength(p_Whatever, typeinfo, 1)
+
+with the interesting argument missing, and consecutive calls look like
+pointless repetition. They are not.
+
+Load_Map has three, and they are free / allocate / free:
+
+    push 0                  SetLength(TileBuffer, 0)
+    imul MapW, MapH; push   SetLength(TileBuffer, MapW * MapH)
+    push 0                  SetLength(TileBuffer, 0)
+
+Event_Begin appears to have two and has ONE - what is duplicated there is the
+TStringList Count call, once to size the array and once for the loop bound.
+An earlier note here called that first SetLength redundant work, which was
+wrong, and it was wrong because the length was not on screen.
+
+To read one: disassemble and look at the push immediately above the call.
+
+    objdump -D -b binary -m i386 --adjust-vma=0x400C00             --start-address=0x... akuji_ver101/akuji.exe
+
+This is the same failure mode as the CompareStr trap below - a helper whose
+real argument or result travels somewhere Ghidra's model does not look, and a
+listing that reads as nonsense or as redundancy as a result.
+
 ## The CompareStr trap - read the instructions, not the listing
 
 Every string comparison in this binary decompiles WRONG, in the same way, and
