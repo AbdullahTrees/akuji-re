@@ -323,6 +323,26 @@ type Ghidra silently refuses - `set_local_variable_type` reported "Type not
 found directly: void **" and left the variable untyped, which is worth knowing
 because it does not fail loudly.
 
+## When naming is not the problem
+
+Ending_Update stayed hard to follow after everything in it was named, and the
+reason was structural, not lexical:
+
+- **The phases are not in order.** The code tests p_ScreenPhase as
+  0, 2, 3, 4, 5, else - so phase 1, the slide show and the largest part of the
+  function, is the unlabelled `else` at the BOTTOM, which is the last place a
+  reader looks.
+- **999 is a sentinel, not a count.** It appears in both the slide and the
+  timer and means "waiting on a fade".
+- **Two globals are on loan.** p_OpeningSlide and p_OpeningTimer belong to the
+  opening; this screen borrows them.
+- **A value arrives from nowhere.** `Percent = System_RoundToInt64()` has no
+  visible argument because the number is on the x87 stack.
+
+None of that is fixable by renaming. The plate comment now walks the phases in
+EXECUTION order and says each of those things, which is the only form the
+answer can take.
+
 ## Ghidra cannot always be made to help
 
 Three shapes defeat typing, and the answer to each is a name plus a comment,
