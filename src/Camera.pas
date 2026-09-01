@@ -13,20 +13,8 @@
   CHANGING while the view is scrolling. Anything that infers "the player moved
   because its position changed" is wrong for that reason.
 
-  Dead zone, against SCREEN_W 320 / SCREEN_H 240:
-
-      X   below 144, or at/above 177     (asymmetric: it brackets the
-      Y   below 104, or at/above 137      player's width, not a point)
-
-  Scrolling stops at the map edge:
-
-      max scroll X = (MapWidthTiles  - 10.0) * TileWidth
-      max scroll Y = (MapHeightTiles -  7.5) * TileHeight
-
-  The Y constant is a 4-byte float at 0x00459D98 - the only FPU code in the
-  game layer - because 240 is not a whole number of 32-pixel tiles. Rounding
-  it would leave a black strip or cut the bottom row. --selftest-camera checks
-  both against all 65 shipped maps. }
+  The dead zone is asymmetric on both axes: it brackets the player's width
+  rather than a point. See DEADZONE_* below. }
 
 unit Camera;
 
@@ -46,12 +34,15 @@ const
   DEADZONE_TOP    = $68;   { 104 }
   DEADZONE_BOTTOM = $89;   { 137 }
 
-  { The screen, in whole tiles. Held as Single because 240/32 is not an
-    integer; see the header. }
+  { The screen in tiles. VIEW_TILES_Y is a 4-byte float at 0x00459D98 - the
+    only FPU code in the game layer - because 240 is not a whole number of
+    32-pixel tiles, and rounding it would leave a black strip or cut the bottom
+    row. --selftest-camera checks both against all 65 shipped maps. }
   VIEW_TILES_X: Single = 10.0;
   VIEW_TILES_Y: Single = 7.5;
 
-{ How far the layer origin may travel before the view leaves the map. }
+{ How far the layer origin may travel before the view leaves the map:
+  (MapTiles - VIEW_TILES) * TileSize. }
 function MaxScrollX(const L: TLayerInfo): Integer;
 function MaxScrollY(const L: TLayerInfo): Integer;
 
