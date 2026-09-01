@@ -50,19 +50,17 @@ const
     ( 71,  72,  73,  72),
     (118, 119, 120, 119));
 
-  { --- Type 24 @ 0x0045A43C, a bobbing pickup ---------------------------
-    Sixteen variants, one sprite each, in a FLAT table - stride 4, not 16; this
-    one has no frames.
+  { Type 24 @ 0x0045A43C, a bobbing pickup. Sixteen variants, one sprite each,
+    in a FLAT table - stride 4, not 16; this one has no frames.
 
-    It bobs. Every play frame it adds DirVelY(EF_FACING) to its Y and advances
-    EF_FACING one step of 64, so over 64 frames it traces one full period of the
-    direction table's vertical component - a sine just over a second long. That
-    is a reuse of EF_FACING as a PHASE rather than a heading, and it is the only
-    place so far that does it.
+    It reuses EF_FACING as a PHASE rather than a heading, adding DirVelY of it
+    and advancing one step of 64 each frame, so it traces one full period of
+    the direction table's vertical component just over a second long. Nothing
+    else in the game uses the field that way.
 
-    Variant 8 is special twice over: its sprite comes from a two-frame table
-    instead, and it plays kodou.wav - Japanese for HEARTBEAT - every 61 frames.
-    A thing that bobs, pulses and beats about once a second. }
+    Variant 8 is special twice: its sprite comes from a two-frame table
+    instead, and it plays kodou.wav - Japanese for HEARTBEAT - every 61
+    frames. }
   ITEM24_VARIANTS   = 16;
   ITEM24_TABLE_ADDR = $0046BDC0;
   ITEM24_TABLE_PTR  = $0046D0E4;
@@ -90,20 +88,14 @@ const
   ITEM25_TABLE_PTR  = $0046CF00;
   ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
 
-  { --- Type 27 @ 0x0045A540, the save point -----------------------------
-    Two frames alternating on a nine-frame cycle, and nothing else. The handler
-    does not know it is a save point - what makes it one is the EVENT, and the
-    data says so about as loudly as data can: type 27 appears exactly ONCE in
-    each of 43 stages, always with opcode 1 (touch plus a button), always with
-    no ParamA argument, and with a ParamB that is byte-identical in all 43:
+  { Type 27 @ 0x0045A540, the save point. The handler does not know it is one
+    - what makes it a save point is the EVENT. Type 27 appears exactly ONCE in
+    each of 43 stages, always opcode 1, always with no ParamA argument, and
+    with a ParamB byte-identical in all 43:
 
         0000-03-0000 / 0003-13 / 0003-03-0001
 
-    which is: say line 0; then if flag 3 is set, sub-op 13 - SAVE; then say
-    line 1. Forty-three stages, one save point each, the same script every time.
-
-    Its table has one reader and two entries, and the handler cycles the frame
-    mod 2, so the extent is flush from both directions. }
+    say line 0; if flag 3 is set, sub-op 13, SAVE; then say line 1. }
   SAVE_POINT_FRAMES = 2;
   SAVE_POINT_ADDR   = $0046BE24;
   SAVE_POINT_PTR    = $0046D18C;
@@ -135,21 +127,17 @@ const
   PICKUP_FX_LEVELUP = 1;
   PICKUP_FX_HEAL    = 3;
 
-  { --- Entity_PlayerTouch @ 0x00457880 ----------------------------------
-    Seven touch kinds, dispatched after one box test. Three guards come first
-    and all three matter:
+  { Entity_PlayerTouch @ 0x00457880. Seven touch kinds after one box test, and
+    three guards first: the player must not be invulnerable UNLESS the kind is
+    3 - which is the only kind that reaches through invulnerability - the
+    entity's own EF_TIMER must be 0, and a kind of 0 is not a touch at all.
 
-      the player must not be invulnerable, UNLESS the kind is 3 - so kind 3
-        reaches through invulnerability where nothing else does
-      the entity's own EF_TIMER must be 0
-      a kind of 0 is not a touch at all
-
-    Opcode 1 - "walk up and press" - needs the player STANDING (EF_VEL_Y = 0),
-    Up held, and Inp.AxisYNegative still clear, which is the edge. The latch is
-    set on the frame after, so holding Up does not retrigger.
+    Opcode 1, "walk up and press", needs the player STANDING, Up held, and
+    Inp.AxisYNegative still clear, which is the edge; the latch is set the
+    frame after, so holding Up does not retrigger.
 
     The original's return value is a local that is never assigned, so callers
-    read whatever was on the stack. Entity_UpdateAll ignores it, and this is a
+    read whatever was on the stack. Entity_UpdateAll ignores it, so this is a
     procedure. }
   TOUCH_KIND_HURT       = 1;
   TOUCH_KIND_MANA       = 2;
@@ -178,20 +166,14 @@ const
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
 
-  { --- Type 36, the falling item @ 0x0045A7BC ---------------------------
-    What Entity_MaybeDropItem drops. Gravity while airborne, then a snap onto
-    the tile edge it lands on - the pattern Entities.pas already quoted from
-    this function, and every line of it checks out.
+  { Type 36, the falling item @ 0x0045A7BC. Its two sprites are chosen by
+    EF_FLAG1C, the field Entity_MaybeDropItem writes its rarity roll into - so
+    the same flag that makes Entity_TouchLife give a full refill also picks
+    which sprite the thing wears on the way down.
 
-    Its two sprites are chosen by EF_FLAG1C, which is the field
-    Entity_MaybeDropItem writes its rarity roll into: the same flag that makes
-    Entity_TouchLife give a full refill instead of one life also picks which
-    of the two sprites the thing wears on the way down. Two entries, one
-    reader, and exactly two values written - flush three ways.
-
-    After landing the velocity keeps being added, but Entity_TileCollideY's
-    zero-delta guard is what settles it: once the snap leaves the velocity at
-    0 the query stops reporting a collision and the item sits still. }
+    After landing the velocity keeps being added, and what settles it is
+    Entity_TileCollideY's zero-delta guard: once the snap leaves the velocity
+    at 0 the query stops reporting a collision. }
   DROP_SPRITE_COUNT = 2;
   DROP_TABLE_ADDR   = $0046BE54;
   DROP_TABLE_PTR    = $0046CE18;
@@ -786,20 +768,11 @@ const
   T50_VULN_OPEN    = 1;
   T50_VULN_CLOSING = 2;
 
-  { --- Types 51 and 53 --------------------------------------------------
-    TYPE 51 is the simplest chaser in the game: a four-frame loop, one
-    Entity_SteerToPlayer a frame with a fixed reload of 6, and move by the
-    velocity that produces. No states, no difficulty tables, no end - it
-    homes until something kills it. It also keeps EF_DEATH_TIMER topped up at
-    2 the way types 11 and 28 do, so it blinks continuously.
+  { Types 51 and 53. Neither has an end: type 51 homes until something kills
+    it, and type 53 runs until it leaves the screen.
 
-    TYPE 53 winds up and then charges in whatever direction it was already
-    facing. Its sprite table is TWO rows of five - frames 0..2 for the
-    wind-up and 3..4 for the run - and the row is the sign of its horizontal
-    velocity, the same shape types 3, 30 and 2 use, at a stride of 0x14 rather
-    than the usual 0x10 because the rows are five wide.
-
-    Nothing stops it. Once it is running it runs until it leaves the screen. }
+    Type 53's sprite table is two rows of FIVE, so its stride is 0x14 rather
+    than the usual 0x10. }
   T51_FRAMES = 4;  T51_TICKS = 8;
   T51_TABLE_ADDR = $0046C170;
   T51_SPRITES: array[0..T51_FRAMES - 1] of Integer = (153, 154, 155, 154);
@@ -1434,20 +1407,12 @@ const
   T76_LAP_AT = $3F;         { the step BEFORE the wrap, not the wrap }
   T76_SND_LAP = $2E;
 
-  { --- Type 77, the final boss ------------------------------------------
-    The largest handler in the game, and the only one that runs from a SCRIPT
-    rather than a hand-written state chain: two 6x6 tables, one of durations
-    and one of actions, indexed by [phase][step]. State 1 counts up to the
-    duration over a difficulty divisor, performs the action and advances the
-    step, wrapping at 6.
-
-    EF_BLOCK_A[1] holds the phase. Every frame it compares its own EF_HP
-    against T77_HP and advances when it drops below, resetting state, frame
-    and script index and puffing a type-32 emitter - except out of phases 0
-    and 4, which pass silently. Past phase 5 it zeroes its own HP and stops.
+  { Type 77, the final boss - the only handler that runs from a SCRIPT rather
+    than a hand-written state chain: two 6x6 tables, durations and actions,
+    indexed by [phase][step].
 
     Each phase's sprite table is exactly as wide as the highest frame that
-    phase's script can reach, which is how the extents below are pinned: the
+    phase's script can reach, which is how the extents below are pinned - the
     binary's pointer layout and the action table agree on all five. }
   T77_PHASES = 6;
   T77_STEPS = 6;
@@ -1678,19 +1643,12 @@ const
   TYPE22_SPRITE     = 60;
   TYPE22_SPRITE_ADDR = $0046BE84;
 
-  { --- Type 33, the explosion @ 0x0045A698 ------------------------------
-    Six frames of sprite on a seven-tick cycle, and on its FIRST update it
-    throws out six sparks of type 6.
-
-    Each spark takes one random heading of 64 and is given a velocity from
-    BOTH direction tables at that same index - which is what makes the burst
-    radial rather than axis-aligned, and is the detail an earlier reading of
-    this function already had. The two speed multipliers are drawn
-    SEPARATELY though, so a spark's X and Y speeds are independent: the
-    scatter is an ellipse of random eccentricity, not a circle.
-
-    Its sprite table is six consecutive ids with one reader, and the handler
-    cycles exactly six frames - flush from both directions. }
+  { Type 33, the explosion @ 0x0045A698. On its FIRST update it throws six
+    type-6 sparks, each taking one random heading of 64 and a velocity from
+    BOTH direction tables at that index, which is what makes the burst radial
+    rather than axis-aligned. The two speed multipliers are drawn SEPARATELY,
+    so a spark's X and Y speeds are independent and the scatter is an ellipse
+    of random eccentricity. }
   BOOM_FRAMES     = 6;
   BOOM_TICKS      = 6;    { advance when the count EXCEEDS it, so every 7 }
   BOOM_TABLE_ADDR = $0046BE3C;
