@@ -1,52 +1,27 @@
-{ Entities - the entity pool, its record layout, and the static type table.
+{ Entities - the entity pool, its record layout, and the static type table,
+  recovered from Entity_Spawn @ 0x004610C4 and the callers that fill in what
+  it leaves at zero.
 
-  All of this is recovered from Entity_Spawn @ 0x004610C4, which is the only
-  place an entity is created, plus the callers that fill in the fields it
-  leaves at zero.
+  THE POOL is one flat array at 0x0046CB68, stride 0x104 = 65 ints, partitioned
+  by Spawn's first argument:
 
-  ## The pool
+      kind 0 -> slot 0 only        kind 1 -> slots 1..0x20
+      kind 2 -> slots 0x21..0x120  289 in all
 
-  One flat array at p_Entities (0x0046CB68 -> 0x0046EB58), stride 0x104 bytes
-  = 65 ints. The spawn function picks a free slot by scanning a RANGE chosen by
-  its first argument, so the array is partitioned:
+  Slot 0 being the player is an inference from kind 0 owning exactly one slot;
+  nothing read so far names it. A slot is free when the byte at +0x08 is zero,
+  and Spawn returns -1 when the range is full - a full pool DROPS the spawn
+  silently, which is worth remembering when something fails to appear.
 
-      kind 0 -> slot 0 only
-      kind 1 -> slots 1 .. 0x20      (32 slots)
-      kind 2 -> slots 0x21 .. 0x120  (256 slots)
+  POSITIONS ARE BIASED, not fixed point: Spawn adds $10000 and its callers
+  subtract it again, so the bias cancels and the logical coordinate is plain
+  pixels. It exists to keep the stored field positive, so truncating division
+  by a tile size behaves the same either side of the origin.
 
-  289 slots in total. Kind 0 owning exactly one slot is why slot 0 is taken to
-  be the player; nothing else read so far names it, so that is an inference,
-  not a decode.
-
-  A slot is free when the byte at +0x08 is zero. Spawn returns the slot index,
-  or -1 when the range is full - so a full pool silently drops the spawn, which
-  is worth remembering when something fails to appear.
-
-  ## Positions are BIASED, not fixed point
-
-  Spawn stores param + $10000 into +0x78 and +0x7C, which looks like 16.16
-  fixed point until you read a caller. FUN_004617FC passes
-
-      Entity_Spawn(2, $24, e^[$78] - $10000, e^[$7C] - $10000)
-
-  - it subtracts exactly what spawn adds back. So $10000 is a constant bias on
-  the stored value and cancels out completely; the logical coordinate is plain
-  integer pixels. The bias keeps the stored field positive for negative
-  coordinates, which lets truncating division by a tile size behave the same on
-  both sides of the origin.
-
-  ## The type table
-
-  81 entries of 18 ints at 0x0046909C, statically initialised in DATA rather
-  than loaded from a file - which is why there is no entity data file in data/.
-  The count is not a guess: entry 81 would start at 0x0046A764, and that is
-  where the DirectX interface GUIDs begin.
-
-  Column +0x1C is zero in all 81 rows and is never read by the spawn function;
-  it is padding. Everything else is copied into the new entity. What the
-  columns MEAN is mostly not established - only the ones traced to a use are
-  named below, and the rest are deliberately left as raw indices rather than
-  given speculative names. }
+  THE TYPE TABLE is 81 rows of 18 ints at 0x0046909C, static in DATA rather
+  than a file. Column +0x1C is padding - zero in all 81 rows and never read.
+  Columns not traced to a use are left as raw indices rather than named on a
+  guess. }
 
 unit Entities;
 
@@ -481,12 +456,8 @@ const
   EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
   EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
 
-  { --- The type table's 18 columns, from Entity_Spawn @ 0x004610C4 ----------
-
-    Entity_Spawn copies the type's row into the new entity field by field, so
-    the destination of every column is now known. This is the mapping; what
-    most of them MEAN is still open, but knowing where a column lands is what
-    lets a later function name it.
+  { The type table's 18 columns and where Entity_Spawn @ 0x004610C4 puts each.
+    TEntityType is a raw array, so this mapping lives nowhere else.
 
         col  type+   entity int      col  type+   entity int
         ---  -----   ----------      ---  -----   ----------
@@ -500,27 +471,14 @@ const
          7   +0x1C   NOT COPIED      16   +0x40   [$3F]
          8   +0x20   [$37]           17   +0x44   [$40]
 
-    Note columns 1 and 2 cross over - col 1 goes to [$24] and col 2 to [$23].
-    That is in the original, not a transcription slip.
+    Columns 1 and 2 CROSS OVER - 1 lands on [$24] and 2 on [$23]. That is the
+    original's, not a slip. Column 7 is dead: never copied, zero in all 81 rows.
 
-    Column 7 is never copied at all, and an earlier survey of the shipped table
-    found +0x1C to be zero for all 81 types. Those two facts explain each other:
-    it is a dead column, not a field whose use has yet to be found.
-
-    Two of the columns are now decoded outright, both booleans, and both agree
-    with the survey's finding that they only ever hold 0 or 1:
-
-      col 5  -> [$34]  Entity_UpdateAll adds the layer scroll to the position
-                       only when this is 0, so 1 means SCREEN-SPACE - the entity
-                       does not scroll with the map. The survey found it set
-                       only for types 0..13, which are the ones spawned by code
-                       rather than placed in a stage.
-      col 10 -> [$39]  when 1, Entity_UpdateAll destroys the entity once
-                       Entity_IsOffScreen(e, 4) is true. So it is CULL WHEN
-                       OFF SCREEN.
-
-    Columns 16 and 17 land on EF_TILE_OFS_X/Y above, which is why those two are
-    zero throughout the table - they are runtime offsets starting at 0. }
+    Two are decoded: col 5 is SCREEN-SPACE (Entity_UpdateAll adds the layer
+    scroll only when it is 0, and it is set only for types 0..13, the
+    code-spawned ones), and col 10 is CULL WHEN OFF SCREEN. Columns 16 and 17
+    land on EF_TILE_OFS_X/Y, which is why they are zero throughout - they are
+    runtime offsets. }
   TYPE_COL_SCREEN_SPACE = 5;    { -> [$34] }
   TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
   TYPE_COL_UNUSED = 7;   { never copied, zero for all 81 types }
@@ -570,41 +528,23 @@ const
     not obtain a sprite either; the 33 extra slots are vestigial. }
   ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
 
-  { --- What the two 10-int blocks are for ----------------------------------
+  { The two 10-int blocks Entity_Spawn zeroes, $08..$11 and $12..$1B:
 
-    Entity_Spawn zeroes ints $08..$11 and $12..$1B, ten each. Reading two
-    handlers shows what the split is:
+      Block A   the placement's PARAMETERS - but from A[1] up. A[0] is a
+                general per-type state slot, used as one by at least three
+                handlers.
+      Block B   the handler's RUNTIME COUNTERS.
 
-      Block A ($08..$11)  mostly PARAMETERS, set when the entity is placed
-      Block B ($12..$1B)  RUNTIME COUNTERS, ticked by the handler
+    EntityUpdate_Type32_Emitter is the clearest example of the pairing:
 
-    With one correction, recorded because the first reading was too tidy:
-    A[0] itself is NOT a parameter. Three separate places use it as per-type
-    runtime state - EntityUpdate_Type36_FallingItem as a "has landed" flag,
-    Entity_SpawnDebris writing kind+1 into it on each particle, and
-    Entity_UpdateAll testing it against 3 for type $44. So the clean split
-    holds from A[1] upward, and A[0] is a general per-type state slot.
+      A[1] frames between spawns   B[0] countdown to next spawn
+      A[2] how many in all         B[1] how many so far
+      A[3] scatter radius          B[2] countdown to next sound
+      A[4] frames between sounds
 
-    EntityUpdate_Type32_Emitter @ 0x0045A5D4 is the clearest case. It is an
-    invisible spawner - type 32 is one of the three rows with no sprite - and it
-    reads its whole configuration out of block A while keeping its state in
-    block B:
-
-      A[1] $09  frames between spawns      B[0] $12  countdown to next spawn
-      A[2] $0A  how many to spawn in all   B[1] $13  how many spawned so far
-      A[3] $0B  scatter radius              B[2] $14  countdown to next sound
-      A[4] $0C  frames between sounds
-
-    AUDIT: the radius was recorded as being "in tiles" and it is not. The
-    offset is Random(r * 16) - r * 8 PIXELS, so it spans plus or minus r * 8 -
-    quarter-tile units at the game's 32-pixel tiles. Reading it as tiles
-    overstates every burst by a factor of four.
-
-    When B[1] passes A[2] it destroys itself - and note the test is a strict
-    `A[2] < B[1]` after the increment, so an emitter configured for N actually
-    spawns N + 1 times. That is the pattern to expect
-    from the other handlers: block A is the stage author's configuration and
-    block B is the handler's scratch. }
+    The radius is in PIXELS: Random(r * 16) - r * 8, so plus or minus r * 8 -
+    quarter tiles, not tiles. The exhaustion test is `A[2] < B[1]` AFTER the
+    increment, so an emitter configured for N spawns N + 1 times. }
   EF_BLOCK_LEN = 10;
   EF_STATE     = $08;   { block A[0]: per-type state, not a parameter }
 
@@ -656,27 +596,9 @@ const
     EF_VEL_Y is positive, i.e. while falling onto it. }
   EF_TOUCH_KIND = $32;
 
-  { --- CORRECTION: +0x90 is hit points, not hit-stun -------------------------
-
-    It was first named EF_HITSTUN from Entity_UpdateDying alone, where all that
-    is visible is a guard requiring it to be < 1 before the entity may die. That
-    reading fits a stun counter just as well as a health one, and the wrong one
-    was picked.
-
-    Entity_TakeProjectileHits @ 0x00457AB4 settles it. On a hit it does
-
-        e^.Raw[EF_HP] := e^.Raw[EF_HP] - projectile^.Raw[EF_HP];
-        if e^.Raw[EF_HP] < 1 then
-          begin  e^.Raw[EF_HP] := 0;  e^.Raw[EF_DYING] := 0  end
-        else
-          Play(SND_HIT01);
-
-    Subtracting a per-projectile amount and clamping at zero is health. The
-    sound it plays when the entity SURVIVES is index 17, which SoundTable gives
-    independently as hit01.wav.
-
-    The genuine stun is the +0x70/+0x74 pair, set to 8 on every hit - the same
-    two fields the death sequence reuses as its countdown. }
+  { +0x90 is HIT POINTS. Entity_TakeProjectileHits subtracts the projectile's
+    own +0x90 from it and clamps at zero; the stun is the +0x70/+0x74 pair,
+    set to 8 on every hit. }
 
   { --- Being hit, from Entity_TakeProjectileHits @ 0x00457AB4 ---------------
 
@@ -1149,33 +1071,24 @@ function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
   places rather than inlined. }
 procedure ApproachZero(var V: Integer; Step: Integer);
 
-{ 0x00457300 / 0x004574DC. The tile an entity would run into moving DeltaMain
-  along this axis, or TILE_NONE if nothing solid is in the way. The caller
-  compares the answer against the terrain's solid threshold - and so does this,
-  because the original stops at the FIRST tile at or above it rather than
-  returning the whole span.
+{ 0x00457300 / 0x004574DC. The first solid tile in the way of moving DeltaMain
+  along this axis, or TILE_NONE. It stops at the first tile at or above the
+  terrain's threshold rather than returning the whole span.
 
-  It does not test one tile. It sweeps the entity's LEADING EDGE across every
-  tile the box spans on the other axis, so a tall entity is stopped by a wall
-  that only meets its feet. DeltaCross shifts that span, which is how a caller
-  asks "if I move this way AND that way, what stops me horizontally".
+  It sweeps the LEADING EDGE across every tile the box spans on the other
+  axis, so a tall entity is stopped by a wall that only meets its feet.
+  DeltaCross shifts that span.
 
-  DELTA OF ZERO RETURNS TILE_NONE. The whole body sits inside `if Delta <> 0`,
-  so an entity that is not moving is never blocked - it can rest inside a solid
-  tile indefinitely and only the next non-zero velocity notices. That is why
-  Player_Update can ask about EF_VEL_X unconditionally.
+  DELTA OF ZERO RETURNS TILE_NONE - the body is inside `if Delta <> 0` - so a
+  motionless entity is never blocked and can rest inside a solid tile until
+  its next non-zero velocity.
 
-  SCROLLING is finer than it looks. It decides whether Delta is added to the
-  LAYER ORIGIN or to the ENTITY POSITION - but both land in the same sum, so it
-  changes no tile except through ROUNDING: each term is converted to pixels
-  separately, so which of the two carries the 1/32-pixel remainder decides
-  whether the sum crosses a pixel. It matters exactly when the two fractions
-  straddle a boundary, and not otherwise.
+  SCROLLING chooses whether Delta is added to the layer origin or the entity
+  position. Both reach the same sum, so it changes the answer only through
+  rounding, when the two 1/32-pixel fractions straddle a pixel boundary.
 
-  The two write their working tile coordinate to globals at 0x00484FA4 and
-  0x00484FA8. Those are NOT outputs: nothing outside these two functions
-  references either address, so they are locals the compiler happened to spill
-  to fixed storage. They are locals here. }
+  The globals at 0x00484FA4/0x00484FA8 are spilled locals, not outputs -
+  nothing outside these two functions reads them. }
 function EntityTileCollideX(const E: TEntity; const L: TLayerInfo;
                             Tiles: TTileSource; SolidThreshold: Integer;
                             DeltaX, DeltaY: Integer;
@@ -1185,52 +1098,22 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
                             DeltaY, DeltaX: Integer;
                             Scrolling: Boolean): Integer;
 
-{ 0x004576B4. Instant death by terrain. Sweeps every tile the entity's box
-  covers and, on finding the stage's KILL TILE, puts the entity into state 10 -
-  the fall-death state - and clears EF_BLOCK_B so the state starts from its
-  first frame.
+{ 0x004576B4. Instant death by terrain: sweeps the tiles the entity's box
+  covers and, on the stage's kill tile, sets state 10 and clears EF_BLOCK_B so
+  the fall-death starts from its first frame.
 
-  Camera_ApplyMoveY @ 0x00459E73 is the only caller, so this runs on every
-  vertical movement step and nowhere else. Falling into a pit is checked; being
-  pushed sideways into one is not.
+  Camera_ApplyMoveY is the ONLY caller, so this runs on vertical movement and
+  nowhere else - falling into a pit is checked, being pushed sideways into one
+  is not.
 
-  ## The box it sweeps
+  Two details of the original, both kept: the match is on the low 16 bits
+  (MOVZX), so a map word above $FFFF could never match; and a hit breaks the
+  COLUMN loop only, so the state is set once per row rather than once per
+  entity - idempotent, but it is a break and not an exit.
 
-  The four bounds are the SAME arithmetic Entity_TileCollideX/Y use for their
-  leading and trailing edges, taken on both axes at once:
-
-      top    = (originPx + posPx - half(extentY) + boxOfsY + tileOfsY)     div tileH
-      bottom = (originPx + posPx + half(extentY) - boxOfsY + tileOfsY - 1) div tileH
-
-  and the same across. EF_BOX_OFS_* is ADDED on the leading edge and SUBTRACTED
-  on the trailing one, which is what makes it an inset rather than an offset;
-  the -1 keeps a box that ends exactly on a boundary out of the next tile.
-  Both conversions use the bare `if negative then +31, then shift` form -
-  OriginPixel, not PixelOf - so the position keeps its bias and the tile
-  indices come out high by it. That is exactly why the lookup subtracts
-  TILE_BIAS_TILES from both coordinates, the same bias the layer origin
-  carries.
-
-  ## Two details a tidy rewrite would lose
-
-  The match is on the LOW 16 BITS of the tile - MOVZX EAX,AX - so a map word
-  above $FFFF could never match. Nothing in the shipped data has one, but the
-  masking is the original's and is kept.
-
-  On a match the original breaks the COLUMN loop only. The row loop keeps
-  going, so the state is set once per row that contains a kill tile rather than
-  once per entity. It is idempotent, so nothing observable changes - but it is
-  a `break`, not an `exit`, and reproducing it costs nothing.
-
-  ## It always returns False
-
-  The function reserves a byte of stack for its Boolean result, writes 0 to it
-  on entry, and never writes it again; the last two instructions load that byte
-  into AL and return. So the result is a constant False whatever it finds, and
-  Camera_ApplyMoveY ignores it. Modelled as a procedure, because a function
-  returning a constant is not a result - it is a Delphi function that forgot to
-  assign one. Stages.pas has the kill tile itself: 29 for terrains 1..8, and
-  1000 for terrain 9, which no tileset can produce. }
+  It always returns False - the byte is written once on entry and never
+  again - so it is modelled as a procedure. Kill tile values are in
+  Stages.pas. }
 procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
                                Tiles: TTileSource; KillTile: Integer);
 
@@ -2204,32 +2087,11 @@ end;
 
 function PixelOf(Raw: Integer): Integer;
 begin
-  { `div`, where this said `shr`. NOT because the shift was wrong - it was
-    right - but because it was right BY ACCIDENT, and the accident is fragile.
-
-    I claimed this was broken and it was not; the correction is worth keeping
-    because the reasoning that produced it is the trap. The original is
-    `if v < 0 then v := v + 31; v := v sar 5`, which is what Delphi emits for
-    `div 32` on a signed value. Pascal's `shr` on an Integer is LOGICAL, so
-    transcribing that literally SHOULD have given nonsense for anything left of
-    or above the origin - and in type 49's bob, where the operand was a plain
-    Integer variable, it did exactly that.
-
-    Here it did not, and the reason is invisible at the call site:
-
-        SizeOf(Raw - POSITION_ROUND) = 8
-
-    POSITION_ROUND is an untyped constant, and `Integer - 65505` has a range
-    that no longer fits in an Integer, so FPC widens the whole expression to
-    Int64. The shift then happens in 64 bits and the assignment truncates back
-    to 32, and for every value in range that is indistinguishable from an
-    arithmetic shift. Correct output, for a reason having nothing to do with
-    the code as read.
-
-    Which is why it is now `div`: give POSITION_ROUND a typed Integer
-    declaration, or hoist the subtraction into a local, and the promotion
-    disappears along with the correctness. `div` says what the original source
-    said and does not depend on a range-inference rule to be right. }
+  { `div`, not `shr`. Pascal's shr on an Integer is LOGICAL, so it is wrong
+    here for anything left of or above the origin - as it was in type 49's
+    bob. It happened to work in this expression only because POSITION_ROUND is
+    untyped, which widens the subtraction to Int64 and makes the shift
+    arithmetic by accident. Typing that constant would silently break it. }
   Result := (Raw - POSITION_BIAS) div (1 shl POSITION_SHIFT);
 end;
 
