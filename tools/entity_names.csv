@@ -19,11 +19,11 @@ type,name,note
 16,InfoSign,contains text that is read by interacting with it 
 20,,looks empty
 21,WingedHorseBlock,movement block that carries you up/down or left/right
-22,,
-23,,
-24,,
-25,,
-27,,
+22,SpikeBall,a stationary spike block that hurts Akuji
+23,Candle,a switch-like object - set by shooting fire at it 
+24,PowerOrb,contains the 9 powers of Akuji (Dash, Fire, Bat, etc.)
+25,Door,the main way of moving between rooms - interact to go to next/prev room
+27,AkujiStatue,
 29,,
 30,,
 31,,

@@ -74,55 +74,51 @@ SPAWN_X = 3        # DEFAULT_SPAWN_X is 0x60 = 96px = tile 3
 
 # THE HEIGHT AND THE ROWS ARE NOT ARBITRARY. A new game starts with
 # PlayerState.ScrollY = DEFAULT_SCROLL_Y = 0x1C0 = 448 pixels = tile 14, and
-# Stage_Begin sets the camera straight from it. Nothing clamps that: the
-# original's Camera_ApplyMoveY only ADDS VelY when a scroll is called for, so
-# a camera that starts outside the map stays outside it.
+# Stage_Begin sets the camera straight from it with no clamp, so row 14 is
+# where the screen opens and the exhibit has to be there.
 #
-# A first attempt made the map 14 tiles tall - exactly 448 pixels - so the
-# camera began precisely at the bottom edge, the draw loop ran zero times and
-# the screen was black with the player somewhere off it. The map has to be
-# tall enough that row 14 is real, and the interesting part has to BE at
-# row 14, because that is where the camera opens.
+# Everything is one tile high and stacked, so a creature sits directly above
+# the player's head with a single floor tile between them:
+#
+#   14  cage ceiling
+#   15  THE CREATURE
+#   16  cage floor - the only thing keeping it off you
+#   17  the corridor you walk, and the signs
+#   18  corridor floor
 H = 24
-CAGE_CEIL_Y = 11
-CELL_FLOOR_Y = 16          # cages occupy rows 12..15
-CORRIDOR_FLOOR_Y = 20      # corridor is rows 17..19
-ENTITY_Y = 15              # stands on the cage floor
-SIGN_Y = 19                # stands on the corridor floor
+CAGE_CEIL_Y = 14
+ENTITY_Y = 15
+CELL_FLOOR_Y = 16
+CORRIDOR_Y = 17
+CORRIDOR_FLOOR_Y = 18
+SIGN_Y = CORRIDOR_Y
 
 TARGETS = ('map/001.map', 'data/ev001.dat', 'data/tk001.dat')
 
 
 def build_map(width):
-    t = [AIR] * (width * H)
+    t = [WALL] * (width * H)
 
     def put(x, y, v):
         if 0 <= x < width and 0 <= y < H:
             t[y * width + x] = v
 
-    # everything above the cages is solid rock, so the player falls down the
-    # one shaft rather than wandering across the roof
-    for x in range(width):
-        for y in range(0, CAGE_CEIL_Y + 1):
-            put(x, y, WALL)
-        put(x, CELL_FLOOR_Y, WALL)           # cage floor / corridor ceiling
-        put(x, CORRIDOR_FLOOR_Y, WALL)       # corridor floor
-        for y in range(CORRIDOR_FLOOR_Y + 1, H):
-            put(x, y, WALL)                  # fill below
-    for y in range(H):
-        put(0, y, WALL)
-        put(width - 1, y, WALL)
+    # carve the two one-tile rows out of solid rock
+    for x in range(1, width - 1):
+        put(x, ENTITY_Y, AIR)
+        put(x, CORRIDOR_Y, AIR)
 
-    # the dividers between cages
+    # a divider between neighbouring cages, in the creature's row only, so the
+    # corridor below stays open end to end
     for i in range(len(TYPES) + 1):
-        x = LEFT + i * PITCH - 1
-        for y in range(CAGE_CEIL_Y + 1, CELL_FLOOR_Y):
-            put(x, y, WALL)
+        put(LEFT + i * PITCH - 1, ENTITY_Y, WALL)
 
-    # the spawn shaft: the player appears at tile 3 row 3 and drops into the
-    # corridor. Everything from the surface down to the corridor is opened.
-    for y in range(1, CORRIDOR_FLOOR_Y):
-        put(SPAWN_X, y, AIR)
+    # the spawn shaft: the player appears at tile 3 row 3 and drops to the
+    # corridor. It must not open the creature row, or they would all escape
+    # down it.
+    for y in range(1, CORRIDOR_Y):
+        if y != ENTITY_Y:
+            put(SPAWN_X, y, AIR)
 
     hdr = struct.pack('<6i', width, H, TILE_W, TILE_H, SHEET_C, SHEET_R)
     return hdr + struct.pack('<%dH' % (width * H), *t)
