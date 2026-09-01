@@ -260,33 +260,17 @@ begin
       file was actually applied. }
     LoadSettings(DataDir);
 
-    { system.ini sits beside the EXE, not in data\. Two fields, and both
-      overwrite what system.dat just supplied.
+    { system.ini carries [disp] fullscreen and [device] input, and both
+      overwrite what system.dat just supplied. Two deliberate exactnesses:
 
-      The section/ident split was read off the register convention - EDX is
-      ReadString's Section and ECX its Ident - and the SHIPPED system.ini
-      confirms it from the data side: it carries [disp] fullscreen and
-      [device] input, exactly those two pairs and nothing else.
+        * the fullscreen compare is case-SENSITIVE (@LStrCmp at 0x004656D8),
+          so 'ON', 'On' and ' on ' all mean WINDOWED.
+        * input goes through the one-argument StrToInt at 0x00465708, which
+          RAISES on anything it cannot parse - including the empty string a
+          missing key returns. A malformed [device] input takes the original
+          down at start-up, so it takes this down too.
 
-      Both reads are now byte-faithful. They used to be written defensively
-      and neither deviation was recorded:
-
-        * fullscreen was compared as LowerCase(Trim(s)) = 'on'. The original
-          calls @LStrCmp at 0x004656D8 and branches on the flags it sets -
-          a byte-exact, case-SENSITIVE compare against 'on'. So 'ON', 'On'
-          and ' on ' all give WINDOWED in the original and gave fullscreen
-          here. Removed.
-
-        * input was parsed with StrToIntDef(..., 0). The original calls
-          StrToInt at 0x00465708 with nothing in EDX, so it is the
-          one-argument form, which RAISES on anything it cannot parse -
-          including the empty string ReadString returns when system.ini or
-          the key is missing. Reproduced: a missing or malformed
-          [device] input takes the original down at start-up and now takes
-          this down too. That is not a bug we are entitled to fix.
-
-      The shipped file parses cleanly under both readings, so this changes
-      nothing for the game as distributed. }
+      The shipped file parses the same either way. }
     { DataDir, not ExtractFilePath(ParamStr(0)). In the original the two are
       the SAME directory - akuji.exe ships beside system.ini - but this build
       lives in src/ and finds the data with FindGameData, so every other path
@@ -552,51 +536,27 @@ begin
   if GameStateValue <> GS_PAUSE then
     DDDD1.TickFade;
 
-  { The OTHER way into the pause menu, which was missing entirely.
-    0x00464D30 does this from the frame loop, between the fader tick and the
-    end-of-frame input block:
-
-        if (((*p_GameState != 0x14) || (*p_TitleSubMode != 1)) &&
-            ((*p_GameState != 0x82) &&
-             (p_InputState[0x1e] == 1 && p_InputState[0x22] == 0)))
-              PTR_DAT_0046d2c0  = *p_MenuIndex     ... SavedMenuIndex
-              *p_MenuIndex      = 0
-              *p_SavedGameState = *p_GameState
-              *p_GameState      = 0x82
-
-    Button 2 - the same button the pause menu's own cancel reads - with its
-    latch, so it fires on the press and not while held. The two guards are the
-    original's: not while already paused, and not on the title screen's OPTIONS
-    page, where button 2 is that screen's back key instead.
-
-    Only FormKeyDown's VK_ESCAPE was implemented, so the mapped pause button
-    did nothing. Both paths write the same four globals, which is why they are
-    one procedure here. }
+  { The frame loop's own way into the pause menu, at 0x00464D30, beside
+    FormKeyDown's VK_ESCAPE - both write the same four globals, so both call
+    EnterPause. The guards are the original's: not while already paused, and
+    not on the title screen's OPTIONS page, where this button is that screen's
+    back key instead. }
   if (GameStateValue <> GS_PAUSE)
      and not ((GameStateValue = GS_TITLE_MENU) and (TitleSubMode = TSM_OPTIONS))
      and FSession.Input.Button[PAUSE_CANCEL_BUTTON]
      and not FSession.Input.ButtonLatch[PAUSE_CANCEL_BUTTON] then
     EnterPause;
 
-  { DIVERGENCE DIV-002. These three stand in for the Joy poll the original runs
-    at the TOP of every frame - two FUN_00454648 calls for the axes, then four
-    FUN_004546C4 calls through p_KeyMap into p_InputState+0x1C - which
-    OVERWRITES the previous frame's values unconditionally. So the stand-ins
-    must live exactly one frame too, and they were being cleared inside the
-    GS_TITLE_MENU arm instead, which meant any state that did not clear them
-    handed them to whatever ran next.
+  { DIVERGENCE DIV-002. These stand in for the Joy poll the original runs at
+    the top of every frame, which overwrites the previous frame's values
+    unconditionally - so they must live exactly one frame and be cleared HERE,
+    for every state, not inside whichever arm happens to consume them. A state
+    that does not clear them hands them to whatever runs next, and screen
+    changes make that a different screen's input.
 
-    That is not theoretical: pressing Down then Z in the PAUSE menu left
-    FMoveY = 1 and FConfirm = True, and pause RESET goes to the title screen.
-    The title menu's first Update then moved its cursor 0 -> 1 and confirmed it
-    in the same call - and row 1 of the title menu is CONTINUE, so Reset loaded
-    the last save.
-
-    Cleared at the frame boundary rather than at the top, because these are fed
-    by WM_KEYDOWN between frames while the original's poll reads the physical
-    state during the frame; the boundary is where a key event stops being this
-    frame's input. That placement is a property of the stand-in, not of the
-    binary - it goes when DIV-002 does. }
+    The frame boundary rather than the top: these are fed by WM_KEYDOWN between
+    frames, so this is where a key event stops being this frame's input. That
+    placement belongs to the stand-in and goes when DIV-002 does. }
   FMoveY := 0;
   FMoveX := 0;
   FConfirm := False;
