@@ -210,41 +210,20 @@ const
   DROP_TABLE_PTR    = $0046CE18;
   DROP_SPRITES: array[0..DROP_SPRITE_COUNT - 1] of Integer = (100, 101);
 
-  { --- The effect family, types 3..13 -----------------------------------
-    Eleven handlers built from the same four moves: write a sprite from a
-    table indexed by a frame counter, tick that counter every N frames,
-    optionally move, and destroy at the end. What differs is which of those
-    each one does, and it is worth having them side by side because the
-    differences are the only content.
+  { The effect family, types 3..13. Eleven handlers built from the same four
+    moves, and each one's own TN_ constants say which of them it does. What
+    the constants cannot say:
 
-        type  frames  ticks  motion                     ends
-          3      3      5    POS_X += VEL_X             yes
-          4      2      3    none                       yes
-          5      4      5    follows its OWNER          yes
-          6      4      9    POS += VEL                 yes
-          7      4      5    none                       yes
-          9      1      -    circles, one step a frame  no
-         10      6      3    none                       yes
-         11      4      3    none                       NO - it loops
-         12      4      4    none                       NO - it loops
-         13    varies       four states, see below      3 of 4
+      * types 11 and 12 never call Entity_Destroy. Not a leak - they are the
+        torch's flame and type 23 owns their lifetime, and anything that
+        wanders off is culled by Entity_UpdateAll.
+      * types 9 and 13 also run in GS_PLAY_ALT; the rest run in GS_PLAY only.
+      * type 6 takes its sprite ROW from block A[1], which the explosion sets
+        when it spawns the spark, so one table serves two burst colours. Type
+        7 takes its row from the VARIANT.
 
-    Types 11 and 12 never call Entity_Destroy at all. They are not leaks: an
-    entity that leaves the screen is culled by Entity_UpdateAll, which is a
-    different mechanism from an effect timing out, and these two rely on it.
-
-    Types 9 and 13 are the only two that also run in GS_PLAY_ALT (100) rather
-    than GS_PLAY alone.
-
-    THE SPRITE TABLES all sit in one run at 0x0046BC5C and their extents come
-    from the next table's start, which is the discipline tools/table_bounds.py
-    exists to enforce - see the 16-versus-2 error it was written after. Two of
-    them are two ROWS rather than a flat list, indexed by a second field with
-    a stride of four:
-
-        type 6   row from block A[1], which the explosion sets when it spawns
-                 the spark - so the same table serves two burst colours
-        type 7   row from the VARIANT }
+    The tables sit in one run at 0x0046BC5C, each one's extent being the next
+    one's start - the rule tools/table_bounds.py enforces. }
   T3_FRAMES = 3;  T3_TICKS = 4;   { advance when the count EXCEEDS, so every 5 }
   T3_TABLE_ADDR = $0046BC5C;
   T3_SPRITES: array[0..1, 0..T3_FRAMES - 1] of Integer =
@@ -352,41 +331,26 @@ const
   T13_TERRAIN_SHARD3 = 3;
   T13_TERRAIN_SHARD4 = 4;
 
-  { --- Types 15, 21, 23, 28 and 29, the furniture -----------------------
-    Five things that sit in a room rather than fly through it, and two more -
-    17 and 19 - whose handlers are a single RET. Those two are not missing:
-    the switch has an arm for them and the arm returns immediately, which is
-    a different fact from having no arm at all, and HANDLER_ADDR distinguishes
-    them from types 0, 18 and 20.
+  { Types 15, 21, 23, 28 and 29, the furniture - plus 17 and 19, whose arms
+    are a single RET. That is not the same as having no arm, and HANDLER_ADDR
+    keeps them apart from types 0, 18 and 20.
 
-    TYPE 15 is a switch, and it is the only handler that writes to the EVENT
-    TABLE. Thrown, it plays a sound, changes to its second sprite, and sets
-    its own event's opcode to 9 - which triggers nothing - so a switch stays
+    Type 15 is the only handler that writes to the EVENT TABLE: it sets its
+    own event's opcode to 9, which triggers nothing, so a thrown switch stays
     thrown without needing a progress flag.
 
-    TYPE 21 oscillates. EF_FACING is not a direction index here, it is a
-    signed SPEED, and it is negated every block-A[1] frames; EF_STATE picks
-    the axis, 0 for vertical and 1 for horizontal. That is exactly what
-    ParamA's 'R' letter configures - it sets EF_FACING and block A[1] - so a
-    placement carries the speed and the half-period of the swing.
+    Type 21's EF_FACING is a signed SPEED, not a direction, negated every
+    block A[1] frames, with EF_STATE choosing the axis. ParamA's 'R' letter
+    writes both, so a placement carries the speed and the half-period.
 
-    TYPE 23 is a torch. On state 1 it spawns TWO children, types 11 and 12,
-    16 and 22 pixels above itself, and remembers them in EF_CHILD_A and
-    EF_CHILD_B; on state 3 it destroys them both. That is why types 11 and 12
-    loop for ever with no Entity_Destroy of their own - they are the flame,
-    and the torch owns their lifetime.
+    Type 23 owns types 11 and 12 - it spawns them as its flame and destroys
+    them - which is why those two never destroy themselves. Both spawns
+    SUBTRACT the layer delta: the children are placed after Entity_UpdateAll
+    has already carried this frame's scroll into the parent, so without it
+    they would be scrolled twice.
 
-    Both spawns subtract the LAYER DELTA from the position. The children are
-    placed after Entity_UpdateAll has already carried this frame's scroll into
-    the parent, so without it they would be carried twice and lag the torch by
-    one frame's scroll.
-
-    TYPE 28 does nothing at all unless its variant is 0 - both the sprite and
-    the animation are inside that test - so a variant-1 placement is inert.
-
-    TYPE 29 animates at two speeds: ten ticks a frame normally, four when the
-    player's box overlaps its own, tested at three times width and one times
-    height. It also drops itself 2 pixels on its very first frame. }
+    Type 28 does nothing at all unless its variant is 0, so a variant-1
+    placement is inert. }
   T15_TABLE_ADDR = $0046BE78;
   T15_SPRITES: array[0..1] of Integer = (61, 62);
   T15_SOUND = $0E;
@@ -420,39 +384,18 @@ const
   T29_NEAR_SCALE_X = 3;
   T29_NEAR_SCALE_Y = 1;
 
-  { --- Types 30, 31 and 37 ----------------------------------------------
-    The first handlers that read the player's DIFFICULTY, and they read it
-    through tables indexed by it rather than by branching on it.
+  { Types 30, 31 and 37 - the first handlers to read DIFFICULTY, and they do
+    it through tables indexed by it rather than by branching on it.
 
-    TYPE 30 patrols. On its first frame, and only on difficulty 2, it DOUBLES
-    its speed and HALVES its turn period - so on hard it covers four times the
-    ground between turns. Its sprite row comes from the sign of that speed,
-    the same two-ifs-no-else shape type 3 has.
+    Type 30 doubles its speed and halves its turn period on its first frame,
+    and only on difficulty 2.
 
-    TYPE 31 floats, circles and attacks on a six-state machine, and three
-    separate difficulty tables drive it: how much HP it gains over the base,
-    how long it waits before attacking, and how fast it fires while attacking.
-    All three are (easy, normal, hard) triples.
+    Type 31's state 3 is a dead end in this handler: nothing here leaves it.
+    The type-35 child writes state 4 back, which is why the state machine
+    looks broken and is not.
 
-      state 0  spawn: add the HP bonus, rise 4 px and left 1 px, go to 1
-      state 1  drift in a circle, one heading step a frame, moving by HALF the
-               X component only; count up and go to state 2 after
-               wait[diff] * HP + 20 frames
-      state 2  spawn a type-35 child in mode 0 pointing at itself, go to 3
-      state 3  held - nothing here moves it; the child does
-      state 4  the attack: for 180 frames, every eighth frame past
-               rate[diff], play sound 0x17 and spawn a type-34 shot along
-               block A[1]'s heading
-      state 5  spawn a type-35 child in mode 1 and go to 6, which is inert
-
-    Reaching state 4 is not this handler's doing - nothing here sets it. The
-    type-35 child does, which is why state 3 looks like a dead end and is not.
-    Losing all HP forces the sprite to frame 4 wherever it is.
-
-    TYPE 37 drops. It puffs on arrival, falls at gravity 4 to a terminal 0x200,
-    lands on the first solid tile with sound 0x1B, and animates a five-frame
-    loop throughout. Its frame counter wraps with a div AND a mod, and the
-    quotient is left in EAX and returned - dead, like type 16's. }
+    Type 37's frame counter wraps with a div AND a mod, and the quotient is
+    left in EAX and returned - dead, like type 16's. }
   T30_FRAMES = 2;  T30_TICKS = 8;
   T30_TABLE_ADDR = $0046BE9C;
   T30_SPRITES: array[0..1, 0..T30_FRAMES - 1] of Integer =
@@ -1116,40 +1059,18 @@ const
   T59_RISE_FRAME = 1;
   T59_HANG_FRAME = 2;
 
-  { --- Type 52, the boss ------------------------------------------------
-    A three-beat cycle: circle, dive, circle, dive, circle, SUMMON, repeat.
-    EF_CHILD_B counts the beats and is what picks which of the two attacks
-    state 2 runs; it resets to 0 after the summon.
+  { Type 52, the boss. Two things the code does not say for itself:
 
-      1  hover: a two-frame flap on an eight-tick reload, and a wait whose
-         length is (EF_HP div 40) * 100 plus a difficulty table. The HP term is
-         the interesting half - it is the boss's CURRENT hp, so as you damage
-         it the wait shrinks and it attacks faster. Nothing else in the game
-         paces itself off its own health.
-      2  circle: adds DirVelX(facing) to X and turns SIXTEEN steps a frame, a
-         quarter turn, so it traverses a square rather than a circle
-      3  dive: falls at gravity 2 from -0x20, stops horizontally the moment
-         Entity_TileCollideX reports a solid tile, and lands when VEL_Y passes
-         0x1F
+      * it REWRITES ITS OWN EF_INSET_PCT_Y - 70 entering the circle, 20
+        entering the dive - and Entity_UpdateAll turns that back into a
+        hitbox inset every frame, so it is a small target while circling and
+        a large one while diving. Type 50 does the same with EF_VULN_KIND.
+      * its HP table is NEGATIVE on every difficulty and applied once at
+        spawn, so the type table carries the HARD figure and each easier
+        setting subtracts from it. Type 50 does this too, but only on easy.
 
-    It REWRITES ITS OWN EF_INSET_PCT_Y - 70 on entering the circle and 20 on
-    entering the dive - which Entity_UpdateAll turns back into a hitbox inset
-    every frame. So the boss is a small target while it circles and a large
-    one while it dives. Type 50 rewrites its own EF_VULN_KIND for a similar
-    reason; these two are the only self-modifying hitboxes so far.
-
-    Its HP table is NEGATIVE on every difficulty - (-30, -20, -10), applied
-    once at spawn. So the type table carries the hard-mode figure and each
-    easier setting subtracts from it, rather than the other way round. Type 50
-    does this too but only on easy.
-
-    Only on HARD does it re-aim before circling; on easy and normal it keeps
-    whatever direction it already had, and a zero is forced to +0x80 so it can
-    never stall.
-
-    The summon spawns type 53 - the charger - 48 pixels ahead and 5 below, and
-    writes the charger's VEL_X itself as sign * DirVelX(0) * a speed table.
-    DirVelX(0) is 32, so the chargers run at 64, 96 or 96. }
+    Only on hard does it re-aim before circling, and a zero heading is forced
+    to +0x80 so it can never stall. }
   T52_FRAMES = 2;  T52_TICKS = 8;
   T52_TABLE_ADDR = $0046C1B0;
   T52_SPRITES: array[0..1, 0..3] of Integer =
@@ -1590,37 +1511,15 @@ const
   T68_RISING_STATE = 3;
   T68_CAUGHT_STATE = 4;     { nothing in this handler ever sets it }
 
-  { --- Types 69 and 70 --------------------------------------------------
-    TYPE 69 is a PUZZLE OBJECT, and the only handler so far that writes a
-    progress flag. It slides - EF_VEL_X decaying by 4 a frame, so something
-    else has to push it - and does nothing at all until the tile one below it
-    is NOT solid. Over a hole it:
+  { Types 69 and 70. Type 69 sets Progress[the first four characters of its
+    event's ParamB] UNCONDITIONALLY - no opcode test, and after the destroy
+    rather than inside it - so it sets its flag whatever its event's opcode
+    says, which Entity_Destroy would not have done.
 
-      * spawns a type 68 as an ACTOR, in state 4 with 1 hp, carrying ITS OWN
-        current sprite id. State 4 is the falling half of type 68, the half
-        that lands and destroys itself WITH loot. So pushing this into the
-        hole is what pays out.
-      * destroys itself
-      * sets Progress[first four characters of its event's ParamB]
-
-    That last write is the same parse Entity_Destroy does for an opcode-5
-    event, but here it is UNCONDITIONAL - no opcode test, and it happens
-    after the destroy rather than inside it. So a type 69 sets its flag
-    whatever its event's opcode says, which Entity_Destroy would not have
-    done.
-
-    TYPE 70 has exactly 100 hp and dies of any scratch. State 1 watches
-    `EF_HP <> 100` - not "below some threshold", not "at zero" - so the first
-    point of damage of any size moves it to state 2, where it shows one fixed
-    frame for 120 frames and then sets its own EF_HP to 0.
-
-    Its two variants differ in one line: variant 1 walks (type 60's wall and
-    ledge probes again) and variant 0 stands still. Everything else is
-    shared, including the 100.
-
-    Variant 1's sprite table is (0, 1, 2, 1, 1) where variant 0's is
-    (434, 435, 436, 435, 437). Those low numbers are what the binary holds;
-    recorded rather than second-guessed. }
+    Type 70 watches `EF_HP <> 100`: not a threshold and not zero, so the
+    first point of damage of any size ends it. Variant 1's sprite table is
+    (0, 1, 2, 1, 1) where variant 0's is in the 434..437 range; those low
+    numbers are what the binary holds, recorded rather than second-guessed. }
   T69_FRAMES = 4;
   T69_TABLE_ADDR = $0046C4B8;
   T69_SPRITES: array[0..T69_FRAMES - 1] of Integer = (430, 431, 432, 433);
