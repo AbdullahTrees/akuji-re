@@ -677,29 +677,16 @@ const
   T44_GRAVITY = 2;
   T44_TERMINAL = $200;
 
-  { --- Types 45 and 46 --------------------------------------------------
-    TYPE 45 is a crumbling platform, and it is the only handler that reads
-    EF_RIDDEN - the flag Entity_SolidCollideY sets when something is standing
-    on a solid. Step on it and it starts shaking; after enough shakes it
-    clears EF_SOLID for 60 frames and you fall through; then it comes back.
+  { Types 45 and 46. Type 45 is the only handler that reads EF_RIDDEN, the
+    flag Entity_SolidCollideY sets when something stands on a solid - and that
+    flag is cleared at the END of every frame whatever state it is in, so it
+    is a one-frame signal the collision has to re-set to keep the count going.
+    Its shake threshold SUBTRACTS a difficulty figure from the placement's own
+    count, so a harder game crumbles it sooner.
 
-    Two details. The shake threshold is `block A[1] - tough[difficulty]`, so
-    a HIGHER difficulty makes it crumble SOONER - subtracting 0, 2 or 4 from
-    the placement's own count. And EF_RIDDEN is cleared at the END of every
-    frame whatever state it is in, so it is a one-frame signal that has to be
-    re-set by the collision each frame to keep counting.
-
-    TYPE 46 sleeps until you come close, then chases. Its wake test is the
-    horizontal distance in PIXELS - abs((self.x - player.x) >> 5) - against
-    64, 80 or 128 by difficulty, so an EASIER game wakes it later. Once awake
-    it uses Entity_SteerToPlayer, which turns one step toward the player every
-    few frames and rewrites the velocity from the direction table; this then
-    HALVES that velocity and multiplies by 2, 3 or 4 by difficulty.
-
-    It also clamps against terrain on both axes with the edge-distance snap,
-    so it slides along walls rather than embedding in them. Its initial
-    heading is Random(64), which is the second use of the RNG outside the
-    debris - so a room full of these does not move in lockstep. }
+    Type 46 wakes on horizontal pixel distance, and an EASIER game wakes it
+    LATER. Its initial heading is Random(64) - the second use of the RNG
+    outside the debris - so a room full of them does not move in lockstep. }
   T45_FRAMES = 5;  T45_TICKS = 8;
   T45_TABLE_ADDR = $0046C074;
   T45_SPRITES: array[0..T45_FRAMES - 1] of Integer = (131, 132, 133, 134, 133);
@@ -723,26 +710,14 @@ const
   T46_WAKE_SOUND = $1D;
   T46_TURN_TIMER = 1;       { Steer's timer slot }
 
-  { --- Type 47, the lobber ----------------------------------------------
-    Four states on a loop: wait, wind up, fire, rest, and back to wait.
+  { Type 47, the lobber. Its two difficulty tables run in OPPOSITE directions
+    - the wait before winding up is 120, 60, 60 and the rest afterwards is
+    180, 120, 60. Both make it fire more often, but they were tuned as
+    separate numbers rather than one.
 
-      1  idle, a two-frame loop; leaves after 120, 60 or 60 frames
-      2  wind up, but ONLY while on screen - the same gate types 38 and 41
-         use. Five frames; at the end it throws TWO type-48 shots, taking
-         their headings from the first two entries of an angle table shifted
-         left five and giving both the same upward velocity of -0x40
-      3  rest, on the same two-frame loop as the idle, for 180, 120 or 60
-         frames
-
-    Its two difficulty tables run in OPPOSITE directions and that is the
-    interesting part: the wait before winding up is 120, 60, 60 - shorter on
-    harder - while the rest afterwards is 180, 120, 60. Both make it fire more
-    often, but they were tuned as separate numbers rather than one.
-
-    The angle table it draws from starts with the same (-1, 1, ...) run type
-    42's fan uses, but only the first two entries are read here - the loop is
-    a `do ... while (--n)` from 2, so the other two ints of the four-int table
-    are unreachable from this handler. }
+    It reads only the first two entries of a four-int angle table - the loop
+    is a `do ... while (--n)` from 2 - so the other two are unreachable from
+    this handler. }
   T47_FRAMES = 2;  T47_TICKS = 8;
   T47_TABLE_ADDR = $0046C0CC;
   T47_SPRITES: array[0..4] of Integer = (139, 140, 141, 142, 143);
@@ -788,29 +763,16 @@ const
   T48_BLINK_TIMER = $E10;   { armed on the second-to-last bounce }
   T48_HANDOFF = $2C;        { the one-shot velocity slot }
 
-  { --- Type 49, the diver -----------------------------------------------
-    Hovers, drops on you, climbs back, rests, repeats.
+  { Type 49, the diver. Its trigger distance runs the ordinary way round -
+    HARDER sees further - and above easy it also AIMS, because that write sits
+    inside `if difficulty > 0`; on easy it dives straight down.
 
-      1  hover: a two-frame flap at sixteen ticks, and a bob that steps the
-         heading every frame and adds a QUARTER of its Y component - the same
-         heading-as-oscillator idiom type 42 uses, at a quarter amplitude
-      2  dive: gravity 4 from -0xC0 upward. Sprite 2 while still rising and 3
-         once falling, which is a sign test on the velocity rather than a
-         state
-      3  climb, then rest and go back to hovering
+    It calls Entity_SpawnDebris twice, at the start and end of the dive, which
+    is the only use of that function outside a death: the debris doubles as a
+    dust puff here.
 
-    It calls Entity_SpawnDebris TWICE - once when the dive starts and once
-    when it ends - which is the only use of that function outside a death, so
-    the debris is doubling as a dust puff here.
-
-    Its trigger is horizontal pixel distance against 64, 128 or 256 by
-    difficulty, and this one runs the ordinary way round: HARDER sees further.
-    Above easy it also AIMS, setting its horizontal speed to
-    Compare(self.x, player.x) shifted left five; on easy it dives straight
-    down, because that write is inside `if difficulty > 0`.
-
-    It clears EF_BLOCK_A[1] and EF_CHILD_B when the dive starts and neither is
-    read anywhere in this handler. }
+    It clears EF_BLOCK_A[1] and EF_CHILD_B when the dive starts, and neither
+    is read anywhere in this handler. }
   T49_FRAMES = 2;  T49_TICKS = $10;
   T49_TABLE_ADDR = $0046C118;
   T49_SPRITES: array[0..3] of Integer = (144, 145, 146, 147);
@@ -891,28 +853,18 @@ const
      (512, 513, 514, 510, 511));     { going right }
   T53_CHARGE_SOUND = 7;
 
-  { --- Type 56, the burst trap ------------------------------------------
-    Sits still until the player comes within five times its width and two
-    times its height, then arms a four-frame fuse and throws a RADIAL BURST of
-    type-57 shots at the player.
+  { Type 56, the burst trap. Its aim takes Angle_Between(self, player) and
+    adds a difficulty SKEW of 0, -4 or -8, so harder settings LEAD the shot
+    rather than aiming straight at the player.
 
-    The aim is the most detailed in the game so far. It takes
-    Angle_Between(self, player), adds a difficulty SKEW of 0, -4 or -8 - so
-    harder settings lead the shot rather than aiming straight at you - and
-    wraps negatives by adding 64. Then it fires count + 1 shots of 1, 3 or 5,
-    stepping the heading by FOUR between each. The wrap is written as
-    `next := aim + 4; if next > 63 then next := aim - 0x3C` - a subtraction of
-    60 from the PREVIOUS value rather than a mask on the new one. It happens
-    to be exactly equivalent to (aim + 4) mod 64 for every aim in 0..63, which
-    is worth stating because it does not look equivalent: aim 62 gives 2 both
-    ways, 63 gives 3, 60 gives 0. Kept in the original's form anyway.
-
-    Each shot gets speed 2, 2 or 3 times the direction component on both axes,
-    and its 0xD4 field set to 1 - EF_VULN_KIND, so the shots are themselves
-    hurtable.
+    The heading wrap is written `next := aim + 4; if next > 63 then next :=
+    aim - 0x3C` - a subtraction of 60 from the PREVIOUS value rather than a
+    mask on the new one. It is exactly equivalent to (aim + 4) mod 64 for
+    every aim in 0..63, which is worth stating because it does not look it.
+    Kept in the original's form anyway.
 
     The fuse lives in EF_TIMER, which Entity_UpdateAll counts down, so this
-    handler only has to watch for it reaching zero to re-arm. }
+    handler only watches for zero. }
   T56_FRAMES = 3;
   T56_TABLE_ADDR = $0046C268;
   T56_SPRITES: array[0..T56_FRAMES - 1] of Integer = (156, 157, 158);
@@ -1726,30 +1678,19 @@ const
   T80_V1_SPRITES: array[0..T80_V1_FRAMES - 1] of Integer = (64, 65, 66, 65);
   T80_V1_BLINK = 2;
 
-  { --- Types 8 and 26, the two self-destructing effects -----------------
-    Both are spawned by something else, play a short animation, and call
-    Entity_Destroy on themselves. Between them they are why the screen filled
-    up with copies of Akuji: an effect whose handler does not exist never
-    reaches its Entity_Destroy, so it stays alive for ever wearing the anim id
-    Entity_Spawn gave it - column 0 of the type table, which is 0 for all 81
-    types, and sprite 0 is Akuji standing.
+  { Types 8 and 26, the two self-destructing effects. Both are spawned by
+    something else, play a short animation, and destroy themselves - which is
+    why a MISSING handler here filled the screen with copies of Akuji rather
+    than leaking: an effect that never reaches its Entity_Destroy stays alive
+    for ever wearing the anim id Entity_Spawn gave it, and that is sprite 0.
 
-    Nothing was leaking. The entities were simply immortal.
+    Type 26's VARIANT is the whole difference between its two sprites: 0 for
+    an ordinary stone, 1 when the stone completed a target and paid a life.
 
-    Type 8 is the puff the player's glide and air dash leave behind -
-    Player.pas spawns it at 0x004585A8's two Spawn(2, 8, ...) calls. Four
-    frames, five ticks each.
-
-    Type 26 is the "GET" that rises out of a collected Mana Stone.
-    Entity_TouchPickup spawns it and sets its VARIANT to say which kind of
-    pickup it was: 0 for an ordinary stone, 1 when the stone completed a
-    target and the player gained a life. So the two sprites are the two
-    messages, and the variant is the whole difference.
-
-    Note the index in each is unchecked in the original and cannot overflow
-    anyway: the frame that would run off the end is the frame that destroys
-    the entity, and the sprite is written before that. The clamps below are
-    unreachable rather than corrective - the same situation type 33 is in. }
+    The frame index is unchecked in the original and cannot overflow: the
+    frame that would run off the end is the frame that destroys the entity,
+    and the sprite is written first. The clamps below are unreachable rather
+    than corrective - the same situation type 33 is in. }
   TYPE8_FRAMES      = 4;
   TYPE8_TICKS       = 4;    { advance when the count EXCEEDS it, so every 5 }
   TYPE8_TABLE_ADDR  = $0046BCCC;
@@ -1810,22 +1751,17 @@ const
   BOOM_SPARKS     = 6;
   BOOM_SPEED_MAX  = 3;    { RandomBelow(3) + 1, so 1..3, per axis }
 
-  { --- Type 32, the emitter @ 0x0045A5D4 --------------------------------
-    An invisible spawner - one of the three types with no sprite - that reads
-    its whole configuration out of block A and keeps its state in block B.
-    Every one of those seven slots is now confirmed by the code:
+  { Type 32, the emitter @ 0x0045A5D4 - an invisible spawner that reads its
+    configuration out of block A and keeps its state in block B:
 
       A[1] $09  frames between spawns    B[0] $12  countdown to the next
       A[2] $0A  how many in all          B[1] $13  how many so far
       A[3] $0B  scatter radius           B[2] $14  countdown to the next sound
       A[4] $0C  frames between sounds
 
-    It spawns type 33 explosions scattered by Random(r * 16) - r * 8 PIXELS on
-    each axis, so plus or minus r * 8 - quarter tiles, not tiles.
-
-    Entity_UpdateDying seeds it two ways, which is how one emitter type gives
-    two different deaths: class 1 gets 8, 2, 1, 2 - a small pair close in - and
-    class 2 gets 4, 32, 4, 1 - a long wide barrage with a sound every frame.
+    The scatter is Random(r * 16) - r * 8 PIXELS on each axis - quarter tiles,
+    not tiles. Entity_UpdateDying seeds it two ways, which is how one emitter
+    type gives two different deaths.
 
     The exhaustion test is `A[2] < B[1]` AFTER the increment, so an emitter
     configured for N spawns N + 1 times. Reproduced. }
