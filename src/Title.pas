@@ -1,23 +1,15 @@
 { Title - the title screen and options, translated from Title_MainMenu
   @ 0x00462330.
 
-  The original is one function with three sub-modes selected by p_TitleSubMode
-  (0x0046CEF8):
+  One function in the original, with three sub-modes on TitleSubMode: the main
+  menu (NEW GAME / CONTINUE / OPTION / EXIT), the ten-row options screen, and
+  the omake viewer. See TSM_* below.
 
-    0  main menu    NEW GAME / CONTINUE / OPTION / EXIT
-    1  options      10 rows, including three rebindable keys
-    2  omake viewer a full-screen unlocked extra image
+  Every string, coordinate and range is from the decompilation, in the
+  original's 320x240 space, drawn through the game's own font sheet.
 
-  Every string, coordinate and range below is taken from the decompilation.
-  Coordinates are in the original's 320x240 space.
-
-  Rendering goes through the game's own bitmap font (GameFont.pas), the same
-  font9x9-01.bmp sheet the original used, so metrics and colours match.
-
-  Still stubbed - DIVERGENCE DIV-009: option value editing (MoveX) and key
-  rebinding, which needs raw
-  button polling rather than an axis. The menu backgrounds (p_Surfaces[1] and
-  [2]) are not loaded yet. }
+  DIVERGENCE DIV-009: option value editing and key rebinding are stubbed -
+  they need raw button polling rather than an axis. }
 
 unit Title;
 
@@ -98,18 +90,9 @@ const
   OPT_OMAKE_NAME_CELL    = $0046D010;
 
   { Ranges the original clamps to }
-  { The GAME LEVEL row draws a NAME, not a number, and its colour changes with
-    the level. 0x00462330 indexes two tables by Settings+4:
-
-        Game_DrawText(0, 0xE8, 0x38, 0,
-                      *(PTR_DAT_0046D348 + level * 4),    <- the variant
-                      *(PTR_PTR_0046D1A0 + level * 4));   <- the string
-
-    The string table is at 0x00469054 and holds pointers to 'EASY', 'NORMAL'
-    and 'HARD' at 0x00452308, 0x00452318 and 0x00452328. The variant table is
-    at 0x00469060 and holds 0, 0, 1 - so HARD is drawn in a different colour
-    from the other two, which is a detail a number could not carry. This row
-    used to draw IntToStr(level) in variant 2, which was wrong twice over. }
+  { The GAME LEVEL row draws a NAME, not a number, and 0x00462330 indexes both
+    tables by Settings+4 - so HARD is drawn in a different colour from the
+    other two. Strings at 0x00469054, variants at 0x00469060. }
   LEVEL_NAMES: array[0..2] of string = ('EASY', 'NORMAL', 'HARD');
   LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 1);
 
@@ -174,29 +157,9 @@ type
     property OnVolume: TNotifyProc read FOnVolume write FOnVolume;
   end;
 
-  { --- GameOver_Update @ 0x00461A44 --------------------------------------
-
-    The game-over screen, and the shortest of the three screens that step
-    through GameState.ScreenPhase:
-
-      0  ask the fader to fade OUT, and move on at once
-      1  wait for the fader to go idle, then tear the run down -
-         GameState_Reset(mode 0), reload the stage assets, re-register the
-         font, clear the title sub-mode, put the state machine on 100, start
-         `midi\gameover`, and fade back IN
-      2  draw the full-screen image from surface slot 3 and wait
-
-    What ends it is `the music has stopped OR confirm was pressed`. So the
-    screen holds for exactly as long as the game-over tune, unless you cut it
-    short - and then it goes to GS_TITLE_INIT, not back to the game.
-
-    Re-registering the font in phase 1 is not redundant: Load_Stage_Assets
-    reloads surface slot 0, which is the font sheet, so the glyph table has
-    to be rebuilt on top of it. Three other places in the original do the
-    same for the same reason (see GameFont.pas).
-
-    The four things it needs from outside are callbacks, the way the title
-    screen's sound is, so the unit stays clear of the component layer. }
+  { GameOver_Update @ 0x00461A44 - the shortest of the three screens that step
+    through GameState.ScreenPhase. What it needs from outside is callbacks, so
+    the unit stays clear of the component layer. }
   TFadeEvent = procedure(FadeIn: Boolean) of object;
   TMusicEvent = procedure(Track: Integer) of object;
   TRestartEvent = procedure of object;
@@ -218,26 +181,14 @@ type
   public
     { Returns True while the screen should be drawn, which is phase 2 only.
 
-      MUSIC IS NOT A PARAMETER, and that is the whole point. The original
-      calls FUN_00450FD0 inside the phase-2 block, in this order:
+      MUSIC IS NOT A PARAMETER but a callback, because phase 1 starts the
+      game-over midi in the SAME call that phase 2 asks whether music is
+      playing. An answer handed in is from before that midi started, and a
+      death that silenced the stage track first then leaves phase 2 at once
+      and never shows the screen.
 
-          phase 2:  draw the screen
-                    cVar1 = FUN_00450FD0()        <-- asked here
-                    leave to state 10 if cVar1 is 0, or confirm
-
-      and phase 1, in the SAME call, has just started the game-over midi.
-      Taking the answer as an argument means the caller reads it before
-      Update runs, so phase 2 sees the state from BEFORE its own music
-      started. Any death that silences the stage track first - PS_FELL calls
-      StopMusic, PS_DYING does not - then left phase 2 immediately and the
-      screen was never seen. Drowning showed no game over; dying any other
-      way did.
-
-      Confirm stays a parameter: the original calls Input_ConfirmPressed
-      lazily, second in an ||, but ConfirmPressed is a pure read of the input
-      snapshot, so evaluating it eagerly cannot differ. FadeBusy stays one
-      too - it is read in the phase-1 condition, and nothing in the call
-      changes the fader before that point. }
+      Confirm and FadeBusy stay parameters: both are pure reads of state
+      nothing in this call changes. }
     function Update(FadeBusy, Confirm: Boolean;
                     var AGameState: Integer): Boolean;
 
@@ -252,30 +203,14 @@ type
 const
   { --- PauseMenu_Update @ 0x00461EE4 --------------------------------------
 
-    Three choices, and it BLACKS THE SCREEN OUT first: the original fills the
-    whole 320x240 with colour 0 before drawing, so the paused game is not
-    visible behind the menu. The reconstruction had been redrawing the frozen
-    scene, which looked more considerate and is not what the game does.
+    Three choices, and it BLACKS THE SCREEN OUT first - colour 0 over the whole
+    320x240 - so the paused game is not visible behind the menu. Six lines, all
+    centred.
 
-    Six lines, all centred - Game_DrawText's fourth argument is 1 for every
-    one of them:
-
-        y 0x50  CONTINUE            variant 2
-        y 0x60  RESET               variant 2
-        y 0x70  EXIT                variant 2
-        y (index * 2 + 10) * 8      variant 1, the cursor '<         >'
-        y 0x90  CTRL+R ... RESET    variant 1
-        y 0xA0     ESC ... EXIT     variant 1
-
-    The cursor's y is arithmetic on the index rather than a table, and it
-    lands exactly on 0x50 / 0x60 / 0x70.
-
-    Two ways out besides confirming: BUTTON 2 resumes, and it restores the
-    menu index that FormKeyDown stashed on the way in rather than leaving the
-    pause cursor where it was. The original also writes the input record's
-    own latches - ButtonLatch[0] on confirm and ButtonLatch[2] on cancel - to
-    swallow the press so the resumed game does not see it. That side effect
-    is reproduced; it is why Update takes the input by var.
+    Button 2 resumes, restoring the menu index FormKeyDown stashed on the way
+    in rather than leaving the pause cursor where it was. The original also
+    writes the input record's own latches to swallow the press so the resumed
+    game does not see it; that side effect is why Update takes the input var.
 
     The cursor moves only when Inp.Moving is FALSE. That is not "while
     standing still": InputEndOfFrame runs AFTER the state handlers, so during
@@ -422,8 +357,10 @@ begin
   end
   else if (ScreenPhase = 1) and not FadeBusy then
   begin
-    { GameState_Reset(mode 0) plus the asset reload and the font rebuild -
-      one callback, because the host owns all three. }
+    { GameState_Reset(mode 0) plus the asset reload and the font rebuild - one
+      callback, because the host owns all three. The font rebuild is not
+      redundant: the asset reload replaces surface slot 0, which IS the font
+      sheet, so the glyph table has to be built again on top of it. }
     if Assigned(FOnRestart) then
       FOnRestart;
     ScreenPhase := 2;
