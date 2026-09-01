@@ -653,6 +653,37 @@ Do not tidy the prefixes away. State, A9_Dying, B0's timer, B1/B2's child refs
 and B3_Shots do hold across types, and they keep the prefix anyway so the
 block layout stays legible.
 
+## Mid-record pointers: do NOT type them as the record
+
+Some loops walk the entity pool with a pointer that does not point at the
+record base. Entity_TakeProjectileHits holds base + 0x20 - the address of
+State - and steps 0x104 bytes a slot. The instructions settle it: its alive
+test is `cmpb $0x0,-0x18(%ebx)`, which is base + 0x08.
+
+Typing such a variable `TEntity *` is WORSE THAN LEAVING IT RAW. Every field
+resolves 0x20 too low and the listing becomes confidently wrong:
+
+    Shot->Slot                 is really State
+    Shot->Timer                is really the damage
+    Shot->PosX                 is really ExtentX
+    Shot[-1].CullOffscreen     is really the record base
+
+Raw `Shot[0x1c]` at least announces that it is unresolved. A wrong field name
+does not. This was tried, seen, and reverted.
+
+Ghidra has no negatively-biased pointer type, so the honest device is a VIEW
+STRUCT: a second struct describing the same memory from the shifted base, with
+only the fields that function touches, and a name that says what it is.
+TShotFromState is that, in ApplyAkujiTypes.java. Its Hp is called Damage
+because that is the field's role on a projectile.
+
+Accesses at NEGATIVE indices still cannot be expressed and stay raw. Say which
+they are in the comment - here [-8] is the record base and [-6] is Alive.
+
+Before typing any pool-walking pointer, check what it actually holds:
+disassemble and look at the sign and size of the displacements. A negative one
+means mid-record.
+
 ## The SetLength trap - the length is invisible
 
 Ghidra's signature for Delphi's DynArraySetLength helper does not include the

@@ -298,6 +298,52 @@ public class ApplyAkujiTypes extends GhidraScript {
             }
         }
 
+        // ---- TShotFromState: TEntity seen from its State field ----------
+        // Entity_TakeProjectileHits walks the projectile slots with a pointer
+        // that does NOT point at the record base. It holds base + 0x20, the
+        // address of State, and steps 0x41 ints (0x104 bytes) per slot. The
+        // instructions confirm it: the alive test is `cmpb $0x0,-0x18(%ebx)`,
+        // which is base + 0x08.
+        //
+        // Typing that variable TEntity * is WORSE THAN LEAVING IT RAW. Every
+        // field then resolves 0x20 too low and the listing reads plausibly
+        // and lies - Shot->Slot for State, Shot->Timer for the damage,
+        // Shot[-1].CullOffscreen for the record base. Tried, reverted.
+        //
+        // Ghidra has no negatively-biased pointer type, so this is the honest
+        // device: a struct describing the same memory from the shifted base.
+        // Offsets below are (index * 4) from State; add 0x20 for the offset
+        // within TEntity. Only the fields this function touches are named -
+        // everything else stays undefined rather than being invented.
+        //
+        // Hp is called Damage here because that is its role on a projectile:
+        // the amount subtracted from the target.
+        //
+        // The two NEGATIVE accesses cannot be expressed as fields and stay
+        // raw: [-8] is the record base handed to Entity_Destroy, [-6] Alive.
+        StructureDataType shot = new StructureDataType("TShotFromState", 0x104);
+        i(shot, 0x00, "State");
+        i(shot, 0x58, "PosX");
+        i(shot, 0x5c, "PosY");
+        i(shot, 0x60, "VelX");
+        i(shot, 0x70, "Damage");
+        i(shot, 0x78, "ExtentX");
+        i(shot, 0x7c, "ExtentY");
+        i(shot, 0x88, "HitboxInsetX");
+        i(shot, 0x8c, "HitboxInsetY");
+        DataType shotT = put(dtm, shot, 0x104);
+        {
+            Function f = getFunctionAt(toAddr(0x00457ab4));  // TakeProjectileHits
+            if (f != null) {
+                for (Variable v : f.getLocalVariables()) {
+                    if ("Shot".equals(v.getName())) {
+                        v.setDataType(dtm.getPointer(shotT), SourceType.USER_DEFINED);
+                        println("  Shot -> TShotFromState *");
+                    }
+                }
+            }
+        }
+
         // ---- TJoyState = the Win32 DIJOYSTATE, from dinput.h ----
         // This is not inferred from offsets. It is the documented Windows
         // structure IDirectInputDevice8::GetDeviceState fills when the data
