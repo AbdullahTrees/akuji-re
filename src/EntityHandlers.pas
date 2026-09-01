@@ -1946,49 +1946,19 @@ const
 
   { --- Type 77, the final boss ------------------------------------------
     The largest handler in the game, and the only one that runs from a SCRIPT
-    rather than from a hand-written state chain.
+    rather than a hand-written state chain: two 6x6 tables, one of durations
+    and one of actions, indexed by [phase][step]. State 1 counts up to the
+    duration over a difficulty divisor, performs the action and advances the
+    step, wrapping at 6.
 
-    PHASES. EF_BLOCK_A[1] holds a phase 0..5. Every frame it compares its own
-    EF_HP against a threshold table and, when it drops below, advances the
-    phase - resetting the state, the frame and the script index, and puffing
-    a type-32 emitter (except out of phases 0 and 4, which pass silently).
-    Past phase 5 it sets its own EF_HP to 0 and stops. The thresholds are
+    EF_BLOCK_A[1] holds the phase. Every frame it compares its own EF_HP
+    against T77_HP and advances when it drops below, resetting state, frame
+    and script index and puffing a type-32 emitter - except out of phases 0
+    and 4, which pass silently. Past phase 5 it zeroes its own HP and stops.
 
-        easy   968 936 904 840 808 776
-        normal 968 936 904 840 808 776     <- identical to easy
-        hard   984 952 920 888 856 824
-
-    so it has about a thousand hit points, and easy and normal are the same
-    fight. Types 52 and 54 also share a difficulty row; this is the third.
-
-    THE SCRIPT. Two 6x6 tables - one of durations, one of actions - indexed by
-    [phase][step]. State 1 counts up to duration[phase][step] divided by a
-    difficulty divisor of 1, 2 or 4, then performs action[phase][step] and
-    advances the step, wrapping at 6. The actions:
-
-        0  nothing - wait again
-        2  turn to face the player, sixty frames        (frame 1)
-        3  dash, leaving a trail                        (frames 2..5)
-        4  the ground slam                              (frames 6..9)
-        5  the projectile                               (frames 10..12)
-        6  recoil - like 3 but faster and backwards     (frame 13)
-        7  dash the OTHER way                           (frames 2..5)
-        8  a held pose that spawns a variant-5 part     (frames 6..7)
-
-    THE ROW WIDTHS PROVE THE SCRIPT. Each phase has its own two-row sprite
-    table, and five of the six are EXACTLY as wide as the highest frame that
-    phase's own script can reach: phase 1 tops out at frame 9 and has 10
-    entries, phase 2 at 13 with 14, phase 3 at 12 with 13, phase 4 at 5 with
-    6, phase 5 at 7 with 8. Phase 0 shares phase 1's table. Two independent
-    readings - the table extents from the binary's pointer layout, and the
-    reachable frames from the action table - agree on all five.
-
-    THE SCREEN SHAKE. On frame 9 of the ground slam it sets the two globals in
-    GameState.pas that the frame loop turns into a random per-frame draw
-    offset. This is the only thing in the game that does.
-
-    It also picks its facing with CompareNZ, not Compare - see Entities.pas.
-    A zero there would have left it with no direction and no sprite. }
+    Each phase's sprite table is exactly as wide as the highest frame that
+    phase's script can reach, which is how the extents below are pinned: the
+    binary's pointer layout and the action table agree on all five. }
   T77_PHASES = 6;
   T77_STEPS = 6;
 
@@ -2041,6 +2011,17 @@ const
      (2, 7, 2, 7, 2, 7),
      (2, 3, 8, 2, 3, 8));
   T77_DIVISOR: array[0..2] of Integer = (1, 2, 4);   { harder runs it faster }
+
+  { T77_ACTION's values - what the step does when its duration runs out. The
+    frame each one starts on is EF_FLAG1C in the arm below. }
+  T77_ACT_WAIT      = 0;   { wait again }
+  T77_ACT_FACE      = 2;   { turn to face the player }
+  T77_ACT_DASH      = 3;   { dash, leaving a trail }
+  T77_ACT_SLAM      = 4;   { the ground slam }
+  T77_ACT_SHOT      = 5;   { the projectile }
+  T77_ACT_RECOIL    = 6;   { like the dash, faster and backwards }
+  T77_ACT_DASH_BACK = 7;   { the dash, entered facing the other way }
+  T77_ACT_POSE      = 8;   { a held pose that spawns a variant-5 part }
 
   T77_SLAM_ADDR     = $0046C898;
   T77_SLAM_DIV_ADDR = $0046C9E0;
@@ -5420,39 +5401,39 @@ begin
       E.Raw[EF_CHILD_A] := 0;
       Act := T77_ACTION[Clamp(Phase, T77_PHASES - 1)][N];
 
-      if Act = 2 then
+      if Act = T77_ACT_FACE then
       begin
         E.Raw[EF_STATE] := 2;
         E.Raw[EF_BLOCK_B] := 0;
         E.Raw[EF_FLAG1C] := 1;
       end;
-      if Act = 3 then
+      if Act = T77_ACT_DASH then
       begin
         E.Raw[EF_STATE] := 3;
         E.Raw[EF_BLOCK_B] := 0;
         E.Raw[EF_FLAG1C] := 2;
       end;
-      if Act = 4 then
+      if Act = T77_ACT_SLAM then
       begin
         E.Raw[EF_STATE] := 4;
         E.Raw[EF_BLOCK_B] := 0;
         E.Raw[EF_FLAG1C] := 6;
       end;
-      if Act = 5 then
+      if Act = T77_ACT_SHOT then
       begin
         E.Raw[EF_STATE] := 5;
         E.Raw[EF_BLOCK_B] := 0;
         E.Raw[EF_FLAG1C] := 10;
         World.PlaySound(T77_SND_ROAR);
       end;
-      if Act = 6 then
+      if Act = T77_ACT_RECOIL then
       begin
         E.Raw[EF_STATE] := 6;
         E.Raw[EF_BLOCK_B] := 0;
         E.Raw[EF_FLAG1C] := 13;
         E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
       end;
-      if Act = 7 then
+      if Act = T77_ACT_DASH_BACK then
       begin
         { the same state as action 3, entered facing the other way }
         E.Raw[EF_STATE] := 3;
@@ -5460,7 +5441,7 @@ begin
         E.Raw[EF_FLAG1C] := 2;
         E.Raw[EF_VEL_X] := -E.Raw[EF_VEL_X];
       end;
-      if Act = 8 then
+      if Act = T77_ACT_POSE then
       begin
         E.Raw[EF_STATE] := 8;
         E.Raw[EF_BLOCK_B] := 0;
