@@ -1,51 +1,32 @@
-{ Camera - the scrolling dead zone, translated from four functions that every
-  moving thing in the game goes through:
+{ Camera - the scrolling dead zone. Four functions every moving thing goes
+  through:
 
-      0x00459C1C  Camera_ShouldScrollX    "should the world move instead?"
-      0x00459CD8  Camera_ShouldScrollY
-      0x00459D9C  Camera_ApplyMoveX       commit the move, one way or the other
-      0x00459E08  Camera_ApplyMoveY
+      0x00459C1C  Camera_ShouldScrollX    0x00459D9C  Camera_ApplyMoveX
+      0x00459CD8  Camera_ShouldScrollY    0x00459E08  Camera_ApplyMoveY
 
-  ## The trick
+  THERE IS NO CAMERA-FOLLOWS-PLAYER CODE. Each movement step asks whether the
+  entity is outside a dead zone and still heading out; if so the move is
+  applied to the LAYER instead - the entity's position is put back and the
+  scroll origin takes the delta.
 
-  There is no camera-follows-player code anywhere. Instead every movement step
-  asks whether the entity is outside a dead zone in the middle of the screen
-  and heading further out. If it is, the move is applied to the LAYER rather
-  than to the entity: the entity's position is put back and the layer's scroll
-  origin takes the delta instead. The player then appears to stay put while
-  the world slides underneath, which is the same thing seen from the other side
-  and costs nothing extra.
+  So an entity's position is a WORLD position, and the player's simply STOPS
+  CHANGING while the view is scrolling. Anything that infers "the player moved
+  because its position changed" is wrong for that reason.
 
-  Consequently the entity's stored position is a WORLD position and the layer
-  origin is subtracted at draw time, but the player's world position simply
-  stops changing while it is scrolling. Anything that assumes "the player moved
-  because its position changed" is wrong for exactly this reason.
+  Dead zone, against SCREEN_W 320 / SCREEN_H 240:
 
-  ## The dead zone
+      X   below 144, or at/above 177     (asymmetric: it brackets the
+      Y   below 104, or at/above 137      player's width, not a point)
 
-      X   scroll below 144, or at/above 177     (SCREEN_W = 320, centre 160)
-      Y   scroll below 104, or at/above 137      (SCREEN_H = 240, centre 120)
-
-  The X pair is asymmetric about the centre because it brackets the player's
-  own width rather than a point.
-
-  ## The clamp, and why one of them is a float
-
-  Scrolling stops when the view reaches the edge of the map:
+  Scrolling stops at the map edge:
 
       max scroll X = (MapWidthTiles  - 10.0) * TileWidth
       max scroll Y = (MapHeightTiles -  7.5) * TileHeight
 
-  10 is 320/32 and 7.5 is 240/32. The X constant is an integer in the binary
-  and the Y constant is the 4-byte float 0x40F00000 at 0x00459D98 - the only
-  FPU code in the game's own layer, and it is there because 240 is not a whole
-  number of 32-pixel tiles. Rounding it to 7 or 8 would leave a strip of black
-  or cut the bottom row off.
-
-  Both are checked against the shipped maps by --selftest-camera: for all 65
-  of them the formula equals MapPixels - ScreenSize EXACTLY, with no slack. A
-  wrong constant, a wrong field, or the wrong one of the pair would not survive
-  that on even one map, let alone all 65. }
+  The Y constant is a 4-byte float at 0x00459D98 - the only FPU code in the
+  game layer - because 240 is not a whole number of 32-pixel tiles. Rounding
+  it would leave a black strip or cut the bottom row. --selftest-camera checks
+  both against all 65 shipped maps. }
 
 unit Camera;
 
