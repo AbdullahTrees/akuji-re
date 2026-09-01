@@ -2433,8 +2433,9 @@ procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
 { 0x00457AB4. Everything the actor slots have thrown at this entity. }
 procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
 
-{ 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
-  which only variant 8 has. }
+{ 0x0045A43C. The power orb. It carries one of Akuji's nine abilities - Dash,
+  Fire, Bat and the rest - and which one is its placement variant. World is
+  needed only for the heartbeat, which only variant 8 has. }
 procedure EntityUpdate_Type24_PowerOrb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2442,17 +2443,20 @@ procedure EntityUpdate_Type24_PowerOrb(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
 
-{ 0x0045B3EC. A springboard, and a shooter, by variant. See the T40_ block -
-  its launch rewrites six fields of the player's entity. }
+{ 0x0045B3EC. PoyoPoyo, a bouncing blob - land on it and it throws the player
+  very high. A springboard and a shooter by variant; see the T40_ block,
+  whose launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40_PoyoPoyo(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
-{ 0x0045C678. The boss: circle, dive, dive, summon. See the T52_ block. }
+{ 0x0045C678. A BOSS - a fire lion that jumps about and breathes fire.
+  Circle, dive, dive, summon; see the T52_ block. }
 procedure EntityUpdate_Type52_Boss_FireLion(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CAD8. The second boss: hover, blink out, fire, hop, blink in.
-  See the T54_ block. }
+{ 0x0045CAD8. A BOSS - a floating magician that teleports around the arena,
+  throwing an orb as it goes. Hover, blink out, fire, hop, blink in; see the
+  T54_ block. }
 procedure EntityUpdate_Type54_Boss_FloatingMagician(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2465,39 +2469,46 @@ procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DA28. Sways a quarter turn a frame until you get near, then runs
-  away. See the T61_
-  block, and note that the acceleration really is away from the player. }
+{ 0x0045DA28. HenaHena, a monster that is AFRAID of the player and runs away.
+  Catching it is the only way to kill it, which needs the Cloud dash: it
+  zeroes its own EF_HP on a 1x1 overlap with the player, in both states. See
+  the T61_ block, and note the acceleration really is away from the player. }
 procedure EntityUpdate_Type61_Mon_HenaHena(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DC84. A walker that recomputes its own vulnerability every frame
-  from which way it is heading relative to you. }
+{ 0x0045DC84. A royal penguin carrying a shield, so its weak side is
+  whichever way the shield is not: it recomputes its own vulnerability every
+  frame from which way it is heading relative to the player. }
 procedure EntityUpdate_Type62_Mon_PenguinHeishi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DDF4. Walks, stops to fire one type-57 skimmer, then turns round.
-  See the T63_ block. }
+{ 0x0045DDF4. An armoured penguin that stops to throw a knife. Walks, fires
+  one type-57 skimmer, then turns round; see the T63_ block. }
 procedure EntityUpdate_Type63_Mon_PenguinKnife(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E030. Drops from the ceiling, sends a wave each way along the
-  floor, rests, and climbs back. }
+{ 0x0045E030. A large spike press that stamps down on a fixed interval: drops
+  from the ceiling, sends a wave each way along the floor, rests, and climbs
+  back. }
 procedure EntityUpdate_Type64_SpikePress(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E25C. The third boss. It reads the input directly: nothing happens
+{ 0x0045E25C. DorDor: it vanishes when attacked and can only be hurt in the
+  moment after it reappears. It reads the input directly - nothing happens
   until the player presses ATTACK while standing in its box. See T65_. }
 procedure EntityUpdate_Type65_Mon_DorDor(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
-{ 0x0045E4EC. An anchor and the satellite that orbits it, one handler and
-  two variants. See the T66_ block for what EF_FACING means here. }
+{ 0x0045E4EC. A giant ball. Environmental rather than an enemy: it damages on
+  contact and does nothing else. An anchor and the satellite that orbits it,
+  one handler and two variants; see the T66_ block for what EF_FACING means
+  here. }
 procedure EntityUpdate_Type66_GiantBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E714. Walks, lays a type-57 egg, then bolts away from it and
-  coasts to a halt. See the T67_ block. }
+{ 0x0045E714. A turtle that lays bombs and runs from them. Walks, lays a
+  type-57 egg, then bolts away from it and coasts to a halt; see the T67_
+  block. }
 procedure EntityUpdate_Type67_Mon_TurtleBomb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2506,18 +2517,23 @@ procedure EntityUpdate_Type67_Mon_TurtleBomb(var E: TEntity; AGameState: Integer
 procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EB1C. A pushable puzzle object: slides, and when it finds a hole
-  under it pays out a type 68 and sets its event's progress flag. }
+{ 0x0045EB1C. GoroGoro: a ball the player rolls by SHOOTING it, to be dropped
+  onto a switch. It slides, and when it finds a hole under it pays out a type
+  68 and sets its event's progress flag. }
 procedure EntityUpdate_Type69_GoroGoro(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EC4C. Exactly 100 hp, and any wound at all is fatal. Variant 1
-  walks, variant 0 stands. See the T70_ block. }
+{ 0x0045EC4C. The angry switch - a switch, not an enemy. The only way to
+  throw it is to drop a GoroGoro on top, which kills it: it has exactly 100
+  hp and any wound at all is fatal, which is what makes the ball the one
+  thing that works. Variant 1 walks, variant 0 stands; see the T70_ block. }
 procedure EntityUpdate_Type70_AngrySwitch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045ED88. Walks invulnerable, curls up vulnerable, repeats. See the
-  T71_ block - and note the walk timer only runs while it is on screen. }
+{ 0x0045ED88. A cat that DEFLECTS anything thrown at it, except during the
+  brief pause when it stops. Walks invulnerable, curls up vulnerable,
+  repeats; see the T71_ block, and note the walk timer only runs while it is
+  on screen. }
 procedure EntityUpdate_Type71_BouncyCat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2526,8 +2542,9 @@ procedure EntityUpdate_Type71_BouncyCat(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F218. The fourth boss. Three of its states are left by a spawned
-  child rather than by anything here. See the T73_ block. }
+{ 0x0045F218. A MINIBOSS - the same lizard as type 31 in another colour, with
+  its own attack. Three of its states are left by a spawned child rather than
+  by anything here; see the T73_ block. }
 procedure EntityUpdate_Type73_Boss_MidoriLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2541,13 +2558,14 @@ procedure EntityUpdate_Type74(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F744. A slow sweep: one heading step per reload, velocity from that
-  heading, so it crosses and comes back over a full turn. }
+{ 0x0045F744. A levitating spike press that tracks left and right: one
+  heading step per reload, velocity from that heading, so it crosses and
+  comes back over a full turn. }
 procedure EntityUpdate_Type76_SpikePress_Lev(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F85C. The final boss: six phases, each running a six-step script
-  out of two tables. See the T77_ block. }
+{ 0x0045F85C. THE FINAL BOSS - the Hero, at the end of the game. Six phases,
+  each running a six-step script out of two tables; see the T77_ block. }
 procedure EntityUpdate_Type77_Boss_Hero(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2561,28 +2579,38 @@ procedure EntityUpdate_Type78(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type79(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x004607E8. Two small effects that share one counter increment. }
+{ 0x004607E8. Decoration and nothing else: touch kind 0, so it cannot be
+  touched or hurt, and the handler only animates. Two placements in the whole
+  game, both unconditional in the final arena. Variant 1 is unreachable - no
+  record selects it and nothing spawns type 80. }
 procedure EntityUpdate_Type80_Fx_ArenaEmber(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D598. Sleeps until touched, then wobbles on the spot. }
+{ 0x0045D598. A FAKE MANA STONE - it sits there looking like the collectible,
+  and is a crab. Sleeps until touched, then wobbles on the spot. }
 procedure EntityUpdate_Type58_Mon_NiseMana(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D7D8. A walker that turns at walls AND at ledges, and enrages when
-  its health drops below 11. See the T60_ block. }
+{ 0x0045D7D8. A golem. Attack it and it loses its head and gets faster. A
+  walker that turns at walls AND at ledges, and enrages when its health drops
+  below 11; see the T60_ block. }
 procedure EntityUpdate_Type60_Mon_Golem(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
+{ 0x0045D670. The red eye: it rises out of the lava when the player comes
+  near and travels toward where they are. Wakes, rises, aims once at the
+  apex, then flies. }
 procedure EntityUpdate_Type59_Mon_RedEye(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CE78. A trap: sits, then bursts at the player. See the T56_ block. }
+{ 0x0045CE78. A red mushroom that swells as the player nears and bursts,
+  throwing a projectile. See the T56_ block. }
 procedure EntityUpdate_Type56_Mon_AkaiKinoko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C608. The simplest chaser: steer, move, repeat, for ever. }
+{ 0x0045C608. A blue spherical ghost: it passes through terrain, follows the
+  player and hurts on contact. The simplest chaser - steer, move, repeat, for
+  ever. }
 procedure EntityUpdate_Type51_Mon_Ghost(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2590,12 +2618,14 @@ procedure EntityUpdate_Type51_Mon_Ghost(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type53(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C430. Patrols, opens to fire, closes - and changes its own
-  vulnerability while open. See the T50_ block. }
+{ 0x0045C430. An armoured turtle, vulnerable only while it is open and
+  firing. Patrols, opens to fire, closes, and changes its own vulnerability
+  while open; see the T50_ block. }
 procedure EntityUpdate_Type50_Mon_Turtle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C250. A diver: hover, drop, climb, rest. See the T49_ block. }
+{ 0x0045C250. A red creature that lives in the water and leaps when the
+  player nears. A diver - hover, drop, climb, rest; see the T49_ block. }
 procedure EntityUpdate_Type49_Mon_Water(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2603,20 +2633,25 @@ procedure EntityUpdate_Type49_Mon_Water(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BF58. A lobber: wait, wind up, throw two shots, rest, repeat. }
+{ 0x0045BF58. A pink squid that lobs spiky bouncing balls on a fixed
+  interval: wait, wind up, throw two shots, rest, repeat. }
 procedure EntityUpdate_Type47_Mon_PinkSquid(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BCC4. A crumbling platform - the only reader of EF_RIDDEN. }
+{ 0x0045BCC4. NukeNuke: a block that stops being solid once the player has
+  stood on it too long. The only reader of EF_RIDDEN. }
 procedure EntityUpdate_Type45_Block_NukeNuke(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BD9C. Sleeps until the player is close, then homes. }
+{ 0x0045BD9C. A purple bat. It sleeps until the player comes close, then
+  homes on them. }
 procedure EntityUpdate_Type46_Mon_Bat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BBD8. Armour. Its VARIANT selects which of the four armour
-  vulnerability kinds it has - see the T43_ block. }
+{ 0x0045BBD8. GashiGashi: a BLOCK, broken by shooting it with Fire+ - not
+  armour worn by anything. Its VARIANT selects which of the four
+  vulnerability kinds it has, which is what makes Fire+ the one shot that
+  works; see the T43_ block. }
 procedure EntityUpdate_Type43_GashiGashi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2624,16 +2659,18 @@ procedure EntityUpdate_Type43_GashiGashi(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type44(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B7C4. A boss. Six states, and its timings scale with its own HP as
-  well as with the difficulty - see the T42_ block. }
+{ 0x0045B7C4. THE SECOND BOSS, placed exactly once in the whole game. Six
+  states, and its timings scale with its own HP as well as with the
+  difficulty; see the T42_ block. }
 procedure EntityUpdate_Type42_Boss_TealBlobSlammer(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B62C. A hopper. See the T41_ block. }
+{ 0x0045B62C. A green jumping cricket. A hopper; see the T41_ block. }
 procedure EntityUpdate_Type41_Mon_TondaCricket(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B0CC. A turret. Waits only while on screen, then fires a type 39. }
+{ 0x0045B0CC. A stationary cat that fires on a fixed interval. Waits only
+  while on screen, then fires a type 39. }
 procedure EntityUpdate_Type38_Mon_AkuNeko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2654,20 +2691,25 @@ procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type35(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045ABD8. A patroller that gets meaner on hard - see the T30_ block. }
+{ 0x0045ABD8. Looks like Akuji. Whether it is MEANT to be him is unsettled -
+  the sprite says so and nothing in the code does. A patroller that gets
+  meaner on hard; see the T30_ block. }
 procedure EntityUpdate_Type30_Akuji(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AC94. A floating attacker. Six states, three difficulty tables, and
-  a child entity that drives the transition this handler cannot make itself. }
+{ 0x0045AC94. THE FIRST BOSS, a purple lizard that spits short-range red
+  projectiles. Six states, three difficulty tables, and a child entity that
+  drives the transition this handler cannot make itself. }
 procedure EntityUpdate_Type31_Boss_MurasakiLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A848. Drops, lands, and lies there animating. }
+{ 0x0045A848. The boss key: it drops when a boss dies, opens the door and
+  restores health. Drops, lands, and lies there animating. }
 procedure EntityUpdate_Type37_BossKey(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A95C. A switch. The only handler that writes to the event table. }
+{ 0x0045A95C. A switch, thrown by pressing UP against it - most often what
+  unlocks a door. The only handler that writes to the event table. }
 procedure EntityUpdate_Type15_Switch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2678,12 +2720,14 @@ procedure EntityUpdate_Type15_Switch(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type17(var E: TEntity);
 procedure EntityUpdate_Type19(var E: TEntity);
 
-{ 0x0045AA10. An oscillating platform - see the T21_ block above for why
-  EF_FACING is a speed here and not a heading. }
+{ 0x0045AA10. The winged-horse block - a platform that carries the player
+  along its axis. See the T21_ block above for why EF_FACING is a speed here
+  and not a heading. }
 procedure EntityUpdate_Type21_WingedHorseBlock(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AA78. A torch: it owns the two flame entities above it. }
+{ 0x0045AA78. A candle, and a switch in disguise: it is set by SHOOTING FIRE
+  at it. It owns the two flame entities above it. }
 procedure EntityUpdate_Type23_Candle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2691,7 +2735,8 @@ procedure EntityUpdate_Type23_Candle(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type28(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AB64. An idle that animates faster when the player is close. }
+{ 0x0045AB64. A green one-eyed monster. Its idle animates faster when the
+  player is close. }
 procedure EntityUpdate_Type29_Mon_MidoriMonster(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2749,23 +2794,12 @@ procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type26(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A944. The sign - what the player reads. Two instructions of
-  substance, and no game-state guard at all: it writes its sprite whether the
-  game is playing, paused or running a script.
-
-  It then computes GameState - GS_PLAY into EAX and returns, which nothing
-  reads - the dispatcher calls every arm as a procedure. That is the tail of a
-  comparison whose branch is gone, and it is left as a comment rather than
-  written as code, the same way Entity_CheckKillTiles's constant False is.
-
-  Until this existed the sign kept the anim id Entity_Spawn gave it, which is
-  the type table's column 0 - and that column is 0 for every type in the game,
-  so an untranslated entity wears sprite 0. Sprite 0 is Akuji standing, which
-  is why the signs looked like the player. }
+{ 0x0045A944. The sign: the player reads its text by interacting with it. Two
+  instructions of substance, and no game-state guard at all. }
 procedure EntityUpdate_Type16_InfoSign(var E: TEntity);
 
-{ 0x0045AA60. One sprite, and it can die - the only difference from the sign
-  is the Entity_UpdateDying call, whose result this one also discards. }
+{ 0x0045AA60. A stationary spike ball; it only has to exist and hurt. One
+  sprite, plus the Entity_UpdateDying call whose result it discards. }
 procedure EntityUpdate_Type22_SpikeBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
@@ -2778,23 +2812,14 @@ procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
                                       World: TEntityWorld);
 
-{ 0x0045A4F0. One table lookup, indexed by the variant. It takes no game state
-  because it does not read any.
-
-  CORRECTED: this used to call it "the only handler that runs identically
-  whatever the game is doing". It is not. FOUR handlers have no game-state
-  guard - 16, 17, 19 and 25 - and this file declares all four with the same
-  one-argument signature, so the claim was refutable from two screens away.
-  17 and 19 are empty, so the pair that actually DOES something unguarded is
-  16 and 25.
-
-  Those two are the same function shape twice: write a sprite, then compute
-  GameState - GS_PLAY into EAX and return it, which nothing reads. See the
-  note on type 16 for why that dead subtraction is left as a comment. }
+{ 0x0045A4F0. The door, and the main way between rooms: interacting steps to
+  the next or previous one. One table lookup indexed by the variant. It takes
+  no game state because it does not read any. }
 procedure EntityUpdate_Type25_Door(var E: TEntity);
 
-{ 0x0045A540. The save point's idle animation. See SAVE_POINT_SPRITES for why
-  it is the save point, which is not visible from this function at all. }
+{ 0x0045A540. The Akuji statue: the save point, which asks before it saves.
+  See SAVE_POINT_SPRITES for why it is the save point, which is not visible
+  from this function at all. }
 procedure EntityUpdate_Type27_AkujiStatue(var E: TEntity; AGameState: Integer);
 
 { ==========================================================================
