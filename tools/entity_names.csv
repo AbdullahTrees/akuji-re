@@ -17,45 +17,45 @@ type,name,note
 14,ManaStone,the collectible the HUD counter counts
 15,Switch,set by pressing up key - often used to unlock doors
 16,InfoSign,contains text that is read by interacting with it 
-20,,looks empty
+20,Type_20,[UNCONFIRMED]looks empty
 21,WingedHorseBlock,movement block that carries you up/down or left/right
 22,SpikeBall,a stationary spike block that hurts Akuji
 23,Candle,a switch-like object - set by shooting fire at it 
-24,PowerOrb,contains the 9 powers of Akuji (Dash, Fire, Bat, etc.)
+24,PowerOrb,contains the 9 powers of Akuji (Dash/Fire/Bat/etc.)
 25,Door,the main way of moving between rooms - interact to go to next/prev room
-27,AkujiStatue,
-29,,
-30,,
-31,,
-37,,
-38,,
-40,,
-41,,
-42,,
-43,,
-45,,
-46,,
-47,,
-49,,
-50,,
-51,,
-52,,
-54,,
-56,,
-58,,
-59,,
-60,,
-61,,
-62,,
-63,,
-64,,
-65,,
-66,,
-67,,
-69,,
-70,,
-71,,
-73,,
-76,,
-77,,
-80,,
+27,AkujiStatue,save point - triggers a textbox asking to save
+29,Mon_MidoriMonster,green one eyed monster
+30,Akuji,looks like akuji - may be something else though
+31,Boss_MurasakiLizard,boss entity(first boss) shoots limited-range red projectiles from mouth
+37,BossKey,key that drops when you defeat a boss - unlocks the door and restores health
+38,Mon_AkuNeko,stationary cat that shoots projectiles on a regular interval
+40,PoyoPoyo,bouncing blob you can jump on really high 
+41,Mon_TondaCricket,a green jumping cricket
+42,Boss_TealBlobSlammer,I feel like this is boss 02 from its movement+attack pattern but can't confirm because it looks exactly like Boss_MurasakiLizard - probably wrong sprite indices loaded. 
+43,GariGari,block that can be broken by shooting with Fire+ 
+45,Block_NukeNuke,block that becomes passthrough if you stand on it for too long
+46,Mon_Bat,a purple bat that flies if you get too close
+47,Mon_PinkSquid,a squid that shoots spiky bouncy balls on regular intervals
+49,Mon_Water,a red boy that jumps up if you go near it. lives in the water
+50,Mon_Turtle,armored turtle thats vulnerably only when its shooting(regular interval)
+51,Mon_Ghost,blue spherical ghost that follows you. is passthrough - damages on touch
+52,Boss_52,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss. 
+54,Boss_54,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss. 
+56,Mon_AkaiKinoko,looks like a mushroom - swells/explodes when you get near throwing a projectile.
+58,Mon_NiseMana,looks like a ManaStone- is fake actually a crab
+59,Mon_RedEye,comes out of lava if too close- and travels towards player's current pos
+60,Mon_Golem,golem that becomes headless and runs faster if you attack
+61,Type_61,monster thats afraid of you. only killable by clouding
+62,Mon_PenguinHeishi,royal penguin with shield
+63,Mon_PenguinKnife,armored penguin that throws a knife
+64,SpikePress,large rectangular block that stamps down on regular interval
+65,Mon_WierdFlaps,monster that disappears if you attack- only vulnerable after reappearing
+66,GiantBall,environmental object-will deal damage if you touch
+67,Mon_TurtleBomb,turtle thats throws bombs
+69,RollBall,ball you roll around by shooting at it. Meant to be dropped on switch
+70,AngrySwitch,acts as a switch only switchable by dropping the RollBall on top of it which kills it
+71,Type_71,can't determine from here a wierd ball is following us
+73,Boss_73,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss.
+76,SpikePress_Lev,levitating spike press that moves left-right
+77,Boss_77,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss.
+80,Type_80,[UNCONFIRMED]looks empty

@@ -60,9 +60,32 @@ import os
 import struct
 import sys
 
-TYPES = [14, 15, 16, 20, 21, 22, 23, 24, 25, 27, 29, 30, 31, 37, 38, 40, 41,
-         42, 43, 45, 46, 47, 49, 50, 51, 52, 54, 56, 58, 59, 60, 61, 62, 63,
-         64, 65, 66, 67, 69, 70, 71, 73, 76, 77, 80]
+# WHICH TYPES A SET CAN SHOW. data/sprNNN.dat is per sprite set, and a frame
+# in it names a surface INDEX, so a type placed under the wrong set indexes
+# into a sheet that does not hold its art and draws as whatever is at that
+# index. That is why every boss looked like type 31 when the whole roster was
+# caged under stage 1's set: 31 is in set 1 and they are not.
+#
+# So the zoo is per sprite set, and the set is chosen by rewriting stage 1's
+# row in data/stage.dat - where the surface and sprite columns are equal in
+# every shipped row, so both move together.
+#
+# Derived by tools/zoo.py --sets from the shipped stage.dat and ev*.dat: for
+# each set, the types that any stage using that set actually places.
+SETS = {
+    0: [14],
+    1: [14, 16, 21, 22, 24, 25, 27, 29, 30, 31, 37],
+    2: [14, 15, 16, 20, 21, 23, 24, 25, 27, 29, 30, 37, 38, 40, 41, 42, 43],
+    3: [14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 37, 43, 45, 46, 47, 49, 50,
+        51, 54],
+    4: [14, 16, 20, 23, 24, 25, 27, 29, 37, 43, 45, 47, 52, 56, 58, 59, 60,
+        61, 64],
+    5: [14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 40, 43, 62, 63, 64, 65],
+    6: [14, 16, 20, 21, 22, 24, 25, 27, 38, 43, 58, 66, 69, 70, 76],
+    7: [20, 25, 73],
+    8: [14, 15, 16, 20, 24, 25, 27, 43, 62, 63, 65, 67, 71],
+    9: [25, 37, 77, 80],
+}
 
 WALL, AIR = 97, 1
 TILE_W = TILE_H = 32
@@ -93,10 +116,24 @@ CORRIDOR_Y = 17
 CORRIDOR_FLOOR_Y = 18
 SIGN_Y = CORRIDOR_Y
 
-TARGETS = ('map/001.map', 'data/ev001.dat', 'data/tk001.dat')
+TARGETS = ('map/001.map', 'data/ev001.dat', 'data/tk001.dat',
+           'data/stage.dat')
 
 
-def build_map(width):
+def set_stage1_sprites(gamedir, sprite_set):
+    """Point stage 1 at another sprite set, so its art is the one that loads."""
+    p = os.path.join(gamedir, 'data', 'stage.dat')
+    lines = open(p, encoding='latin-1').read().splitlines()
+    f = lines[1].split(',')
+    f[0] = '%d' % sprite_set
+    f[1] = '\t%d' % sprite_set
+    lines[1] = ','.join(f)
+    nl = chr(10)
+    with open(p, 'w', encoding='latin-1', newline=nl) as fh:
+        fh.write(nl.join(lines) + nl)
+
+
+def build_map(width, types):
     t = [WALL] * (width * H)
 
     def put(x, y, v):
@@ -110,7 +147,7 @@ def build_map(width):
 
     # a divider between neighbouring cages, in the creature's row only, so the
     # corridor below stays open end to end
-    for i in range(len(TYPES) + 1):
+    for i in range(len(types) + 1):
         put(LEFT + i * PITCH - 1, ENTITY_Y, WALL)
 
     # the spawn shaft: the player appears at tile 3 row 3 and drops to the
@@ -124,17 +161,21 @@ def build_map(width):
     return hdr + struct.pack('<%dH' % (width * H), *t)
 
 
-def install(gamedir):
+def install(gamedir, sprite_set):
+    types = SETS[sprite_set]
     for rel in TARGETS:
         p = os.path.join(gamedir, rel.replace('/', os.sep))
         if os.path.isfile(p) and not os.path.isfile(p + '.orig'):
             open(p + '.orig', 'wb').write(open(p, 'rb').read())
 
-    width = LEFT + len(TYPES) * PITCH + 3
-    open(os.path.join(gamedir, 'map', '001.map'), 'wb').write(build_map(width))
+    set_stage1_sprites(gamedir, sprite_set)
+
+    width = LEFT + len(types) * PITCH + 3
+    open(os.path.join(gamedir, 'map', '001.map'), 'wb').write(
+        build_map(width, types))
 
     ev, tk, legend = [], [], []
-    for i, t in enumerate(TYPES):
+    for i, t in enumerate(types):
         x = LEFT + i * PITCH
         ev.append('0,0000,0000,%04d,%04d,%04d-*,*' % (x, ENTITY_Y, t))
         ev.append('1,0000,0000,%04d,%04d,0016-*,0000-03-%04d'
@@ -148,9 +189,9 @@ def install(gamedir):
     open(os.path.join(d, 'tk001.dat'), 'w', encoding='latin-1').write(
         '\n'.join(tk) + '\n')
 
-    print('zoo installed: %d cages, map %dx%d' % (len(TYPES), width, H))
-    print('originals kept as map/001.map.orig, data/ev001.dat.orig, '
-          'data/tk001.dat.orig')
+    print('zoo installed: sprite set %d, %d cages, map %dx%d'
+          % (sprite_set, len(types), width, H))
+    print('originals kept alongside each target as *.orig')
     print()
     print('  tile x   type')
     for x, t in legend:
@@ -176,7 +217,14 @@ def main():
     if not os.path.isdir(os.path.join(g, 'data')):
         print('no data/ under %s' % g)
         return 2
-    (install if sys.argv[1] == '--install' else restore)(g)
+    if sys.argv[1] == '--restore':
+        restore(g)
+        return 0
+    sprite_set = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    if sprite_set not in SETS:
+        print('sprite set must be one of %s' % sorted(SETS))
+        return 2
+    install(g, sprite_set)
     return 0
 
 
