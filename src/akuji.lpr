@@ -5379,7 +5379,7 @@ begin
     for I := 0 to ITEM25_VARIANTS - 1 do
     begin
       Fresh(I);
-      EntityUpdate_Type25(E);
+      EntityUpdate_Type25_Door(E);
       if E.Raw[EF_ANIM_ID] <> ITEM25_SPRITES[I] then
       begin
         Log.Add(Format('FAILED: type 25 variant %d gave sprite %d, want %d',
@@ -5401,7 +5401,7 @@ begin
     Frames := '';
     for I := 1 to 20 do
     begin
-      EntityUpdate_Type27(E, GS_PLAY);
+      EntityUpdate_Type27_AkujiStatue(E, GS_PLAY);
       Frames := Frames + Format('%d', [E.Raw[EF_FLAG1C]]);
     end;
     Log.Add(Format('type 27 over 20 frames: %s', [Frames]));
@@ -5412,7 +5412,7 @@ begin
     end;
     Fresh(0);
     for I := 1 to 20 do
-      EntityUpdate_Type27(E, GS_PAUSE);
+      EntityUpdate_Type27_AkujiStatue(E, GS_PAUSE);
     if (E.Raw[EF_FLAG1C] <> 0) or (E.Raw[EF_BLOCK_B] <> 0) then
     begin
       Log.Add('FAILED: the save point animated while the game was not in play');
@@ -5434,7 +5434,7 @@ begin
     MaxY := StartY;
     for I := 1 to DIR_COUNT do
     begin
-      EntityUpdate_Type24(E, GS_PLAY, W);
+      EntityUpdate_Type24_PowerOrb(E, GS_PLAY, W);
       if E.Raw[EF_POS_Y] < MinY then MinY := E.Raw[EF_POS_Y];
       if E.Raw[EF_POS_Y] > MaxY then MaxY := E.Raw[EF_POS_Y];
     end;
@@ -5463,7 +5463,7 @@ begin
 
     { Outside GS_PLAY it sets its sprite and freezes. }
     Fresh(0);
-    EntityUpdate_Type24(E, GS_PAUSE, W);
+    EntityUpdate_Type24_PowerOrb(E, GS_PAUSE, W);
     if (E.Raw[EF_POS_Y] <> POSITION_BIAS) or (E.Raw[EF_FACING] <> 0) then
     begin
       Log.Add('FAILED: type 24 bobbed while the game was not in play');
@@ -5478,7 +5478,7 @@ begin
     { An ordinary variant is silent and does not animate. }
     Fresh(0);
     for I := 1 to 200 do
-      EntityUpdate_Type24(E, GS_PLAY, W);
+      EntityUpdate_Type24_PowerOrb(E, GS_PLAY, W);
     if W.Sounds <> 0 then
     begin
       Log.Add(Format('FAILED: variant 0 played %d sound(s)', [W.Sounds]));
@@ -5496,7 +5496,7 @@ begin
     Frames := '';
     for I := 1 to 6 do
     begin
-      EntityUpdate_Type24(E, GS_PLAY, W);
+      EntityUpdate_Type24_PowerOrb(E, GS_PLAY, W);
       Frames := Frames + Format('%d ', [E.Raw[EF_ANIM_ID]]);
     end;
     Log.Add(Format('type 24 variant 8, six frames: %s', [Trim(Frames)]));
@@ -5508,7 +5508,7 @@ begin
 
     Fresh(ITEM24_BEAT_VARIANT);
     for I := 1 to 610 do
-      EntityUpdate_Type24(E, GS_PLAY, W);
+      EntityUpdate_Type24_PowerOrb(E, GS_PLAY, W);
     Beats := W.Sounds;
     Log.Add(Format('type 24 variant 8 over 610 frames: %d heartbeat(s), '
       + 'last sound %d (%s)', [Beats, W.LastSound,
@@ -6562,17 +6562,17 @@ begin
        Pool.Entity($22)^.Raw[EF_ANIM_ID], ITEM24_SPRITES[3]]));
     if Pool.Entity($21)^.Raw[EF_ANIM_ID] <> ITEM25_SPRITES[2] then
     begin
-      Log.Add('FAILED: the type 25 arm did not reach EntityUpdate_Type25');
+      Log.Add('FAILED: the type 25 arm did not reach EntityUpdate_Type25_Door');
       Inc(Result);
     end;
     if Pool.Entity($22)^.Raw[EF_ANIM_ID] <> ITEM24_SPRITES[3] then
     begin
-      Log.Add('FAILED: the type 24 arm did not reach EntityUpdate_Type24');
+      Log.Add('FAILED: the type 24 arm did not reach EntityUpdate_Type24_PowerOrb');
       Inc(Result);
     end;
     if Pool.Entity($23)^.Raw[EF_ANIM_ID] <> SAVE_POINT_SPRITES[0] then
     begin
-      Log.Add('FAILED: the type 27 arm did not reach EntityUpdate_Type27');
+      Log.Add('FAILED: the type 27 arm did not reach EntityUpdate_Type27_AkujiStatue');
       Inc(Result);
     end;
 
@@ -10635,7 +10635,7 @@ begin
         $0045A944:
           begin
             LoadEntityFromMem(EMU_ENTITY_AT, E);
-            EntityUpdate_Type16_Sign(E);
+            EntityUpdate_Type16_InfoSign(E);
             GotMem := HexOfEntity(E);
             HasMem := True;
             Got := 0;
@@ -10643,7 +10643,7 @@ begin
         $0045A4F0:
           begin
             LoadEntityFromMem(EMU_ENTITY_AT, E);
-            EntityUpdate_Type25(E);
+            EntityUpdate_Type25_Door(E);
             GotMem := HexOfEntity(E);
             HasMem := True;
             Got := 0;

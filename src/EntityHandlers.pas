@@ -2435,7 +2435,7 @@ procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
 
 { 0x0045A43C. See ITEM24_SPRITES above. World is needed only for the heartbeat,
   which only variant 8 has. }
-procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type24_PowerOrb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A7BC. The falling item. See DROP_SPRITES above. }
@@ -2444,16 +2444,16 @@ procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
 
 { 0x0045B3EC. A springboard, and a shooter, by variant. See the T40_ block -
   its launch rewrites six fields of the player's entity. }
-procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type40_PoyoPoyo(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
 { 0x0045C678. The boss: circle, dive, dive, summon. See the T52_ block. }
-procedure EntityUpdate_Type52(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type52_Boss_FireLion(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045CAD8. The second boss: hover, blink out, fire, hop, blink in.
   See the T54_ block. }
-procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type54_Boss_FloatingMagician(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045CC98. The boss's fireball in state 0 and its trail in state 1. }
@@ -2468,37 +2468,37 @@ procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
 { 0x0045DA28. Sways a quarter turn a frame until you get near, then runs
   away. See the T61_
   block, and note that the acceleration really is away from the player. }
-procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type61_Mon_HenaHena(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045DC84. A walker that recomputes its own vulnerability every frame
   from which way it is heading relative to you. }
-procedure EntityUpdate_Type62(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type62_Mon_PenguinHeishi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045DDF4. Walks, stops to fire one type-57 skimmer, then turns round.
   See the T63_ block. }
-procedure EntityUpdate_Type63(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type63_Mon_PenguinKnife(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045E030. Drops from the ceiling, sends a wave each way along the
   floor, rests, and climbs back. }
-procedure EntityUpdate_Type64(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type64_SpikePress(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045E25C. The third boss. It reads the input directly: nothing happens
   until the player presses ATTACK while standing in its box. See T65_. }
-procedure EntityUpdate_Type65(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type65_Mon_DorDor(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
 { 0x0045E4EC. An anchor and the satellite that orbits it, one handler and
   two variants. See the T66_ block for what EF_FACING means here. }
-procedure EntityUpdate_Type66(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type66_GiantBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045E714. Walks, lays a type-57 egg, then bolts away from it and
   coasts to a halt. See the T67_ block. }
-procedure EntityUpdate_Type67(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type67_Mon_TurtleBomb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045EA40. What hatches: a riser that resizes its own hitbox frame by
@@ -2508,17 +2508,17 @@ procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
 
 { 0x0045EB1C. A pushable puzzle object: slides, and when it finds a hole
   under it pays out a type 68 and sets its event's progress flag. }
-procedure EntityUpdate_Type69(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type69_GoroGoro(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045EC4C. Exactly 100 hp, and any wound at all is fatal. Variant 1
   walks, variant 0 stands. See the T70_ block. }
-procedure EntityUpdate_Type70(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type70_AngrySwitch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045ED88. Walks invulnerable, curls up vulnerable, repeats. See the
   T71_ block - and note the walk timer only runs while it is on screen. }
-procedure EntityUpdate_Type71(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type71_BouncyCat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045EFC8. A faller, a flyer that picks its sprite by heading, and the
@@ -2528,7 +2528,7 @@ procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
 
 { 0x0045F218. The fourth boss. Three of its states are left by a spawned
   child rather than by anything here. See the T73_ block. }
-procedure EntityUpdate_Type73(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type73_Boss_MidoriLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045F498. Type 73's charge-up, and the fan of shots it throws. The
@@ -2543,12 +2543,12 @@ procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
 
 { 0x0045F744. A slow sweep: one heading step per reload, velocity from that
   heading, so it crosses and comes back over a full turn. }
-procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type76_SpikePress_Lev(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045F85C. The final boss: six phases, each running a six-step script
   out of two tables. See the T77_ block. }
-procedure EntityUpdate_Type77(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type77_Boss_Hero(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0046023C. The boss's second body. It has no behaviour: it reads the
@@ -2562,28 +2562,28 @@ procedure EntityUpdate_Type79(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x004607E8. Two small effects that share one counter increment. }
-procedure EntityUpdate_Type80(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type80_Fx_ArenaEmber(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D598. Sleeps until touched, then wobbles on the spot. }
-procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type58_Mon_NiseMana(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D7D8. A walker that turns at walls AND at ledges, and enrages when
   its health drops below 11. See the T60_ block. }
-procedure EntityUpdate_Type60(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type60_Mon_Golem(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045D670. Wakes, rises, aims once at the apex, then flies. }
-procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type59_Mon_RedEye(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045CE78. A trap: sits, then bursts at the player. See the T56_ block. }
-procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type56_Mon_AkaiKinoko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045C608. The simplest chaser: steer, move, repeat, for ever. }
-procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type51_Mon_Ghost(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045CA28. Winds up, then charges in whatever direction it faces. }
@@ -2592,11 +2592,11 @@ procedure EntityUpdate_Type53(var E: TEntity; AGameState: Integer;
 
 { 0x0045C430. Patrols, opens to fire, closes - and changes its own
   vulnerability while open. See the T50_ block. }
-procedure EntityUpdate_Type50(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type50_Mon_Turtle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045C250. A diver: hover, drop, climb, rest. See the T49_ block. }
-procedure EntityUpdate_Type49(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type49_Mon_Water(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045C0F4. Type 47's shot: four bounces, each shorter than the last. }
@@ -2604,20 +2604,20 @@ procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045BF58. A lobber: wait, wind up, throw two shots, rest, repeat. }
-procedure EntityUpdate_Type47(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type47_Mon_PinkSquid(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045BCC4. A crumbling platform - the only reader of EF_RIDDEN. }
-procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type45_Block_NukeNuke(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045BD9C. Sleeps until the player is close, then homes. }
-procedure EntityUpdate_Type46(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type46_Mon_Bat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045BBD8. Armour. Its VARIANT selects which of the four armour
   vulnerability kinds it has - see the T43_ block. }
-procedure EntityUpdate_Type43(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type43_GashiGashi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045BC00. Type 42's shot: thrown up, pulled down, culled off screen. }
@@ -2626,15 +2626,15 @@ procedure EntityUpdate_Type44(var E: TEntity; AGameState: Integer;
 
 { 0x0045B7C4. A boss. Six states, and its timings scale with its own HP as
   well as with the difficulty - see the T42_ block. }
-procedure EntityUpdate_Type42(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type42_Boss_TealBlobSlammer(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045B62C. A hopper. See the T41_ block. }
-procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type41_Mon_TondaCricket(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045B0CC. A turret. Waits only while on screen, then fires a type 39. }
-procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type38_Mon_AkuNeko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045B260. Type 38's shot: charges, then flies. }
@@ -2655,20 +2655,20 @@ procedure EntityUpdate_Type35(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045ABD8. A patroller that gets meaner on hard - see the T30_ block. }
-procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type30_Akuji(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045AC94. A floating attacker. Six states, three difficulty tables, and
   a child entity that drives the transition this handler cannot make itself. }
-procedure EntityUpdate_Type31(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type31_Boss_MurasakiLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A848. Drops, lands, and lies there animating. }
-procedure EntityUpdate_Type37(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type37_BossKey(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A95C. A switch. The only handler that writes to the event table. }
-procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type15_Switch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A9D4 and 0x0045A9D0. Both are a single RET. The switch HAS an arm for
@@ -2680,11 +2680,11 @@ procedure EntityUpdate_Type19(var E: TEntity);
 
 { 0x0045AA10. An oscillating platform - see the T21_ block above for why
   EF_FACING is a speed here and not a heading. }
-procedure EntityUpdate_Type21(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type21_WingedHorseBlock(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045AA78. A torch: it owns the two flame entities above it. }
-procedure EntityUpdate_Type23(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type23_Candle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A580. Four frames, and inert unless its variant is 0. }
@@ -2692,7 +2692,7 @@ procedure EntityUpdate_Type28(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045AB64. An idle that animates faster when the player is close. }
-procedure EntityUpdate_Type29(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type29_Mon_MidoriMonster(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x00459EB4. A moving puff whose sprite row is chosen by which way it is
@@ -2762,11 +2762,11 @@ procedure EntityUpdate_Type26(var E: TEntity; AGameState: Integer;
   the type table's column 0 - and that column is 0 for every type in the game,
   so an untranslated entity wears sprite 0. Sprite 0 is Akuji standing, which
   is why the signs looked like the player. }
-procedure EntityUpdate_Type16_Sign(var E: TEntity);
+procedure EntityUpdate_Type16_InfoSign(var E: TEntity);
 
 { 0x0045AA60. One sprite, and it can die - the only difference from the sign
   is the Entity_UpdateDying call, whose result this one also discards. }
-procedure EntityUpdate_Type22(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type22_SpikeBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
 { 0x0045A698. The explosion. See BOOM_SPRITES above. }
@@ -2791,11 +2791,11 @@ procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
   Those two are the same function shape twice: write a sprite, then compute
   GameState - GS_PLAY into EAX and return it, which nothing reads. See the
   note on type 16 for why that dead subtraction is left as a comment. }
-procedure EntityUpdate_Type25(var E: TEntity);
+procedure EntityUpdate_Type25_Door(var E: TEntity);
 
 { 0x0045A540. The save point's idle animation. See SAVE_POINT_SPRITES for why
   it is the save point, which is not visible from this function at all. }
-procedure EntityUpdate_Type27(var E: TEntity; AGameState: Integer);
+procedure EntityUpdate_Type27_AkujiStatue(var E: TEntity; AGameState: Integer);
 
 { ==========================================================================
   Entity_UpdateAll @ 0x004608BC - the per-frame loop over the entity pool.
@@ -3306,7 +3306,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type24(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type24_PowerOrb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Variant, Frame: Integer;
@@ -3359,7 +3359,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type25(var E: TEntity);
+procedure EntityUpdate_Type25_Door(var E: TEntity);
 var
   Variant: Integer;
 begin
@@ -3407,7 +3407,7 @@ begin
   Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
 end;
 
-procedure EntityUpdate_Type52(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type52_Boss_FireLion(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Sign, Slot, PlayerX: Integer;
@@ -3549,7 +3549,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type54(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type54_Boss_FloatingMagician(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Hop: Integer;
@@ -3961,7 +3961,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type61_Mon_HenaHena(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Cap: Integer;
@@ -4053,7 +4053,7 @@ begin
     E.Raw[EF_HP] := 0;
 end;
 
-procedure EntityUpdate_Type62(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type62_Mon_PenguinHeishi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, PlayerX: Integer;
@@ -4114,7 +4114,7 @@ begin
     Dec(E.Raw[EF_CHILD_A]);
 end;
 
-procedure EntityUpdate_Type63(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type63_Mon_PenguinKnife(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot, PlayerX: Integer;
@@ -4203,7 +4203,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type64(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type64_SpikePress(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot, Rise: Integer;
@@ -4293,7 +4293,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type65(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type65_Mon_DorDor(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 var
   Frame, D, Slot, Hop, Shot, PlayerX: Integer;
@@ -4410,7 +4410,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type66(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type66_GiantBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, Slot, Period: Integer;
@@ -4510,7 +4510,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type67(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type67_Mon_TurtleBomb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot, PlayerX: Integer;
@@ -4683,7 +4683,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type69(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type69_GoroGoro(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, Slot: Integer;
@@ -4720,7 +4720,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type70(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type70_AngrySwitch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -4778,7 +4778,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type71(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type71_BouncyCat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, PlayerX: Integer;
@@ -4999,7 +4999,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type73(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type73_Boss_MidoriLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot, Hp: Integer;
@@ -5239,7 +5239,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type76(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type76_SpikePress_Lev(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D: Integer;
@@ -5283,7 +5283,7 @@ begin
   Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
 end;
 
-procedure EntityUpdate_Type77(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type77_Boss_Hero(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, Dir, Phase, D, Slot, I, N, Act, Speed: Integer;
@@ -5874,7 +5874,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type80(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type80_Fx_ArenaEmber(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -5924,7 +5924,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type58(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type58_Mon_NiseMana(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -5973,7 +5973,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type60(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type60_Mon_Golem(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot, PlayerX: Integer;
@@ -6054,7 +6054,7 @@ begin
   Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
 end;
 
-procedure EntityUpdate_Type59(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type59_Mon_RedEye(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Dist: Integer;
@@ -6137,7 +6137,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type56(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type56_Mon_AkaiKinoko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Aim, I, N, Slot: Integer;
@@ -6206,7 +6206,7 @@ begin
     E.Raw[EF_TIMER] := T56_FUSE;
 end;
 
-procedure EntityUpdate_Type51(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type51_Mon_Ghost(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -6284,7 +6284,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type50(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type50_Mon_Turtle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot: Integer;
@@ -6393,7 +6393,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type49(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type49_Mon_Water(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Step, Dist: Integer;
@@ -6568,7 +6568,7 @@ begin
     World.DestroyEntity(E, False);
 end;
 
-procedure EntityUpdate_Type47(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type47_Mon_PinkSquid(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, I, Slot: Integer;
@@ -6650,7 +6650,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type45(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type45_Block_NukeNuke(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D: Integer;
@@ -6709,7 +6709,7 @@ begin
   E.Raw[EF_RIDDEN] := 0;
 end;
 
-procedure EntityUpdate_Type46(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type46_Mon_Bat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Dist: Integer;
@@ -6777,7 +6777,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type43(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type43_GashiGashi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Variant: Integer;
@@ -6830,7 +6830,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type42(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type42_Boss_TealBlobSlammer(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, I, N, Slot: Integer;
@@ -7014,7 +7014,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type41(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type41_Mon_TondaCricket(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D: Integer;
@@ -7100,7 +7100,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type40(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type40_PoyoPoyo(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 var
   Frame, Row, D, Slot, Aim: Integer;
@@ -7200,7 +7200,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type38(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type38_Mon_AkuNeko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, Row, D, Slot: Integer;
@@ -7533,7 +7533,7 @@ begin
   World.DestroyEntity(E, False);
 end;
 
-procedure EntityUpdate_Type30(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type30_Akuji(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -7584,7 +7584,7 @@ begin
   Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
 end;
 
-procedure EntityUpdate_Type31(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type31_Boss_MurasakiLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, D, Slot: Integer;
@@ -7694,7 +7694,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type37(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type37_BossKey(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -7744,7 +7744,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type15(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type15_Switch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame: Integer;
@@ -7780,7 +7780,7 @@ procedure EntityUpdate_Type19(var E: TEntity);
 begin
 end;
 
-procedure EntityUpdate_Type21(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type21_WingedHorseBlock(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 begin
   E.Raw[EF_ANIM_ID] := T21_SPRITE;
@@ -7809,7 +7809,7 @@ begin
     Inc(E.Raw[EF_POS_X], E.Raw[EF_FACING]);
 end;
 
-procedure EntityUpdate_Type23(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type23_Candle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Slot: Integer;
@@ -7885,7 +7885,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type29(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type29_Mon_MidoriMonster(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 var
   Frame, Ticks: Integer;
@@ -8297,12 +8297,12 @@ begin
     World.DestroyEntity(E, False);
 end;
 
-procedure EntityUpdate_Type16_Sign(var E: TEntity);
+procedure EntityUpdate_Type16_InfoSign(var E: TEntity);
 begin
   E.Raw[EF_ANIM_ID] := SIGN_SPRITE;
 end;
 
-procedure EntityUpdate_Type22(var E: TEntity; AGameState: Integer;
+procedure EntityUpdate_Type22_SpikeBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 begin
   E.Raw[EF_ANIM_ID] := TYPE22_SPRITE;
@@ -8392,7 +8392,7 @@ begin
     World.DestroyEntity(E, True);
 end;
 
-procedure EntityUpdate_Type27(var E: TEntity; AGameState: Integer);
+procedure EntityUpdate_Type27_AkujiStatue(var E: TEntity; AGameState: Integer);
 var
   Frame: Integer;
 begin
@@ -8589,9 +8589,9 @@ begin
   case E.Raw[EF_TYPE] of
     1:  PlayerUpdate(E, P, L, Inp, World, AGameState);
     14: EntityUpdate_Type14_ManaStone(E, AGameState);
-    24: EntityUpdate_Type24(E, AGameState, World);
-    25: EntityUpdate_Type25(E);
-    27: EntityUpdate_Type27(E, AGameState);
+    24: EntityUpdate_Type24_PowerOrb(E, AGameState, World);
+    25: EntityUpdate_Type25_Door(E);
+    27: EntityUpdate_Type27_AkujiStatue(E, AGameState);
     32: EntityUpdate_Type32_Emitter(E, AGameState, World);
     33: EntityUpdate_Type33_Explosion(E, AGameState, World);
     2:  EntityUpdate_Type02(E, AGameState, World);
@@ -8606,63 +8606,63 @@ begin
     11: EntityUpdate_Type11(E, AGameState);
     12: EntityUpdate_Type12(E, AGameState);
     13: EntityUpdate_Type13(E, AGameState, World);
-    15: EntityUpdate_Type15(E, AGameState, World);
+    15: EntityUpdate_Type15_Switch(E, AGameState, World);
     17: EntityUpdate_Type17(E);
     19: EntityUpdate_Type19(E);
-    21: EntityUpdate_Type21(E, AGameState, World);
-    23: EntityUpdate_Type23(E, AGameState, World);
+    21: EntityUpdate_Type21_WingedHorseBlock(E, AGameState, World);
+    23: EntityUpdate_Type23_Candle(E, AGameState, World);
     28: EntityUpdate_Type28(E, AGameState, World);
-    29: EntityUpdate_Type29(E, AGameState, World);
-    30: EntityUpdate_Type30(E, AGameState, World);
-    31: EntityUpdate_Type31(E, AGameState, World);
+    29: EntityUpdate_Type29_Mon_MidoriMonster(E, AGameState, World);
+    30: EntityUpdate_Type30_Akuji(E, AGameState, World);
+    31: EntityUpdate_Type31_Boss_MurasakiLizard(E, AGameState, World);
     34: EntityUpdate_Type34(E, AGameState, World);
     35: EntityUpdate_Type35(E, AGameState, World);
-    37: EntityUpdate_Type37(E, AGameState, World);
-    38: EntityUpdate_Type38(E, AGameState, World);
+    37: EntityUpdate_Type37_BossKey(E, AGameState, World);
+    38: EntityUpdate_Type38_Mon_AkuNeko(E, AGameState, World);
     39: EntityUpdate_Type39(E, AGameState, World);
-    40: EntityUpdate_Type40(E, AGameState, Inp, World);
-    41: EntityUpdate_Type41(E, AGameState, World);
-    42: EntityUpdate_Type42(E, AGameState, World);
-    43: EntityUpdate_Type43(E, AGameState, World);
+    40: EntityUpdate_Type40_PoyoPoyo(E, AGameState, Inp, World);
+    41: EntityUpdate_Type41_Mon_TondaCricket(E, AGameState, World);
+    42: EntityUpdate_Type42_Boss_TealBlobSlammer(E, AGameState, World);
+    43: EntityUpdate_Type43_GashiGashi(E, AGameState, World);
     44: EntityUpdate_Type44(E, AGameState, World);
-    45: EntityUpdate_Type45(E, AGameState, World);
-    46: EntityUpdate_Type46(E, AGameState, World);
-    47: EntityUpdate_Type47(E, AGameState, World);
+    45: EntityUpdate_Type45_Block_NukeNuke(E, AGameState, World);
+    46: EntityUpdate_Type46_Mon_Bat(E, AGameState, World);
+    47: EntityUpdate_Type47_Mon_PinkSquid(E, AGameState, World);
     48: EntityUpdate_Type48(E, AGameState, World);
-    49: EntityUpdate_Type49(E, AGameState, World);
-    50: EntityUpdate_Type50(E, AGameState, World);
-    51: EntityUpdate_Type51(E, AGameState, World);
+    49: EntityUpdate_Type49_Mon_Water(E, AGameState, World);
+    50: EntityUpdate_Type50_Mon_Turtle(E, AGameState, World);
+    51: EntityUpdate_Type51_Mon_Ghost(E, AGameState, World);
     53: EntityUpdate_Type53(E, AGameState, World);
-    56: EntityUpdate_Type56(E, AGameState, World);
-    52: EntityUpdate_Type52(E, AGameState, World);
-    54: EntityUpdate_Type54(E, AGameState, World);
+    56: EntityUpdate_Type56_Mon_AkaiKinoko(E, AGameState, World);
+    52: EntityUpdate_Type52_Boss_FireLion(E, AGameState, World);
+    54: EntityUpdate_Type54_Boss_FloatingMagician(E, AGameState, World);
     55: EntityUpdate_Type55(E, AGameState, World);
     57: EntityUpdate_Type57(E, AGameState, World);
-    58: EntityUpdate_Type58(E, AGameState, World);
-    59: EntityUpdate_Type59(E, AGameState, World);
-    60: EntityUpdate_Type60(E, AGameState, World);
-    61: EntityUpdate_Type61(E, AGameState, World);
-    62: EntityUpdate_Type62(E, AGameState, World);
-    63: EntityUpdate_Type63(E, AGameState, World);
-    64: EntityUpdate_Type64(E, AGameState, World);
-    65: EntityUpdate_Type65(E, AGameState, Inp, World);
-    66: EntityUpdate_Type66(E, AGameState, World);
-    67: EntityUpdate_Type67(E, AGameState, World);
+    58: EntityUpdate_Type58_Mon_NiseMana(E, AGameState, World);
+    59: EntityUpdate_Type59_Mon_RedEye(E, AGameState, World);
+    60: EntityUpdate_Type60_Mon_Golem(E, AGameState, World);
+    61: EntityUpdate_Type61_Mon_HenaHena(E, AGameState, World);
+    62: EntityUpdate_Type62_Mon_PenguinHeishi(E, AGameState, World);
+    63: EntityUpdate_Type63_Mon_PenguinKnife(E, AGameState, World);
+    64: EntityUpdate_Type64_SpikePress(E, AGameState, World);
+    65: EntityUpdate_Type65_Mon_DorDor(E, AGameState, Inp, World);
+    66: EntityUpdate_Type66_GiantBall(E, AGameState, World);
+    67: EntityUpdate_Type67_Mon_TurtleBomb(E, AGameState, World);
     68: EntityUpdate_Type68(E, AGameState, World);
-    69: EntityUpdate_Type69(E, AGameState, World);
-    70: EntityUpdate_Type70(E, AGameState, World);
-    71: EntityUpdate_Type71(E, AGameState, World);
+    69: EntityUpdate_Type69_GoroGoro(E, AGameState, World);
+    70: EntityUpdate_Type70_AngrySwitch(E, AGameState, World);
+    71: EntityUpdate_Type71_BouncyCat(E, AGameState, World);
     72: EntityUpdate_Type72(E, AGameState, World);
-    73: EntityUpdate_Type73(E, AGameState, World);
+    73: EntityUpdate_Type73_Boss_MidoriLizard(E, AGameState, World);
     74: EntityUpdate_Type74(E, AGameState, World);
     75: EntityUpdate_Type75(E, AGameState, World);
-    76: EntityUpdate_Type76(E, AGameState, World);
-    77: EntityUpdate_Type77(E, AGameState, World);
+    76: EntityUpdate_Type76_SpikePress_Lev(E, AGameState, World);
+    77: EntityUpdate_Type77_Boss_Hero(E, AGameState, World);
     78: EntityUpdate_Type78(E, AGameState, World);
     79: EntityUpdate_Type79(E, AGameState, World);
-    80: EntityUpdate_Type80(E, AGameState, World);
-    16: EntityUpdate_Type16_Sign(E);
-    22: EntityUpdate_Type22(E, AGameState, World);
+    80: EntityUpdate_Type80_Fx_ArenaEmber(E, AGameState, World);
+    16: EntityUpdate_Type16_InfoSign(E);
+    22: EntityUpdate_Type22_SpikeBall(E, AGameState, World);
     26: EntityUpdate_Type26(E, AGameState, World);
     36: EntityUpdate_Type36_FallingItem(E, AGameState, World);
     { Every arm in HANDLER_ADDR now has a case above. This else is not in

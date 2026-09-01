@@ -101,7 +101,7 @@ type
     function Load(const ADataDir: string; StageIndex: Integer): Integer;
 
     procedure SetActive(Index: Integer; Value: Boolean);
-    { EntityUpdate_Type15's throw. Distinct from Disable, which also moves the
+    { EntityUpdate_Type15_Switch's throw. Distinct from Disable, which also moves the
       record off the map - a thrown switch keeps its tile and its entity. }
     procedure SetOpcode(Index, Value: Integer);
     procedure SetInWindow(Index: Integer; Value: Boolean);

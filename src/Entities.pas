@@ -725,13 +725,13 @@ type
     procedure BeginEvent(EventId, Arg: Integer); virtual;
     procedure ClearEventEntity(EventId: Integer); virtual;
     procedure SetProgress(Index: Integer); virtual;
-    { EntityUpdate_Type15 rewrites its own event's OPCODE - a switch that has
+    { EntityUpdate_Type15_Switch rewrites its own event's OPCODE - a switch that has
       been thrown becomes opcode 9, which no longer triggers anything. The
       event table is the entity system's, not the interpreter's, so it comes
       through the world like the rest. }
     procedure SetEventOpcode(EventId, Opcode: Integer); virtual;
     { The player's difficulty, 0..2. Several enemy handlers index a
-      three-entry table with it - EntityUpdate_Type30 doubles its speed on 2,
+      three-entry table with it - EntityUpdate_Type30_Akuji doubles its speed on 2,
       and type 31 has three separate tables keyed by it. The player state is
       not otherwise reachable from a handler, so it comes through here. }
     function PlayerDifficulty: Integer; virtual;
