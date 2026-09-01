@@ -277,14 +277,9 @@ begin
   FTiles[Y * FMapW + X] := Word(Tile);
 end;
 
-{ The original's positive modulus, both branches. TileMap_Draw @ 0x0044D818
-  reduces the scroll by it before doing anything else:
-
-      if (scroll < 0) scroll = ((span - scroll) - 1) / span * span + scroll;
-      else            scroll = scroll % span;
-
-  Delphi's own mod would give a negative answer for a negative scroll, which
-  is why the original spells the negative case out. }
+{ Positive modulus. Delphi's mod returns a negative answer for a negative
+  operand; TileMap_Draw @ 0x0044D818 spells the negative case out, so this
+  does too. }
 function WrapMod(A, Span: Integer): Integer;
 begin
   if Span <= 0 then Exit(0);
@@ -294,30 +289,13 @@ begin
     Result := A mod Span;
 end;
 
-{ TileMap_Draw @ 0x0044D818.
+{ TileMap_Draw @ 0x0044D818. The map is a TORUS: the scroll is reduced modulo
+  the map's pixel size and the tile indices wrap at both edges.
 
-  THE MAP WRAPS. This is the whole point of the function and it was missed on
-  the first pass, which clamped instead:
-
-      if X1 > FMapW then X1 := FMapW;
-      if Y1 > FMapH then Y1 := FMapH;
-
-  The original does not clamp anywhere. It reduces the scroll modulo the map's
-  PIXEL size (+0x60A0 and +0x60A4), and then wraps the tile indices as it
-  walks - `if (mapTilesX <= col) col = 0` at the right edge and the same for
-  the row at the bottom. So the map is a torus: scroll past the edge and the
-  opposite edge comes round.
-
-  HOW THE DIFFERENCE SURFACED. Every shipped map is big enough that the camera
-  never leaves it, so clamping and wrapping agree on all 65 of them and the
-  bug was invisible. A hand-made map exactly 448 pixels tall then put the
-  camera at DEFAULT_SCROLL_Y = 0x1C0 = 448 - precisely one map-height down -
-  and the two readings diverged completely: the original wrapped to the top
-  and drew the room, while this clamped every row away and drew nothing, so
-  the screen was black and the player appeared to fall through the world.
-
-  Nothing in the shipped game changes as a result of this fix; it only stops
-  being wrong outside the range the shipped data happens to use. }
+  This clamped until 2026-09-01, which agrees with wrapping on every shipped
+  map because the camera never leaves them. It diverges the moment one does -
+  a 448-pixel-tall map with the new game's ScrollY of 448 drew nothing at all.
+  See notes/divergences.md. }
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
   SurfaceIndex, OffsetX, OffsetY, ViewW, ViewH: Integer);
 var
@@ -338,8 +316,7 @@ begin
   SX := WrapMod(OffsetX, MapPxW);
   SY := WrapMod(OffsetY, MapPxH);
 
-  { The first column starts at a NEGATIVE pixel offset when the scroll is not
-    a whole tile, so the partly-visible tile at the left is drawn too. }
+  { Negative, so the tile straddling the left edge is drawn too. }
   StartPxX := -(SX mod FTileW);
   RemY     := SY mod FTileH;
   StartPxY := -RemY;
@@ -358,9 +335,8 @@ begin
     PxX := StartPxX;
     for C := 0 to Cols - 1 do
     begin
+      { 0xFFFF is the original's "no tile"; it falls out of the range test. }
       Idx := GetTile(Col, Row);
-      { The original skips 0xFFFF - "no tile" - and complains about anything
-        above 0x400; here anything without a definition is simply skipped. }
       if (Idx >= 0) and (Idx < Length(FTileDefs)) then
         Dest.CopyRect(Rect(PxX, PxY, PxX + FTileW, PxY + FTileH),
                       Sheet.Canvas, FTileDefs[Idx]);
