@@ -22,21 +22,21 @@ uses
   Classes, SysUtils, GameState;
 
 { Player_Update @ 0x004585A8 lives in Player.pas; these are the constants and
-  save fields it reads. EF_STATE (block A[0]) selects the behaviour:
+  save fields it reads. Detail and derivation: notes/player_controller.md }
 
-      0 ground   1 dash    2 air      3 landing recovery   4 wall kick
-      5 attack   6 glide   7 air dash 8 knockback
-      9 dying    10 dying by a fall - both end at GameState 100
-
-  6, 7 and 8 are delegated to Player_UpdateGlide / UpdateAirDash /
-  UpdateKnockback at 0x004593B0, 0x00459624 and 0x00459828.
-
-  The four abilities gate four of those states, one flag each:
-
-      Head[4] dash -> 1    Head[5] wall kick -> 4
-      Head[6] air dash -> 7   Head[7] glide -> 6
-
-  Detail and derivation: notes/player_controller.md }
+const
+  { EF_STATE, block A[0], selects the player's behaviour. }
+  PSTATE_GROUND    = 0;
+  PSTATE_DASH      = 1;    { gated by ABILITY_DASH }
+  PSTATE_AIR       = 2;
+  PSTATE_LANDING   = 3;    { landing recovery }
+  PSTATE_WALLKICK  = 4;    { gated by ABILITY_WALLKICK }
+  PSTATE_ATTACK    = 5;
+  PSTATE_GLIDE     = 6;    { gated by ABILITY_GLIDE;   Player_UpdateGlide      }
+  PSTATE_AIRDASH   = 7;    { gated by ABILITY_AIRDASH; Player_UpdateAirDash    }
+  PSTATE_KNOCKBACK = 8;    {                           Player_UpdateKnockback  }
+  PSTATE_DYING     = 9;
+  PSTATE_DYING_FALL = 10;  { both dying states end at GameState 100 }
 
 const
   { All from Player_Update. The player falls slower than loose objects, which
@@ -101,13 +101,10 @@ const
         variant 6  'Cloud   '     -> Head[6]
         variant 7  'Bat   '       -> Head[7]
 
-    CAUTION about the names below. WALLKICK, AIRDASH and GLIDE were taken from
-    what Player.pas does with each flag, not from the game's own words, and
-    the game's words do not obviously agree - 'Jump++' reads like a second
-    jump rather than a wall kick, and 'Bat' is a form rather than a glide. The
-    INDICES are not in doubt; the labels are, and renaming them would be a
-    claim about the controller that has not been made yet. Left as they are
-    with the discrepancy written down. }
+    CAUTION: WALLKICK, AIRDASH and GLIDE are named for what Player.pas does
+    with each flag, not for the game's own words, and the two do not obviously
+    agree - 'Jump++' reads like a second jump, 'Bat' like a form. The INDICES
+    are certain; the labels are a reading. }
   ABILITY_DASH      = 4;
   ABILITY_WALLKICK  = 5;
   ABILITY_AIRDASH   = 6;
@@ -174,22 +171,12 @@ const
   DEFAULT_SPAWN_Y   = $73;     { 115 pixels = tile 3 + 19 }
   DEFAULT_SCROLL_Y  = $1C0;    { 448 pixels = tile 14 }
 
-  { Where a tile-numbered destination lands in pixels. Both the stage-load and
-    the warp sub-opcodes carry TILE coordinates and convert them the same way,
-    and the two axes are NOT symmetric:
-
-        SpawnX := tileX * TileW + 16          centred across
-        SpawnY := tileY * TileH + 19          NOT centred down
-        ScrollX := camTileX * TileW           the camera is flush, no offset
-        ScrollY := camTileY * TileH
-
-    The 19 is not a rounding of 16. Game_StartOrLoad's own default carries it
-    too - 115 is 3 * 32 + 19 - so it is deliberate, and it puts the player's
-    origin where its feet sit rather than at the middle of the tile. Recorded
-    as measured; what makes 19 the right number is the player's box, which
-    Player.pas has. }
-  SPAWN_CENTRE_X = 16;
-  SPAWN_CENTRE_Y = 19;
+  { Added to a tile-numbered spawn destination. X centres across the tile; Y
+    does NOT centre down - 19 puts the player's origin at its feet, and
+    Game_StartOrLoad's own default carries the same 19 (115 = 3 * 32 + 19), so
+    it is deliberate. The camera's scroll takes no offset on either axis. }
+  SPAWN_CENTRE_X  = 16;
+  SPAWN_FOOT_Y    = 19;
   DEFAULT_FIELD11C8 = 300;
   DEFAULT_FIELD11D0 = $68;     { 104 }
 

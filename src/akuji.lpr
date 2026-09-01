@@ -2069,13 +2069,13 @@ begin
     Want(Pool.PosX(0) = 96 * 32, 'the default spawn is not 96 pixels across');
     Want(Pool.PosY(0) = 115 * 32, 'the default spawn is not 115 pixels down');
     { And the two axes really are offset differently. 96 is tile 3 flush; 115
-      is tile 3 plus 19, which is SPAWN_CENTRE_Y and not SPAWN_CENTRE_X. }
+      is tile 3 plus 19: the spawn is placed by the feet, not centred. }
     Want(DEFAULT_SPAWN_X = 3 * 32,
          Format('the default X %d is not flush with tile 3',
                 [DEFAULT_SPAWN_X]));
     Want(DEFAULT_SPAWN_Y = 3 * 32 + 19,
          Format('the default Y %d is not tile 3 plus 19', [DEFAULT_SPAWN_Y]));
-    Want(SPAWN_CENTRE_Y <> SPAWN_CENTRE_X,
+    Want(SPAWN_FOOT_Y <> SPAWN_CENTRE_X,
          'the two spawn offsets have become equal; the original has 16 and 19');
   finally
     H.Free;

@@ -619,7 +619,7 @@ begin
     if FWorld.Layer.TileH > 0 then TH := FWorld.Layer.TileH;
   end;
   FPlayer^.SpawnX  := PlayerTileX * TW + SPAWN_CENTRE_X;
-  FPlayer^.SpawnY  := PlayerTileY * TH + SPAWN_CENTRE_Y;
+  FPlayer^.SpawnY  := PlayerTileY * TH + SPAWN_FOOT_Y;
   FPlayer^.ScrollX := CamTileX * TW;
   FPlayer^.ScrollY := CamTileY * TH;
 end;
