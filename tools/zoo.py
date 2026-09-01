@@ -72,22 +72,37 @@ import sys
 #
 # Derived by tools/zoo.py --sets from the shipped stage.dat and ev*.dat: for
 # each set, the types that any stage using that set actually places.
+# For each sprite set: the types some stage using it actually places, plus the
+# TERRAIN and the two tile ids to build the room out of.
+#
+# The tiles cannot be fixed. Surface index 6 is bg00N.bmp, a DIFFERENT sheet
+# per set, so ids 97/1 - the commonest wall and air of stage 1's map - draw as
+# something else entirely under any other set. Each row's wall and air are the
+# commonest solid and non-solid tile of the largest shipped map using that set,
+# judged against that terrain's own threshold, so every room looks like a room
+# the game actually ships.
+#
+# terrain matters twice: it sets the solid threshold the wall has to clear, and
+# Terrain_Configure animates tiles for terrains 1..4 by hard-coded id.
 SETS = {
-    0: [14],
-    1: [14, 16, 21, 22, 24, 25, 27, 29, 30, 31, 37],
-    2: [14, 15, 16, 20, 21, 23, 24, 25, 27, 29, 30, 37, 38, 40, 41, 42, 43],
-    3: [14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 37, 43, 45, 46, 47, 49, 50,
-        51, 54],
-    4: [14, 16, 20, 23, 24, 25, 27, 29, 37, 43, 45, 47, 52, 56, 58, 59, 60,
-        61, 64],
-    5: [14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 40, 43, 62, 63, 64, 65],
-    6: [14, 16, 20, 21, 22, 24, 25, 27, 38, 43, 58, 66, 69, 70, 76],
-    7: [20, 25, 73],
-    8: [14, 15, 16, 20, 24, 25, 27, 43, 62, 63, 65, 67, 71],
-    9: [25, 37, 77, 80],
+    #      types                                            terr wall air
+    0: ([14],                                                  1,  97,  1),
+    1: ([14, 16, 21, 22, 24, 25, 27, 29, 30, 31, 37],          1,  97,  1),
+    2: ([14, 15, 16, 20, 21, 23, 24, 25, 27, 29, 30, 37, 38,
+         40, 41, 42, 43],                                      2,  81,  0),
+    3: ([14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 37, 43, 45,
+         46, 47, 49, 50, 51, 54],                              3,  88,  0),
+    4: ([14, 16, 20, 23, 24, 25, 27, 29, 37, 43, 45, 47, 52,
+         56, 58, 59, 60, 61, 64],                              4,  81,  0),
+    5: ([14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 40, 43, 62,
+         63, 64, 65],                                          5,  84,  0),
+    6: ([14, 16, 20, 21, 22, 24, 25, 27, 38, 43, 58, 66, 69,
+         70, 76],                                              6,  81,  0),
+    7: ([20, 25, 73],                                          6,  81,  0),
+    8: ([14, 15, 16, 20, 24, 25, 27, 43, 62, 63, 65, 67, 71],  8,  78,  0),
+    9: ([25, 37, 77, 80],                                      9,  88,  0),
 }
 
-WALL, AIR = 97, 1
 TILE_W = TILE_H = 32
 SHEET_C = SHEET_R = 10
 
@@ -120,21 +135,27 @@ TARGETS = ('map/001.map', 'data/ev001.dat', 'data/tk001.dat',
            'data/stage.dat')
 
 
-def set_stage1_sprites(gamedir, sprite_set):
-    """Point stage 1 at another sprite set, so its art is the one that loads."""
+def set_stage1_sets(gamedir, sprite_set, terrain):
+    """Point stage 1 at another surface/sprite set and terrain.
+
+    Surface and sprite are equal in every shipped row and have to move
+    together: a sprite frame names a surface INDEX, so the two files are only
+    meaningful as a pair. Terrain is the last column."""
     p = os.path.join(gamedir, 'data', 'stage.dat')
     lines = open(p, encoding='latin-1').read().splitlines()
     f = lines[1].split(',')
+    tab = chr(9)
     f[0] = '%d' % sprite_set
-    f[1] = '\t%d' % sprite_set
+    f[1] = tab + '%d' % sprite_set
+    f[15] = tab + '%d' % terrain
     lines[1] = ','.join(f)
     nl = chr(10)
     with open(p, 'w', encoding='latin-1', newline=nl) as fh:
         fh.write(nl.join(lines) + nl)
 
 
-def build_map(width, types):
-    t = [WALL] * (width * H)
+def build_map(width, types, wall, air):
+    t = [wall] * (width * H)
 
     def put(x, y, v):
         if 0 <= x < width and 0 <= y < H:
@@ -142,37 +163,37 @@ def build_map(width, types):
 
     # carve the two one-tile rows out of solid rock
     for x in range(1, width - 1):
-        put(x, ENTITY_Y, AIR)
-        put(x, CORRIDOR_Y, AIR)
+        put(x, ENTITY_Y, air)
+        put(x, CORRIDOR_Y, air)
 
     # a divider between neighbouring cages, in the creature's row only, so the
     # corridor below stays open end to end
     for i in range(len(types) + 1):
-        put(LEFT + i * PITCH - 1, ENTITY_Y, WALL)
+        put(LEFT + i * PITCH - 1, ENTITY_Y, wall)
 
     # the spawn shaft: the player appears at tile 3 row 3 and drops to the
     # corridor. It must not open the creature row, or they would all escape
     # down it.
     for y in range(1, CORRIDOR_Y):
         if y != ENTITY_Y:
-            put(SPAWN_X, y, AIR)
+            put(SPAWN_X, y, air)
 
     hdr = struct.pack('<6i', width, H, TILE_W, TILE_H, SHEET_C, SHEET_R)
     return hdr + struct.pack('<%dH' % (width * H), *t)
 
 
 def install(gamedir, sprite_set):
-    types = SETS[sprite_set]
+    types, terrain, wall, air = SETS[sprite_set]
     for rel in TARGETS:
         p = os.path.join(gamedir, rel.replace('/', os.sep))
         if os.path.isfile(p) and not os.path.isfile(p + '.orig'):
             open(p + '.orig', 'wb').write(open(p, 'rb').read())
 
-    set_stage1_sprites(gamedir, sprite_set)
+    set_stage1_sets(gamedir, sprite_set, terrain)
 
     width = LEFT + len(types) * PITCH + 3
     open(os.path.join(gamedir, 'map', '001.map'), 'wb').write(
-        build_map(width, types))
+        build_map(width, types, wall, air))
 
     ev, tk, legend = [], [], []
     for i, t in enumerate(types):
@@ -189,8 +210,8 @@ def install(gamedir, sprite_set):
     open(os.path.join(d, 'tk001.dat'), 'w', encoding='latin-1').write(
         '\n'.join(tk) + '\n')
 
-    print('zoo installed: sprite set %d, %d cages, map %dx%d'
-          % (sprite_set, len(types), width, H))
+    print('zoo installed: set %d, terrain %d, tiles %d/%d, %d cages, map %dx%d'
+          % (sprite_set, terrain, wall, air, len(types), width, H))
     print('originals kept alongside each target as *.orig')
     print()
     print('  tile x   type')
