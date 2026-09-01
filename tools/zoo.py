@@ -156,6 +156,27 @@ def set_stage1_sets(gamedir, sprite_set, terrain):
         fh.write(nl.join(lines) + nl)
 
 
+def unconfirmed(names_csv):
+    """Types still wanting an identification, read from entity_names.csv.
+
+    A type counts as done once it has a real name and no [UNCONFIRMED] marker.
+    Most types - doors, switches, signs, mana stones - are in nearly every set
+    and only need seeing once, so caging the whole roster again per set is
+    almost all repeats."""
+    want = set()
+    for line in open(names_csv, encoding='latin-1'):
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('type,'):
+            continue
+        f = line.split(',', 2)
+        if len(f) < 2 or not f[0].isdigit():
+            continue
+        name, note = f[1].strip(), (f[2] if len(f) > 2 else '')
+        if not name or name.startswith('Type_') or 'UNCONFIRMED' in note:
+            want.add(int(f[0]))
+    return want
+
+
 def build_map(width, types, wall, air):
     t = [wall] * (width * H)
 
@@ -184,8 +205,19 @@ def build_map(width, types, wall, air):
     return hdr + struct.pack('<%dH' % (width * H), *t)
 
 
-def install(gamedir, sprite_set):
+def install(gamedir, sprite_set, all_types=False):
     types, terrain, wall, air = SETS[sprite_set]
+    if not all_types:
+        csv = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'entity_names.csv')
+        if os.path.isfile(csv):
+            want = unconfirmed(csv)
+            picked = [t for t in types if t in want]
+            if picked:
+                types = picked
+            else:
+                print('nothing unconfirmed in set %d - caging all %d'
+                      % (sprite_set, len(types)))
     for rel in TARGETS:
         p = os.path.join(gamedir, rel.replace('/', os.sep))
         if os.path.isfile(p) and not os.path.isfile(p + '.orig'):
@@ -243,11 +275,12 @@ def main():
     if sys.argv[1] == '--restore':
         restore(g)
         return 0
-    sprite_set = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    rest = [a for a in sys.argv[3:] if a != '--all']
+    sprite_set = int(rest[0]) if rest else 1
     if sprite_set not in SETS:
         print('sprite set must be one of %s' % sorted(SETS))
         return 2
-    install(g, sprite_set)
+    install(g, sprite_set, '--all' in sys.argv)
     return 0
 
 
