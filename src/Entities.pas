@@ -977,31 +977,9 @@ function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
 function OriginPixel(Raw: Integer): Integer;
 
 { 0x00457150 / 0x00457228. How far the entity may move on that axis before it
-  is flush against the tile boundary it is heading for, in 1/32 pixel. The
-  callers use it to land exactly on an edge after Entity_TileCollide* has said
-  something is in the way.
-
-  The two are an exact pair: every field the X one reads at offset N, the Y one
-  reads at N+4, and they take LayerInfo +0x00/+0x10 against +0x04/+0x14. That
-  pairing over six independent fields is what established EF_EXTENT_*,
-  EF_BOX_OFS_* and EF_TILE_OFS_* in the first place.
-
-  TWO THINGS THAT LOOK WRONG AND ARE NOT.
-
-  The entity position is converted with a bare +31 for negatives, WITHOUT
-  removing POSITION_BIAS - unlike everywhere else. The bias survives into the
-  world coordinate, but 0x10000 in 1/32 pixel is 2048 pixels, and 2048 is
-  exactly 64 tiles of 32, so it shifts the coordinate by a whole number of
-  tiles and the distance to a tile edge is unchanged. It would stop being true
-  for any tile width that does not divide 2048; every shipped map is 32.
-
-  DELTA = 0 RETURNS RUBBISH. The original initialises its result to the entity
-  POINTER and only overwrites it in the Delta < 0 and Delta > 0 branches, so a
-  zero delta returns an address cast to an integer. Callers reach it only after
-  a collision was reported, which normally implies a non-zero delta - but
-  Entity_TileCollide* can report one for an entity already inside a solid tile,
-  and then the original assigns a pointer to a velocity. Reproducing that is
-  neither possible nor desirable here; this returns 0. }
+  is flush against the tile boundary it is heading for, in 1/32 pixel. Callers
+  use it to land exactly on an edge after Entity_TileCollide* reported a
+  blocker. }
 function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
                        Delta: Integer): Integer;
 function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
@@ -1188,9 +1166,20 @@ function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
 var
   CamPx, TileW, EntPx, Half, World: Integer;
 begin
-  Result := 0;                          { see the header: Delta = 0 }
+  { DIVERGENCE. On a zero delta the original returns the ENTITY POINTER cast
+    to an integer - its result starts as that and is only overwritten in the
+    two signed branches. A caller reaches this only after a collision was
+    reported, which normally implies a non-zero delta; Entity_TileCollide* can
+    still report one for an entity already inside a solid tile, and then the
+    original assigns a pointer to a velocity. Not reproducible here. }
+  Result := 0;
   if Delta = 0 then
     Exit;
+  { POSITION_BIAS is deliberately NOT removed, unlike everywhere else. It is
+    0x10000 in 1/32 pixel = 2048 px = exactly 64 tiles of 32, so it displaces
+    the coordinate by a whole number of tiles and the distance to an edge is
+    unchanged. This stops being true for any tile width that does not divide
+    2048; every shipped map is 32. }
   CamPx := OriginPixel(L.OriginX);
   TileW := L.TileW;
   if TileW = 0 then
@@ -1999,18 +1988,13 @@ begin
   for I := 0 to 9 do
     E^.Raw[EF_TYPEF_20 + I] := T.Raw[TC_NO_DROP + I];
 
-  { The sprite. Column 0 is the entity's initial anim id, and -1 means the
-    type has no sprite at all - three of the eighty-one.
+  { An entity's EXTENTS come off its sprite every frame, and every collision
+    box is built from those - so a spawn without one has no size and collides
+    with nothing. Three of the eighty-one types ask for TC_ANIM_ID = -1 and
+    are meant to be that way.
 
-    This used to be skipped, recorded as "a divergence that matters only once
-    sprites are drawn from it". It matters immediately: an entity's EXTENTS
-    are read off its sprite every frame by Entity_UpdateAll and every
-    collision box is built from them, so an entity with no sprite has no size
-    and collides with nothing. See SpritePool.pas.
-
-    A full pool FAILS THE SPAWN, alive flag and all. That is the original's
-    behaviour and it is why the pool size is a real limit rather than a
-    guard. }
+    A full sprite pool FAILS THE SPAWN, alive flag and all, which is what
+    makes the pool size a hard limit rather than a guard. }
   if (Sprites <> nil) and (T.Raw[TC_ANIM_ID] <> SPRITE_NONE) then
   begin
     I := Sprites.AllocSprite(T.Raw[TC_ANIM_ID]);
@@ -2027,11 +2011,9 @@ end;
 
 function PixelOf(Raw: Integer): Integer;
 begin
-  { `div`, not `shr`. Pascal's shr on an Integer is LOGICAL, so it is wrong
-    here for anything left of or above the origin - as it was in type 49's
-    bob. It happened to work in this expression only because POSITION_ROUND is
-    untyped, which widens the subtraction to Int64 and makes the shift
-    arithmetic by accident. Typing that constant would silently break it. }
+  { `div`, not `shr`: Pascal's shr on an Integer is LOGICAL and so is wrong
+    for anything left of or above the origin. Do not give POSITION_ROUND a
+    type either - being untyped is what widens this to Int64. }
   Result := (Raw - POSITION_BIAS) div (1 shl POSITION_SHIFT);
 end;
 
@@ -2057,16 +2039,10 @@ begin
 end;
 
 initialization
-  { The stride is not a design choice, it is what the original's
-    `base + index * 0x104` requires. A layout slip here silently misaligns
-    every slot after the first, so fail loudly at startup.
-
-    NOT Assert. These were two Asserts, and FPC compiles assertions out unless
-    -Sa is passed, which this project does not pass - proved on 2026-08-31 by
-    falsifying one to SizeOf(TEntity) = 999 and watching the suite pass. They
-    had never run. TPlayerState's own guard had already been rewritten as a
-    plain raise for exactly this reason and these two were left behind.
-    --selftest-layouts checks the same sizes and every field offset besides. }
+  { A layout slip silently misaligns every slot after the first, so fail at
+    startup. NOT Assert: FPC compiles assertions out without -Sa and this
+    project does not pass it, so an Assert here would never run.
+    --selftest-layouts checks these sizes and every field offset besides. }
   if SizeOf(TEntity) <> ENTITY_BYTES then
     raise Exception.CreateFmt('TEntity is %d bytes; the original indexes the '
       + 'pool as base + index * %d and the layout must match',
