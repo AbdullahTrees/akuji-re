@@ -4,44 +4,26 @@
   around the circle, and velocities come out of a lookup table rather than from
   floating point. There is no FPU code anywhere in the game's own layer.
 
-  Recovered from three places:
+  Recovered from:
 
     0x004513E0  angle between two points, as an integer, no division
     0x00461738  the homing/steering step (see TurnToward)
-    0x00468B14  the velocity table, 64 ints
-    0x00468C14  a second 64-int table, used for the Y component
+    0x00468B14  the velocity table, 64 ints      (X, via 0x0046CEE4)
+    0x00468C14  a second 64-int table            (Y, via 0x0046CE34)
 
-  The two tables are adjacent - the first ends exactly where the second begins,
-  and the eight ints after the second are pointers - so both are exactly 64
-  entries. They are also not independent: table2[i] = table1[(i + 16) mod 64]
-  for all 64 entries, which is the quarter-turn relationship between sine and
-  cosine. So there is really one table, emitted twice.
+  DirVelY computes DIR_COS[(Dir + 16) and 63] instead of holding that second
+  table because the two were read out and compared entry by entry: the
+  quarter-turn relation holds for all 64, so the image really carries one table
+  emitted twice. Their extents are pinned from outside - the first ends exactly
+  where the second begins, and pointers follow the second.
 
-  BOTH tables are confirmed from the code, and so is the relationship between
-  them. The game reaches them through two globals:
-
-      0x0046CEE4 -> 0x00468B14   the X component
-      0x0046CE34 -> 0x00468C14   the Y component
-
-  EntityUpdate_Type33_Explosion @ 0x0045A698 uses the pair together: it picks a
-  random heading with Random($40), then takes the X velocity from the first
-  table and the Y velocity from the second, at the SAME index. Entity_SpawnDebris
-  @ 0x00461874 uses the first alone the same way.
-
-  So DirVelY computing DIR_COS[(Dir + 16) and 63] rather than storing a second
-  table is not a shortcut taken on faith - the two tables in the image were read
-  out and checked entry by entry, and the quarter-turn relation holds for all 64.
-  A 64-entry random index into these exact addresses is also independent
-  evidence that DIR_COUNT is 64.
-
-  Its closed form is exact for every entry:
+  The closed form is exact for every entry:
 
       DIR_COS[i] = trunc(32 * cos(i * 2*Pi / 64))
 
-  - truncated toward zero, not rounded. It is kept here verbatim rather than
-  generated at startup, because the truncation is what the original shipped and
-  a rounding difference of one unit would slowly desynchronise any movement
-  that accumulates.
+  - truncated toward zero, not rounded, and kept verbatim rather than generated
+  at startup because a one-unit rounding difference would slowly desynchronise
+  any movement that accumulates.
 
   Screen Y grows downward, so the Y table is negated sine and direction 16
   points UP:
