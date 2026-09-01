@@ -78,29 +78,31 @@ import sys
 # The tiles cannot be fixed. Surface index 6 is bg00N.bmp, a DIFFERENT sheet
 # per set, so ids 97/1 - the commonest wall and air of stage 1's map - draw as
 # something else entirely under any other set. Each row's wall and air are the
-# commonest solid and non-solid tile of the largest shipped map using that set,
-# judged against that terrain's own threshold, so every room looks like a room
-# the game actually ships.
+# BRIGHTEST solid and non-solid tile that any stage using that set places at
+# least fifty times, judged against that terrain's own threshold. Brightest and
+# not commonest: tile 0 is the empty cell in every sheet, and it is the most
+# common non-solid tile in most maps, so picking by frequency paints the room
+# black. Sets 7 and 9 have nothing brighter - those areas really are that dark.
 #
 # terrain matters twice: it sets the solid threshold the wall has to clear, and
 # Terrain_Configure animates tiles for terrains 1..4 by hard-coded id.
 SETS = {
     #      types                                            terr wall air
-    0: ([14],                                                  1,  97,  1),
-    1: ([14, 16, 21, 22, 24, 25, 27, 29, 30, 31, 37],          1,  97,  1),
+    0: ([14],                                                  1,  84,  1),
+    1: ([14, 16, 21, 22, 24, 25, 27, 29, 30, 31, 37],          1,  84,  1),
     2: ([14, 15, 16, 20, 21, 23, 24, 25, 27, 29, 30, 37, 38,
-         40, 41, 42, 43],                                      2,  81,  0),
+         40, 41, 42, 43],                                      2,  93, 13),
     3: ([14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 37, 43, 45,
-         46, 47, 49, 50, 51, 54],                              3,  88,  0),
+         46, 47, 49, 50, 51, 54],                              3,  89,  1),
     4: ([14, 16, 20, 23, 24, 25, 27, 29, 37, 43, 45, 47, 52,
-         56, 58, 59, 60, 61, 64],                              4,  81,  0),
+         56, 58, 59, 60, 61, 64],                              4,  97, 29),
     5: ([14, 15, 16, 20, 21, 22, 24, 25, 27, 29, 40, 43, 62,
-         63, 64, 65],                                          5,  84,  0),
+         63, 64, 65],                                          5,  93, 39),
     6: ([14, 16, 20, 21, 22, 24, 25, 27, 38, 43, 58, 66, 69,
-         70, 76],                                              6,  81,  0),
+         70, 76],                                              6,  68, 21),
     7: ([20, 25, 73],                                          6,  81,  0),
-    8: ([14, 15, 16, 20, 24, 25, 27, 43, 62, 63, 65, 67, 71],  8,  78,  0),
-    9: ([25, 37, 77, 80],                                      9,  88,  0),
+    8: ([14, 15, 16, 20, 24, 25, 27, 43, 62, 63, 65, 67, 71],  8,  88, 33),
+    9: ([25, 37, 77, 80],                                      9,  89,  0),
 }
 
 TILE_W = TILE_H = 32
