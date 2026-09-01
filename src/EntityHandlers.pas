@@ -276,24 +276,18 @@ const
     if their animation somehow does not. }
   EFFECT_LATCH_TIMER = $F0;
 
-  { --- Type 13, the debris ----------------------------------------------
-    Four states, and the state is set by whoever spawns it - see
+  { Type 13, the debris. Its state is set by whoever spawns it - see
     Entity_SpawnDebris's DEBRIS_* kinds in Entities.pas.
 
-      0  a splash: rises against a growing downward pull, three frames at
-         nine ticks, then gone
-      1  a shard: gravity, twelve frames at five ticks, then gone. Its sprite
-         table depends on the STAGE TERRAIN - one for terrain 3 and another
-         for terrain 4, and no write at all for any other terrain, which
-         leaves whatever sprite it already had
-      2  and 3: gravity and drift, no animation and NO end. Like types 11 and
-         12 they rely on being culled off-screen
+    State 1's sprite table depends on the STAGE TERRAIN, with no write at all
+    for any terrain but 3 and 4, which leaves whatever sprite it already had.
+    States 2 and 3 never end; like types 11 and 12 they rely on the off-screen
+    cull.
 
-    Two things reproduced rather than tidied. States 1, 2 and 3 add VEL_Y to
-    POS_Y TWICE in the same frame - the original really does write
-    `POS_Y += VEL_Y` on two separate lines - so debris falls at double the
-    rate its velocity says. And the gravity is applied BEFORE the first add,
-    so the first frame already moves. }
+    Two things reproduced rather than tidied: states 1, 2 and 3 add VEL_Y to
+    POS_Y TWICE in the same frame - the original really does write it on two
+    separate lines - so debris falls at double the rate its velocity says; and
+    the gravity is applied BEFORE the first add, so the first frame moves. }
   T13_STATE_SPLASH = 0;
   T13_STATE_SHARD  = 1;
   T13_SPLASH_FRAMES = 3;  T13_SPLASH_TICKS = 8;
@@ -558,22 +552,9 @@ const
   T40_BOUNCE_FRAMES = 3;  T40_BOUNCE_TICKS = 4;  T40_BOUNCE_CYCLES = 4;
   T40_BOUNCE_TIMER = $78;
 
-  { --- Type 41, the hopper ----------------------------------------------
-    Crouches, springs, and turns round every so many landings.
-
-      0  settle 1 px, and on HARD ONLY double its speed - the same one-line
-         scaling type 30 has, and the second instance of it
-      1  idle, and ONLY while on screen: a four-frame loop and a countdown of
-         30, 20 or 10 frames by difficulty. At the end, sound 0x21, jump
-         velocity -0x60, and frame 4
-      2  five ticks of anticipation, then frame 5
-      3  airborne: drift by its speed, gravity 4 to a terminal 0x200, and on
-         landing snap flush to the tile edge, go back to 1, and count the
-         landing. After block A[1] landings it reverses
-
-    The turn counter is EF_CHILD_B and the landing test uses the same
-    edge-distance snap the falling item does. Like type 38, the idle counts
-    only while visible - so a hopper off screen is frozen mid-crouch rather
+  { Type 41, the hopper. On HARD ONLY it doubles its speed on its first frame
+    - the same one-line scaling type 30 has. Like type 38, its idle counts
+    only while on screen, so a hopper off screen is frozen mid-crouch rather
     than hopping in place. }
   T41_FRAMES = 4;  T41_TICKS = 6;
   T41_TABLE_ADDR = $0046BFBC;
@@ -640,23 +621,18 @@ const
   T42_RETREAT_STEP = $20;
   T42_RETREAT_LEN = $3C;
 
-  { --- Types 43 and 44 --------------------------------------------------
-    TYPE 43 is four instructions and one of them is the point:
+  { Types 43 and 44. Type 43 is four instructions and one of them is the
+    point:
 
         EF_VULN_KIND := variant + 0x5A
 
-    which lands exactly on the armour block Entity_TakeProjectileHits already
-    knows - VULN_ARMOUR_1 is 0x5A, VULN_ARMOUR_2 0x5B, VULN_IMMUNE_ALT 0x5C
-    and VULN_ONLY_POWER3 0x5D. So one entity type covers all four armours and
-    the placement's variant picks which, which is why those four constants sit
-    contiguously rather than being scattered like the other vulnerability
-    kinds. Written EVERY frame, not once, so nothing can leave it armoured
-    differently.
+    which lands exactly on the armour block Entity_TakeProjectileHits knows,
+    0x5A..0x5D. One entity type covers all four armours and the placement's
+    variant picks which - which is why those four constants sit contiguously
+    rather than scattered like the other kinds. Written EVERY frame, not once.
 
-    TYPE 44 is type 42's shot: an eight-frame loop at three ticks, thrown
-    upward at -0xB0 and pulled down at gravity 2 while drifting by whatever
-    horizontal velocity it was spawned with. It has no Entity_Destroy at all -
-    like types 9, 11 and 12 it relies on being culled off screen. }
+    Type 44 has no Entity_Destroy at all; like types 9, 11 and 12 it relies on
+    the off-screen cull. }
   T43_VARIANTS = 4;
   T43_TABLE_ADDR = $0046C02C;
   T43_SPRITES: array[0..T43_VARIANTS - 1] of Integer = (121, 122, 179, 442);
@@ -736,22 +712,18 @@ const
   T47_ANGLE_SHIFT = 5;
   T47_FIRE_SOUND = $1E;
 
-  { --- Type 48, the bouncing shot ---------------------------------------
-    Type 47's throw. Four bounces, and each one is shorter than the last: the
-    rebound velocity is (bounces left + 1) * -0x10, so it goes -0x50, -0x40,
-    -0x30, -0x20 and then stops existing. That is the whole of its arc - there
-    is no separate decay term.
+  { Type 48, the bouncing shot. Each rebound is (bounces left + 1) * -0x10,
+    so the arc decays out of the counter and there is no separate decay term.
 
-    On the SECOND-TO-LAST bounce it arms EF_DEATH_TIMER to 0xE10, which is
-    3600 frames - a minute at 60fps, and far longer than it can survive its
-    remaining bounce. Entity_UpdateAll uses that field's parity for the damage
-    flicker, so the practical effect is that the ball starts blinking on its
-    last bounce rather than that it times out.
+    On the SECOND-TO-LAST bounce it arms EF_DEATH_TIMER to 3600 frames, far
+    longer than it can survive its remaining bounce. Entity_UpdateAll uses
+    that field's parity for the damage flicker, so the practical effect is
+    that the ball starts BLINKING on its last bounce, not that it times out.
 
-    It also copies field 0x2C into its velocity on any frame that field is
-    non-zero, then clears it - a one-shot handoff slot. Entity_Spawn zeroes
-    0x2C, and type 47 sets EF_VEL_X directly, so nothing in the shipped game
-    ever puts anything there. Reproduced because the read is real. }
+    It copies field 0x2C into its velocity on any frame that field is
+    non-zero, then clears it. Entity_Spawn zeroes 0x2C and type 47 sets
+    EF_VEL_X directly, so nothing in the shipped game ever puts anything
+    there. Reproduced because the read is real. }
   T48_FRAMES = 4;  T48_TICKS = 8;
   T48_TABLE_ADDR = $0046C0F8;
   T48_SPRITES: array[0..T48_FRAMES - 1] of Integer = (237, 238, 239, 238);
@@ -788,23 +760,16 @@ const
   T49_FALLING_FRAME = 3;
   T49_AIM_SHIFT = 5;
 
-  { --- Type 50, the opener ----------------------------------------------
-    Patrols, opens, fires, and closes - and while it is open it REWRITES ITS
-    OWN EF_VULN_KIND, which nothing else does. Vulnerability 1 while firing
-    and 2 while closing, so the window in which it can be hurt is part of the
-    animation rather than a property of the type.
+  { Type 50, the opener. While it is open it REWRITES ITS OWN EF_VULN_KIND,
+    so the window in which it can be hurt is part of the animation rather than
+    a property of the type.
 
-    Its states are 1, 2, 3, 5 and 6 - there is no 4, and nothing here sets 3
-    to 5 either. The type-39 shot it spawns in state 2 is what does that, the
-    same parent-child arrangement types 31/35 and 38/39 use, and this is the
-    third instance.
+    Its states are 1, 2, 3, 5 and 6 - there is no 4, and nothing here moves it
+    from 3 to 5 either; the type-39 shot it spawns does, the same parent-child
+    arrangement types 31/35 and 38/39 use.
 
     On EASY it starts by SUBTRACTING 2 from its own EF_HP - the only handler
-    that makes itself weaker rather than the difficulty making it stronger.
-
-    The patrol reverses on block A[1] frames like type 30's, and the whole
-    patrol lasts 60 frames on every difficulty - the table is (60, 60, 60), so
-    that one was left flat. }
+    that makes itself weaker rather than the difficulty making it stronger. }
   T50_FRAMES = 4;  T50_TICKS = 8;
   T50_TABLE_ADDR = $0046C140;
   T50_SPRITES: array[0..5] of Integer = (148, 149, 150, 149, 151, 152);
@@ -881,22 +846,11 @@ const
   T56_FAN_STEP = 4;
   T56_FAN_WRAP = $3C;       { subtracted from the previous heading, not a mask }
 
-  { --- Type 59, the riser -----------------------------------------------
-    Lies dormant, wakes when the player is within 80 pixels, rises, hangs,
-    takes ONE reading of where the player is, and flies that way for ever.
-
-      1  asleep. The wake range is 0x50 pixels and it is NOT difficulty-keyed -
-         the only proximity test in the game that is a bare literal
-      2  rising: launched at -0x80 with gravity 2, so it arcs up and slows.
-         It leaves the moment its velocity turns positive, which is the apex,
-         rather than after a fixed time
-      3  hang, nine frames
-      4  fly: Angle_Between is taken ONCE on entry and never again, so it
-         commits to a heading at the top of its arc and cannot correct. Speed
-         is 1, 2 or 3 by difficulty
-
-    It calls Entity_SpawnDebris on waking, the same way type 49 does at the
-    ends of its dive - a dust puff rather than a death.
+  { Type 59, the riser. Its wake range is a bare literal - the only proximity
+    test in the game that is not difficulty-keyed. It leaves the rise the
+    moment its velocity turns positive, which is the apex rather than a fixed
+    time, and takes Angle_Between ONCE on entering the flight, so it commits
+    to a heading at the top of its arc and cannot correct.
 
     Nothing ends it. Once flying it flies until it is culled. }
   T59_TABLE_ADDR = $0046C300;
@@ -1708,22 +1662,17 @@ const
   TYPE26_SPRITES: array[0..TYPE26_VARIANTS - 1] of Integer =
     (83, 99, 102, 103);
 
-  { --- Types 16 and 22, the one-sprite entities -------------------------
-    Two of the shortest handlers in the game. Each writes ONE anim id and
-    stops; neither animates, and neither reads its own state.
-
-    Their sprite is not a literal - it is the first int of a table, reached
-    through a pointer, exactly as the animated types' tables are. Both tables
-    sit in the same run at 0x0046BE3C onwards:
+  { Types 16 and 22, the one-sprite entities. Each writes ONE anim id and
+    stops. That id is not a literal - it is element 0 of a table reached
+    through a pointer, in the same run at 0x0046BE3C as the animated types':
 
         0x0046BE74  54   type 16, the sign
         0x0046BE84  60   type 22
 
-    Only element 0 is ever read, because the handler indexes nothing. That
-    makes the extent of these two tables unknowable from their readers, and
-    unimportant: a single unconditional read cannot run off the end. Recorded
-    rather than guessed at - see tools/table_bounds.py on why a length that
-    nothing pins is not a length. }
+    Only element 0 is ever read, so the extent of these two is unknowable from
+    their readers and unimportant - a single unconditional read cannot run off
+    the end. Recorded rather than guessed: a length that nothing pins is not a
+    length. }
   SIGN_SPRITE       = 54;
   SIGN_SPRITE_ADDR  = $0046BE74;
   TYPE22_SPRITE     = 60;
