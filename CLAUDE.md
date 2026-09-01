@@ -202,6 +202,42 @@ The tell is a comment written in the passive or the future - "the caller owns
 that", "left to the host", "decides whether" - sitting next to code with no
 corresponding statement. Treat that as an unfinished line, not a finished one.
 
+## 3a-2. Comments answer WHY. The code answers WHAT.
+
+Section 3a-0 says the comments are a specification. That does not license
+essays. A long comment is a second implementation written in prose: it drifts
+out of step with the code, and unlike code nothing checks it.
+
+That has already happened here repeatedly - each of these was believed until
+something contradicted it:
+
+| the comment claimed | the truth |
+|---|---|
+| "only types 52 and 54 pace off their own HP" | five do: 31, 42, 52, 54, 73 |
+| type 14's clamp is safe, "range 0..15, table of 16 rows" | those are TYPE 24's dimensions |
+| `Event_Begin` sizes the array twice, "the first is redundant" | there is one SetLength; the COUNT call is doubled |
+| type 6's sprite row "is set by its spawner" | named the wrong spawner |
+
+**The rules.**
+
+1. Do not narrate control flow. If a block needs explaining, first try naming
+   things so it explains itself.
+2. Prefer a named constant to a comment about a literal. "An essay followed by
+   magic numbers" is the failure this catches.
+3. Before writing a derivation down, ask whether anyone needs it. Usually only
+   the FACT matters - `SolidThreshold is 0x32 for terrain 1` earns its place;
+   the paragraph reconstructing how that was found does not.
+4. When the working-out genuinely must survive, put ALL of it in `notes/` and
+   leave the FINDING in the code with a one-line pointer. Not a summary of the
+   journey - the conclusion.
+
+**Keep:** an address, a measured constant, why an apparent bug is deliberate,
+a hazard invisible at the call site, how to re-check a claim.
+
+**A comment pass is safe.** `tools/audited.py` strips `{ }`, `(* *)` and `//`
+before fingerprinting, so editing prose cannot trip the freeze gate - and if
+code is touched by accident, the gate fails. Trim freely; run `tools/check.sh`.
+
 ## 3b. Working rule: write the code as you read the disassembly
 
 **Translate each function to Pascal in the same breath as decompiling it.** Do

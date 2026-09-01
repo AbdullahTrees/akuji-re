@@ -15,10 +15,10 @@
 #
 type,name,note
 14,ManaStone,the collectible the HUD counter counts
-15,,
-16,,
-20,,
-21,,
+15,Switch,set by pressing up key - often used to unlock doors
+16,InfoSign,contains text that is read by interacting with it 
+20,,looks empty
+21,WingedHorseBlock,movement block that carries you up/down or left/right
 22,,
 23,,
 24,,
