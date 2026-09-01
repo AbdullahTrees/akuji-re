@@ -25,18 +25,10 @@ uses
   SysUtils, Entities, GameState, SoundTable, PlayerState, Player, Directions;
 
 const
-  { --- Four adjacent sprite tables, and a correction ---------------------
-
-    THE TYPE 14 TABLE WAS RECORDED AS SIXTEEN ROWS AND IT IS TWO. The mistake
-    is kept in view because the evidence for sixteen was real and simply
-    attached to the wrong type: the shipped data does place something with the
-    ParamA 'A' argument running 0..15, and it is TYPE 24, whose sprite table is
-    a different one starting 32 bytes further on. Type 14's own 122 placements
-    use A = 1 and nothing else.
-
-    What settles an extent here is the LAYOUT, not the data. This whole region
-    is a run of small const arrays laid end to end, each reached through its own
-    pointer global, so a table ends where the next one begins:
+  { Four adjacent sprite tables. What settles an extent here is the LAYOUT,
+    not the data: the region is a run of small const arrays laid end to end,
+    each reached through its own pointer global, so a table ends where the
+    next one begins.
 
       ptr         base        ints  used by
       0x0046CBA0  0x0046BDA0     8  type 14, as 2 rows of 4 frames (stride 16)
@@ -44,16 +36,11 @@ const
       0x0046D32C  0x0046BE00     2  type 24 variant 8's two-frame animation
       0x0046CF00  0x0046BE08     3  type 25, flat
 
-    Every one of those four pointers has exactly ONE reader in the whole binary
-    - the handler named beside it - so no second type could need more rows. And
-    two of the four are flush with their use in both directions: type 24 is
-    placed exactly sixteen times with A = 0..15, one of each, and type 25 uses
-    A = 0, 1, 2 and nothing else.
-
-    The lesson for the self-test: reading N values out of akuji.exe and finding
-    they match proves the VALUES and says nothing about N - especially when N is
-    the constant under test, which is what the old check did. The extent is now
-    checked against the neighbouring pointer instead. }
+    Each of those pointers has exactly ONE reader in the binary, so no second
+    type could need more rows. Type 14's table was once recorded as sixteen
+    rows and is two: reading N values out of akuji.exe and finding they match
+    proves the VALUES and says nothing about N. tools/table_bounds.py checks
+    the extent against the neighbouring pointer instead. }
 
   MANA_VARIANTS = 2;
   MANA_FRAMES   = 4;
@@ -438,33 +425,19 @@ const
   T37_TERMINAL  = $200;
   T37_LAND_SOUND = $1B;
 
-  { --- Types 34 and 35, type 31's two children --------------------------
-    Between them these close the thread type 31 left open. Nothing in type 31
-    sets its own state 4; type 35 does.
+  { Types 34 and 35, type 31's two children - and what closes the thread type
+    31 leaves open, since nothing in type 31 sets its own state 4.
 
-    TYPE 35 is the telegraph - eight frames at five ticks, played FORWARDS in
-    mode 0 and BACKWARDS in mode 1, off the same eight-entry table read as
-    `table[7 - frame]`. It watches its owner and destroys itself the moment
-    the owner's HP reaches 0, so a parent killed mid-wind-up takes its
-    telegraph with it.
+    Type 35 writes Angle_Between(owner, PLAYER) into its owner at the END of
+    the telegraph rather than tracking it, which is why type 31's shots all
+    leave along one heading however the player moves. It also destroys itself
+    the moment its owner's HP reaches 0, so a parent killed mid-wind-up takes
+    its telegraph with it.
 
-    When the forward run finishes it does three things to its OWNER: plays
-    sound 0x18, sets the owner's state to 4 - the attack - and writes
-    Angle_Between(owner, PLAYER) into the owner's block A[1]. That is the aim,
-    taken once at the end of the telegraph rather than tracked, which is why
-    type 31's shots all leave along one heading however the player moves.
-
-    The backward run just puts the owner back to state 1.
-
-    TYPE 34 is the shot. It moves at DOUBLE the direction table's step on both
-    axes, and its five frames advance on a DIFFICULTY-KEYED divisor of 8, 10
-    or 12 - so the shot animates FASTER on easy, and since it dies at the end
-    of its animation it also has a shorter range there. That is backwards from
-    what the other difficulty tables do and it is what the binary says.
-
-    Its frame test is `count mod rate = 0`, not a countdown, so the counter
-    runs on and the frames land on multiples. The division's quotient is left
-    in EAX and returned - dead, like type 16's and type 37's. }
+    Type 34's frames advance on a difficulty divisor of 8, 10 or 12, so the
+    shot animates FASTER on easy and, dying at the end of its animation, has a
+    shorter range there. That is backwards from every other difficulty table
+    and it is what the binary says. }
   T34_FRAMES = 5;
   T34_TABLE_ADDR = $0046BEF0;
   T34_SPRITES: array[0..T34_FRAMES - 1] of Integer = (512, 513, 514, 515, 516);
@@ -482,31 +455,17 @@ const
   T35_OWNER_ATTACK = 4;
   T35_OWNER_IDLE   = 1;
 
-  { --- Type 2, the player's shot ----------------------------------------
-    What Player_Update fires, and the state it carries is the weapon: 0 and 1
-    for the two ordinary shots and 2 for the charge, which is Player.pas's
-    WEAPONS table column ProjState arriving here.
+  { Type 2, the player's shot. The state it carries is the WEAPON - Player.pas
+    passes its WEAPONS table's ProjState straight through - and only the
+    charge accelerates.
 
-    Its sprite table is three rows of four, and each row is TWO frames going
-    right followed by TWO going left - so the row index is the state and the
-    half is the sign of the velocity, the same two-ifs-no-else shape types 3
-    and 30 have.
+    The sparks a wall impact throws carry 1 in block A[1] for a charge shot
+    and 0 otherwise, which is what selects between type 6's two sprite rows,
+    so a charged impact scatters a different colour.
 
-    Only the charge does anything extra: it ACCELERATES, adding four in
-    whatever direction it is already going, and it drops a type-7 trail every
-    fifth frame.
-
-    Its lifetime is a countdown in EF_CHILD_B rather than a frame limit, and
-    running out is a soft end - it leaves one last type-7 puff. Hitting a wall
-    is the loud one: SIX type-6 sparks, each with a random heading out of 64
-    and a random speed of one or two half-steps per axis, drawn separately so
-    the scatter is an ellipse. The sparks' block A[1] carries 1 for a charge
-    shot and 0 otherwise, which is what selects between type 6's two sprite
-    rows - so a charged impact throws different-coloured sparks.
-
-    Note the speed multiplier is Random(2) + 1, one or two. The explosion at
-    type 33 uses Random(3) + 1 for the same idiom, so these are not the same
-    burst and the difference is deliberate. }
+    Their speed multiplier is Random(2) + 1. Type 33's explosion uses
+    Random(3) + 1 for the same idiom, so these are not the same burst and the
+    difference is deliberate. }
   T2_STATES = 3;
   T2_FRAMES = 2;  T2_TICKS = 4;
   T2_TABLE_ADDR = $0046BC2C;
@@ -632,30 +591,11 @@ const
   T41_GRAVITY = 4;
   T41_TERMINAL = $200;
 
-  { --- Type 42, a boss --------------------------------------------------
-    The largest handler so far, and the first whose timings scale with its own
-    HP as well as with the difficulty - so a boss that has taken damage acts
-    faster, which is a difficulty curve inside a single fight.
+  { Type 42, a boss. Its timings scale with its own HP as well as with the
+    difficulty, so a boss that has taken damage acts faster - a difficulty
+    curve inside a single fight.
 
-      0  spawn: add an HP bonus of 0, 20 or 40 by difficulty, drop 8 px and
-         start moving right at 0x20
-      1  patrol: bounce off walls by negating its speed, and bob vertically by
-         stepping one heading every four frames and taking the Y component as
-         the velocity. Leaves after HP * 10 + 120 frames with sound 0x23
-      2  rise: step the heading every frame - so it climbs in a tightening
-         curve - for 120, 60 or 30 frames by difficulty, then drop
-      3  fall: gravity 4 to a terminal 0x200. On landing, sound 4, snap flush,
-         and FIRE A FAN of shots: count + 1 type-44s, each taking its heading
-         from a shared angle table (-1, 1, -2, 2, -3, 3) shifted left five.
-         The count is 1, 3 or 5 by difficulty, so easy gets two shots and hard
-         gets six
-      4  recover: hold, re-snapping to the floor each frame, and go back up
-         after (HP / 10) * (1, 3 or 5) + 30 frames. Every third recovery it
-         goes to state 5 instead
-      5  retreat: rise 1 px a frame for 60 frames, then back to patrol
-
-    EF_CHILD_B is a free-running frame counter that every state resets, and
-    EF_SHOTS - normally an owner's live-shot count - is reused here as the
+    EF_SHOTS, normally an owner's live-shot count, is reused here as the
     recovery counter. }
   T42_FRAMES = 4;  T42_TICKS = 8;
   T42_TABLE_ADDR = $0046C010;
@@ -1559,31 +1499,14 @@ const
   T74_SHOT_VARIANT = 1;
   T74_OWNER_STATE = 6;      { what it writes into its parent before it goes }
 
-  { --- Types 75 and 76 --------------------------------------------------
-    TYPE 75 is the child type 73 waits on, and it is the clearest example of
-    the parent-child idiom in the game: eight frames, then it writes a state
-    into its owner and destroys itself. Nothing else.
+  { Types 75 and 76. Type 75 dies with its parent - after the dying check it
+    reads the OWNER's EF_HP and destroys itself if that is zero. No other
+    child does this; types 35, 39 and 74 outlive a dead parent.
 
-    Its two states read the SAME eight-int table in opposite directions -
-    state 0 forwards, state 1 as `table[7 - frame]` - and that is the whole
-    difference between opening and closing. On finishing, state 0 plays a
-    sound and sets its owner to 4; state 1 is silent and sets its owner to 1.
-    Type 73 spawns it in state 0, so the closing half belongs to something
-    else.
-
-    It also dies with its parent: the first thing it does after the dying
-    check is read the OWNER's EF_HP, and if that is zero it destroys itself.
-    No other child does this - types 35, 39 and 74 outlive a dead parent.
-
-    TYPE 76 sweeps. Its heading advances one step per reload, and its
-    velocity is DirVelX of that heading times a difficulty speed, so over a
-    full 64-step turn it travels right, slows, reverses, and comes back - the
-    heading-as-oscillator idiom again, but here with a RELOAD between steps
-    rather than one step a frame, so the sweep is slow.
-
-    Its lap sound fires when the new heading equals 63, not when it wraps to
-    0. Type 66's satellite plays the same sound on the wrap itself. One step
-    apart, in two handlers, with the same sound id. Recorded as found. }
+    Type 76's lap sound fires when the new heading equals 63, not when it
+    wraps to 0. Type 66's satellite plays the same sound on the wrap itself:
+    one step apart, in two handlers, with the same sound id. Recorded as
+    found. }
   T75_FRAMES = 8;  T75_TICKS = 4;
   T75_TABLE_ADDR = $0046C670;
   T75_SPRITES: array[0..T75_FRAMES - 1] of Integer =
