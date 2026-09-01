@@ -1,68 +1,13 @@
 { The ending screen - GameState 150, entered by event sub-op 80, `soulget`.
+  It is the results screen, and it is where the game's two persistent unlock
+  sets are earned: the two extra doors into the last map, and the seven
+  gallery entries. Both are banked at once, in EndingApplyUnlocks.
 
-  This is the results screen, and it is where the game's PERSISTENT unlocks
-  are earned. Two separate mechanisms, both of them decoded here:
-
-  1. THE TWO EXTRA DOORS. GameState.pas has recorded system.dat +0x1C and
-     +0x1D for a while as two flags that each gate one half of a locked-door
-     pair leading to the last map, and noted that they survive starting a new
-     game. What it could not say was how they are earned. This is how:
-
-         completion above 90 percent      sets +0x1C
-         finished in 30 minutes or less   sets +0x1C AND +0x1D
-
-     The time test is not an additional condition on the percentage - it is
-     checked afterwards and overrides, so a fast run unlocks both however
-     little of the game it collected.
-
-  2. THE SEVEN GALLERY ENTRIES. system.dat +0x2C..+0x32 are seven bytes that
-     the options screen reads. They are not written during play. This screen
-     copies them across from progress flags 1186..1192 - one per entry, in
-     order - so the gallery is unlocked by whatever sets those seven flags
-     during a run, and only banked when you finish.
-
-     Those seven sit immediately after Progress[1185], which is extra door
-     one, and immediately before Progress[1194], which is door two. Nine
-     consecutive flags, all of them about the extras.
-
-  THE PERCENTAGE is Counter / 400 * 100, computed on the x87 and then
-  truncated. Four hundred is therefore the game's collectible total, which
-  also settles the right-hand side of HUD_Draw's "%3d/%-3d".
-
-  AND IT IS ONE POINT LOW AT TWO VALUES. Counter/400*100 is exactly
-  Counter/4, which is exactly representable in binary - but the original does
-  not compute Counter/4. It divides, rounds to 64 bits, multiplies, rounds
-  again, and at two counters the result lands a ulp BELOW the integer:
-
-      counter 212   should read 53%   reads 52%
-      counter 236   should read 59%   reads 58%
-
-  What makes it visible rather than harmless is the conversion. 0x00402948
-  loads the control word at 0x00468028, which is 0x1D6C - rounding control
-  3, toward zero - so it is Trunc, not Round, and a value a ulp short of 53
-  becomes 52 instead of being rounded back up. Had Delphi's Round been used
-  here neither deviation would exist.
-
-  Neither counter crosses a rank gate, so the unlocks below are unaffected;
-  only the printed number is wrong. Reproduced rather than corrected, and the
-  self-test walks all 401 counters against a separate exact-rational model of
-  the same x87 sequence.
-
-  THE RANK, 0..4, picks which of five closing lines is shown, and the same
-  number is what the two door rules hang off:
-
-      0   50 percent or less
-      1   above 50
-      2   above 70
-      3   above 90            -> door one
-      4   30 minutes or less  -> both doors
-
-  WHAT IS NOT HERE. The screen is a long presentation sequence - a series of
-  pictures loaded one at a time from bmp.qda as `ed%.3d.bmp`, seventeen sprite
-  registrations, a scrolling staff roll and `midi\end05` underneath it. All of
-  that belongs to the DirectDraw component this project replaces wholesale, so
-  what this unit carries is the part that is the game's: the phase machine,
-  the arithmetic, and the two sets of flags. The host draws. }
+  The screen itself is a long presentation - pictures from bmp.qda, seventeen
+  sprite registrations, a staff roll over midi\end05 - and all of that belongs
+  to the DirectDraw component this project replaces wholesale. What is here is
+  the part that is the game's: the phase machine, the arithmetic and the flags.
+  The host draws. }
 
 unit Ending;
 
@@ -74,7 +19,9 @@ uses
   SysUtils, GameState, PlayerState;
 
 const
-  { 0x00464420 and 0x00464424, the two floats the percentage is built from. }
+  { 0x00464420 and 0x00464424, the two floats the percentage is built from.
+    So 400 is the game's collectible total, which also settles the right-hand
+    side of HUD_Draw's "%3d/%-3d". }
   ENDING_TOTAL = 400;
 
   { The three percentage gates and the time gate, from 0x00463E39. }
@@ -111,8 +58,14 @@ function EndingPercent(Counter: Integer): Integer;
 
 const
   { The only two counters at which the original disagrees with Counter div 4.
-    Found by simulating its FDIV/FMUL/FISTP at 64-bit significands with exact
-    rationals, the same technique tools/x87_sim.py uses for ScaleByPercent. }
+    It divides, rounds to 64 bits, multiplies and rounds again, and at these
+    two the result lands one ulp below the integer - then 0x00402948 loads
+    control word 0x1D6C, rounding toward zero, so it truncates rather than
+    rounding back up and 53% prints as 52%. Delphi's Round would not have.
+
+    Neither crosses a rank gate, so only the printed number is affected. Found
+    with exact rationals, as tools/x87_sim.py does for ScaleByPercent; the
+    self-test walks all 401 counters against that model. }
   ENDING_PCT_DEVIATIONS: array[0..1] of Integer = (212, 236);
 
 { 0x00463E39. The rank, and the only thing the door unlocks depend on. }
