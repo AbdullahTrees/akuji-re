@@ -1185,46 +1185,10 @@ const
   T52_SND_SPAWN  = $25;
   T52_SND_LAND   = 4;
 
-  { --- Types 54 and 55, the second boss and its fireball ----------------
-    TYPE 54 hovers on a two-frame flap, bobbing by DirVelY of a heading it
-    advances one step a frame - the heading-as-oscillator idiom types 42 and
-    49 use, here at full amplitude.
-
-    Its wait is (EF_HP div 2) * 60 + 60, so like type 52 it is paced off its
-    OWN current health and speeds up as you damage it. That makes two, and
-    they are the only two.
-
-    Its HP table is the SAME numbers as type 52's - (-30, -20, -10) - in a
-    different table at a different address. Two bosses tuned the same way,
-    written out twice.
-
-    The cycle is: wait, blink out (state 2, held until EF_DEATH_TIMER runs
-    down), fire a type-55 fireball, wait again, then HOP and blink back in.
-    The hop offsets are four pairs, multiplied by 0x20 - a pixel each:
-
-        +160, 0     -320, 0     +160, -96     0, +96
-
-    which sum to (0, 0), so the circuit returns it to where it started. The
-    index wraps at 4 and nothing else touches it, so it walks the same square
-    for ever.
-
-    TYPE 55 is the fireball in state 0 and the trail it leaves in state 1 -
-    one type, two tables, picked by the state.
-
-    In state 0 it homes: Entity_SteerToPlayer(1, 2), then MULTIPLIES both
-    velocity components by difficulty + 1 every frame. On easy that is times
-    one and does nothing; above easy it compounds between the frames on which
-    the steer reloads. Kept exactly as written.
-
-    Two counters run in parallel and count the same thing: EF_SHOTS gates the
-    homing off at 240 and EF_BLOCK_B[4] destroys it at 241. Every seventeenth
-    frame it drops a copy of ITSELF with EF_STATE pre-set to 1 - the trail -
-    at a random offset of up to eight pixels either way. The Y offset's random
-    is drawn BEFORE the X offset's, which is the order the argument evaluation
-    produced and the order the sequence has to be drawn in to match.
-
-    State 1 sets its own EF_DEPTH to 3 and tops up EF_DEATH_TIMER at 2 so it
-    blinks, then runs seven frames and destroys itself. }
+  { Types 54 and 55, the second boss and its fireball. Type 55 MULTIPLIES both
+    velocity components by difficulty + 1 EVERY FRAME, so above easy it
+    compounds between the frames on which the steer reloads. Kept as written,
+    as is the order the two jitter randoms are drawn in - see the handler. }
   T54_FRAMES = 2;  T54_TICKS = $10;
   T54_TABLE_ADDR = $0046C204;
   T54_SPRITES: array[0..T54_FRAMES - 1] of Integer = (500, 501);
@@ -1265,44 +1229,15 @@ const
   T55_SELF_TYPE = $37;      { 55 - the trail is another one of these }
   T55_SND_LOOP = $26;       { on the frame the animation wraps to 0 }
 
-  { --- Types 58 and 60 --------------------------------------------------
-    TYPE 58 sleeps until you touch it. Its whole first state is one line of
-    setup - drop 5 pixels, show frame 2 - and then it waits on
-    Entity_BoxesOverlap against the player at three times its box on both
-    axes. On contact it rises 3 pixels, plays a sound and starts moving.
+  { Types 58 and 60. Type 58's setup runs BEFORE Entity_UpdateDying, so one
+    killed on its spawn frame still takes its 5-pixel drop. Kept in that order.
 
-    What it does then is add DirVelX of a heading it advances one step a
-    frame, which over 64 frames sums to zero: it wobbles from side to side
-    around where it woke up rather than travelling. Types 42, 49 and 54 use
-    the same heading-as-oscillator trick on the Y axis; this is the first on
-    the X.
-
-    Its setup runs BEFORE Entity_UpdateDying rather than after, so a type 58
-    killed on the frame it spawns still takes its 5-pixel drop. Kept in that
-    order.
-
-    TYPE 60 walks a platform and enrages when hurt. Two facts are worth
-    stating because they are both easy to get backwards:
-
-      * its walk speed table is (1, 1, 1) and its turn interval is
-        (180, 180, 180). Both flat. The ONLY difficulty-keyed number it has
-        is the speed it charges at AFTER enraging, (3, 4, 5) - so difficulty
-        changes nothing about this enemy until you have hurt it.
-      * `if EF_HP < 11 then EF_HP := 3`. That is a write, not a clamp: an
-        enemy on 10 hp loses 7 and an enemy on 1 hp GAINS 2. It is what the
-        binary does.
-
-    The enrage spawns type 32, the invisible emitter, with exactly the four
-    parameters DEATH_CLASS_SMALL uses - so it borrows the small death burst
-    as its transformation puff rather than having one of its own.
-
-    The ledge check is the interesting part of its movement:
-
-        TileCollideX(self, VEL_X, DeltaY 0)      >= threshold   -> turn
-        TileCollideX(self, VEL_X, DeltaY 0x400)  <  threshold   -> turn
-
-    the first is a wall ahead, the second is NO floor one tile down. Same
-    function, same delta, a different vertical probe. }
+    Type 60's `if EF_HP < 11 then EF_HP := 3` is a WRITE, not a clamp: an
+    enemy on 10 hp loses 7 and one on 1 hp GAINS 2. Its only difficulty-keyed
+    number is the charge speed AFTER enraging, so difficulty changes nothing
+    about it until it has been hurt. Its two ledge probes are the same call
+    with a different vertical delta - a wall ahead, and no floor one tile
+    down. }
   T58_FRAMES = 2;           { 0 and 1 while awake; 2 is the dormant sprite }
   T58_TICKS = 4;
   T58_TABLE_ADDR = $0046C2F4;
@@ -1540,47 +1475,15 @@ const
   T64_WAVE_SPEED = $20;
   T64_SND_SLAM = $2A;
 
-  { --- Types 65 and 66 --------------------------------------------------
-    TYPE 65 is the third boss and the only enemy in the game that reads the
-    INPUT STATE. It will not start until the player presses ATTACK - Button[1]
-    held with ButtonLatch[1] clear, which is the rising edge - while standing
-    inside a 10x2 box around it. Type 40 is the only other handler that takes
-    the input, and it is a switch.
+  { Types 65 and 66. Type 65 is the only enemy that reads the INPUT STATE: it
+    will not start until ATTACK is pressed while the player stands in its box.
+    It writes EF_VULN_KIND and EF_HIT_SOUND onto the type 57 it fires, which
+    no other spawner does, so its fireball can be hurt. Above easy it gives
+    ITSELF 2 more HP - the opposite direction from types 50, 52 and 54.
 
-    After that it is type 54's shape again: blink out, fire, hold, HOP, blink
-    back in. Its hop table has only TWO entries, (-96, +96) scaled by 0x20, so
-    it toggles between two places 96 pixels apart rather than walking a
-    circuit. EF_CHILD_B starts from EF_VARIANT, so the placement chooses which
-    of the two it starts on.
-
-    What it fires is a type 57 with EF_VARIANT 2 - the homing fireball - and
-    it writes two fields on the shot that no other spawner writes:
-    EF_VULN_KIND 6 and EF_HIT_SOUND 2. So this boss's fireball can be hurt,
-    and it makes a different noise when it is.
-
-    On any difficulty above easy it gives ITSELF 2 more HP. That is the
-    opposite direction from types 50, 52 and 54, which subtract.
-
-    TYPE 66 is a pair: an anchor (variant 0) and a satellite (variant 1) that
-    it spawns once and then never touches again.
-
-    Both read their placement parameters out of the same two fields, and both
-    read them in unusual ways:
-
-      EF_FACING is not a direction here. Its SIGN picks which way the pair
-      turns and its MAGNITUDE is a speed multiplier - the satellite's velocity
-      is Abs(EF_FACING) * half the direction component.
-
-      EF_BLOCK_A[1] is a period: the anchor advances its own frame every that
-      many ticks, and the satellite recomputes its velocity every that many.
-
-    The two sign tests are written differently - the anchor asks
-    Compare(EF_FACING, 0) < 1 and the satellite asks < 0 - so at EF_FACING = 0
-    the anchor still advances its frame while the satellite still advances its
-    angle. Both happen to increment; the asymmetry is real but harmless.
-
-    The satellite's angle wraps through the whole 64-step circle and plays a
-    sound on every wrap, so a full orbit is audible. }
+    Type 66's two sign tests are written differently - the anchor asks
+    Compare(EF_FACING, 0) < 1 and the satellite < 0 - so at EF_FACING = 0 both
+    still advance. The asymmetry is real and harmless. }
   T65_FRAMES = 2;  T65_TICKS = 4;
   T65_TABLE_ADDR = $0046C41C;
   T65_SPRITES: array[0..T65_FRAMES - 1] of Integer = (195, 196);
@@ -1739,43 +1642,14 @@ const
   T70_LEDGE_PROBE = $400;
   T70_DYING_FOR = $78;      { 120 frames of the wound frame, then hp := 0 }
 
-  { --- Types 71 and 72 --------------------------------------------------
-    TYPE 71 walks, then stops and curls up, and its EF_VULN_KIND follows the
-    state exactly: 7 while walking and 1 while resting. Types 50, 62 and 68
-    all rewrite their own vulnerability; this is the plainest of the four -
-    two states, two kinds, one line each.
+  { Types 71 and 72. Type 71's walk timer only advances while it is ON SCREEN,
+    so one that has wandered off the edge walks for ever and never presents
+    its vulnerable phase. Its rest table is keyed on COMPLETED curl loops, so
+    the harder the game the shorter the window in which it can be hurt.
 
-    Its rest table is (2, 1, 0), and the test is `rest < EF_CHILD_A` where
-    EF_CHILD_A counts COMPLETED loops of the four-frame curl. So on hard it
-    leaves after one loop and on easy after three: the harder the game, the
-    shorter the window in which it can be hurt.
-
-    Its walk timer only advances while it is ON SCREEN - the increment sits
-    behind `not Entity_IsOffScreen(2)` - so a type 71 that has wandered off
-    the edge walks for ever and never presents its vulnerable phase.
-
-    Its two sprite rows share four of their six entries: only the two walking
-    frames differ by direction, and the whole curl looks the same either way.
-
-    On EASY it subtracts 2 from its own HP, as type 50 does.
-
-    TYPE 72 is three things by EF_VARIANT again, and the middle one indexes
-    its sprite by DIRECTION rather than by a frame counter: sixteen sprites
-    for the sixty-four headings, EF_FACING shr 2, with the round-toward-zero
-    correction the original spells out.
-
-      0  a faller. Sets its own EF_CLASS to 6, its own EF_VULN_KIND to 1, and
-         EF_FIELD_C0 to 1 - see Entities.pas on that last one, which nothing
-         is known to read.
-      1  a flyer that lives 360 frames and drops a trail every few. It moves
-         by DirVel(EF_FACING) * speed and NEVER writes EF_VEL_X or EF_VEL_Y -
-         but it hands the trail its EF_VEL_X and EF_VEL_Y anyway. Those are
-         whatever the flyer was spawned with, not the direction it is
-         actually travelling, so the trail does not follow it. Written as
-         found.
-      2  the trail. It zeroes its own EF_TOUCH_KIND, which is what makes it
-         scenery rather than a second hazard, and blinks by topping up
-         EF_DEATH_TIMER at 2 the way types 11, 28 and 51 do. }
+    Type 72 variant 1 never writes EF_VEL_X or EF_VEL_Y, yet hands the trail
+    its EF_VEL_* anyway - whatever it was spawned with, not where it is
+    actually going - so the trail does not follow it. Written as found. }
   T71_ROW = 6;
   T71_WALK_FRAMES = 2;  T71_WALK_TICKS = 8;
   T71_CURL_FIRST = 2;   T71_CURL_LAST = 5;  T71_CURL_TICKS = 8;
@@ -2061,48 +1935,15 @@ const
   T77_SND_SLAM = $30;
   T77_SND_LOB = $2E;
 
-  { --- Types 78, 79 and 80, the boss's furniture ------------------------
-    TYPE 78 is a second body that has no behaviour of its own at all: every
-    frame it reads the boss's state, frame and facing, and writes its own
-    position and sprite from offset tables. It never moves itself, never
-    animates on its own clock, and never decides anything.
+  { Types 78, 79 and 80, the boss's furniture. Three things kept as written:
 
-    What it does decide is whether it hurts you. It sets EF_TOUCH_KIND to 1
-    while the boss is idle, turning, dashing or recoiling AND during the
-    ground slam - and to 0 for the whole of the lob. So the lob's wind-up is
-    the one window where you can stand next to this half of the boss safely.
-
-    Its idle height is chosen by the boss's frame: -0x680 on frames 0, 3 and
-    5 and -0x6A0 otherwise. Those are the frames of two different animations,
-    which is why the list looks arbitrary.
-
-    It dies when the boss reaches PHASE 5 - `if owner's block A[1] = 5 then
-    my EF_HP := 0` - so the last phase is fought against the boss alone.
-
-    TYPE 79 is everything the boss emits, six variants deep, and three of
-    them are pure decoration that zero their own EF_TOUCH_KIND on their first
-    frame. The two that matter:
-
-      3  the lob's projectile. It stops dead on a wall and arms a 15-frame
-         death timer; if it has not hit anything in 120 frames it arms the
-         same timer anyway, and it dies when the timer reaches 1 rather than
-         0 - one frame early, and deliberate, because Entity_UpdateAll
-         decrements it after the handler runs.
-      5  the summoner, and the thing that frees the boss from state 8. It
-         cycles a six-frame animation and spawns a type 72 flyer aimed at the
-         player on each completion - THREE of them - and on the fourth pass
-         instead writes state 1 back into the boss and destroys itself. That
-         is the fifth parent-child arrangement in the game and the only one
-         where the child fires a burst before handing control back.
-
-    Variant 0 is the boss's other attached piece and dies at phase 1, so the
-    fight visibly sheds parts: piece 0 at phase 1, type 78 at phase 5.
-
-    TYPE 80 is two unrelated effects, and its two variants SHARE a counter
-    increment. EF_BLOCK_B is incremented once at the top for both, and then
-    AGAIN inside variant 1 - so variant 0 advances every nine frames and
-    variant 1 every two, from the same field, because one of them is counted
-    twice. Reproduced as written. }
+      78  clears EF_TOUCH_KIND for the whole of the lob, so the wind-up is the
+          one window in which this half of the boss is safe to stand beside.
+      79  variant 3 dies when its timer reaches 1, not 0 - one frame early,
+          and deliberate: Entity_UpdateAll decrements it after the handler.
+      80  both variants share ONE counter. EF_BLOCK_B is incremented at the
+          top for both and AGAIN inside variant 1, so variant 1 runs at twice
+          the rate off a field that is counted twice. }
   T78_SLAM_X_ADDR = $0046CA28;
   T78_SLAM_Y_ADDR = $0046CA48;
   T78_SLAM_X: array[0..1, 0..3] of Integer =
