@@ -866,7 +866,8 @@ begin
   { GameState_Reset(form, 0), the title asset load, and the font - then the
     ending, with the opening's two counters cleared so a later new game does
     not resume mid-cutscene. }
-  FSession.ResetState(0);
+  FSession.ResetState(0);   { first, so a title reached from a running game
+                              does not inherit its pool, events or camera }
   LoadStage(0);
   GameStateValue := GS_ENDING;
   FOpening.Reset;
@@ -949,29 +950,8 @@ begin
   KbgmPlayer1.Stop;
 end;
 
-{ Title_Init @ 0x0046214C, in the order the original does it.
-
-  Three things were missing from the version this replaces, all of them
-  before the music:
-
-    * GameState_Reset(mode 0) is the FIRST thing it does. Without it, entering
-      the title from a running game left the pool, the events and the camera
-      as they were.
-    * ScreenPhase and the title sub-mode are both cleared. ScreenPhase is the
-      counter the game-over screen, the opening and the message box share, so
-      a title reached from any of them would have inherited a live phase.
-    * a once-only Sleep of 0x168 ms, guarded by a flag at 0x0046CFE8 that is
-      set the first time through. It is 360 milliseconds of nothing, exactly
-      once per run, and it is reproduced rather than dropped because a pause
-      at the point the audio device has just been opened is more likely to be
-      load-bearing than decorative.
-
-  It does NOT draw. The old version blitted the title background here; the
-  original leaves that to Title_MainMenu, which paints it every frame.
-
-  The Font_Define arguments match GameFont.pas exactly - 32 columns, 9x9
-  cells, 8 pixel advance, last character 0x5F - which is independent
-  confirmation of constants first read off the font sheet itself. }
+{ Title_Init @ 0x0046214C, in the order the original does it. It does NOT
+  draw - Title_MainMenu paints the background every frame. }
 procedure TFrm_main.TitleInit;
 begin
   FSession.ResetState(0);
@@ -984,10 +964,15 @@ begin
     original passes 0 as the repeat flag - a one-shot reset would not loop. }
   KbgmPlayer1.Play(0, False);
 
+  { ScreenPhase is shared with the game-over screen, the opening and the
+    message box, so a title reached from any of them starts mid-phase. }
   ScreenPhase := 0;
   TitleSubMode := 0;
   GameStateValue := GS_TITLE_MENU;
 
+  { 360 ms of nothing, once per run, guarded by a flag at 0x0046CFE8.
+    Reproduced rather than dropped: a pause just after the audio device was
+    opened is more likely load-bearing than decorative. }
   if not FTitleSlept then
   begin
     FTitleSlept := True;
