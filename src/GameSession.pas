@@ -1,45 +1,18 @@
 { GameSession - the running game, as one object.
 
-  Everything up to now has been translated in isolation and tested in
-  isolation. The entity system, the player controller, the camera and the
-  event interpreter all work and NONE of them had a caller: GmMain.pas did not
-  even reference the units. This is what connects them, and it is the first
-  place any of it is asked to fit together.
+  The original keeps all of this in globals: the pool at 0x0046CB68, the layer
+  array at 0x0046D144, the event table, the interpreter's six variables, the
+  player state at 0x0046CFF0. Gathering them into one object makes the WIRING
+  testable, which a form is not - and connecting two correct functions wrongly
+  is a defect no per-function self-test can catch.
 
-  ## Why an object rather than the form
+  Sound, sprites and the screen are hooks the session does not own, and nil is
+  a legitimate configuration: a session with no sprite pool still runs every
+  frame of logic, which is what the self-test needs.
 
-  The original keeps all of this in globals - the pool at 0x0046CB68, the
-  layer array at 0x0046D144, the event table, the interpreter's six variables,
-  the player state at 0x0046CFF0. Gathering them into one object is the same
-  move already made for TEventRunner, and for the same reason: they are one
-  thing, and a test wants to make one without disturbing the game's.
-
-  It also means the WIRING is testable. A form is not; a session is. That
-  matters more here than anywhere else, because every self-test so far has
-  checked a function against its own fixture, and none of them could catch two
-  correct functions being connected wrongly.
-
-  ## What is real and what is a hook
-
-  Real: the pool, the tile source over a shipped map, the entity dispatcher,
-  the player controller, the camera, the event table and the interpreter.
-
-  Hooks: sound, sprites and the screen. TGameSession takes them as objects it
-  does not own, and nil is a legitimate configuration - a session with no
-  sprite pool still runs every frame of logic, which is exactly what the
-  self-test needs.
-
-  ## The frame
-
-  Frame() is the order TFrm_main_AppIdle runs in, minus the presentation:
-
-      Events_SpawnNearCamera    what has come near the camera exists
-      Entity_UpdateAll          every live slot, including the player
-      the event interpreter     if a script is running
-
-  The player is slot 0 and is updated by the dispatcher like everything else,
-  so there is no separate call for it. That is the original's shape and it is
-  why EKIND_SINGLE has exactly one slot. }
+  Frame() is the order TFrm_main_AppIdle runs in, minus the presentation. The
+  player is slot 0 and is updated by the dispatcher like anything else, so it
+  gets no separate call - which is why EKIND_SINGLE has exactly one slot. }
 
 unit GameSession;
 
@@ -146,18 +119,10 @@ type
     procedure BeginStage(StageIndex: Integer; var AGameState: Integer);
 
     { One frame of logic. }
-    { THE FRAME IS THREE PARTS, because the original's is.
-      notes/trace_findings.md has the evidence: Entity_UpdateAll was called
-      20304 times in 20304 frames - once per frame, in EVERY state, including
-      the title menu and every one of the 105 pause frames - while
-      Events_SpawnNearCamera ran 14560 times, which is exactly the 12347
-      frames of state 60 plus the 2213 of state 140.
-
-      So the entity update is not part of the state dispatch at all. It sits
-      between two dispatches and is gated internally by the state argument,
-      which is why every handler carries its own `if AGameState <> GS_PLAY
-      then Exit`. Those exits were translated faithfully without my noticing
-      what they implied about the caller. }
+    { THREE parts, because the original's frame is. The entity update is not
+      part of the state dispatch: it runs in EVERY state and gates itself on
+      the state argument, which is what each handler's own `if AGameState <>
+      GS_PLAY then Exit` is for. Trace counts in notes/trace_findings.md. }
 
     { Clears the scroll delta. Called at the top of every frame in every
       state - if it only ran in the states that scroll, a pause would carry
@@ -189,18 +154,12 @@ type
       Layer property. }
     procedure SetCamera(PixelX, PixelY: Integer);
 
-    { THE layer - not a copy. TEntityWorld owns the storage because that is
-      what every collision query reads, and the session hands the same field
-      to EntityUpdateAll as its var parameter, so a scroll applied during a
-      frame is applied to the thing the next query will read.
-
-      This was a field on the session first, synced to the world's copy at the
-      top of each frame and back at the bottom. The write-back overwrote every
-      scroll the frame had just applied, so the camera never moved, the
-      player's tile row never changed, and nothing in the map was ever solid -
-      the player fell through the world forever. Every unit test still passed,
-      because each function was correct; only running a frame could show it.
-      One storage location, structurally, is the fix. }
+    { THE layer, not a copy. TEntityWorld owns the storage because that is
+      what every collision query reads, and the session hands the same field to
+      EntityUpdateAll as its var parameter - so a scroll applied during a frame
+      is applied to the thing the next query reads. Keeping a second copy in
+      sync here cannot work: whichever end is written back last discards the
+      other's scroll. }
     property Layer: TLayerInfo read GetLayer;
 
     { The sprite pool. Not presentation: an entity's extents are read off its
@@ -230,21 +189,11 @@ type
         mode 2   SKIPS the camera reset, so a caller that has already placed
                  the view keeps it.
 
-      What it clears, in the original's order: the shared sub-phase and the
-      menu indices; every sprite in the pool; the screen shake; the three
-      layers' origin and delta (but not their tile geometry); every entity
-      slot's EF_ALIVE, EF_EVENT_ID and EF_SPRITE; the LAST 501 progress
-      flags; and every event record's two runtime bytes.
-
-      That progress range is worth a second look. Progress is 0x1195 bytes
-      and this clears 0x1F5 of them from offset 0xFAA - flags 4000..4500 -
-      leaving 0..3999 untouched. So the top five hundred are per-run scratch
-      that a reset wipes, and everything below them is the save. Nothing in
-      the reconstruction had noticed that split.
-
-      Nine further globals and two objects are cleared in the original that
-      have no counterpart here yet; they belong to the opening sequence and
-      the message box. Listed in the body rather than silently skipped. }
+      It clears the layers' origin and delta but NOT their tile geometry, and
+      only the last 501 progress flags - so 4000..4500 are per-run scratch and
+      everything below is the save. Nine further globals and two objects that
+      the original clears have no counterpart here yet; they are listed in the
+      body rather than silently skipped. }
     procedure ResetState(Mode: Integer);
 
     property World: TGameWorld read FWorld;
@@ -488,19 +437,10 @@ begin
       FEvents.SetActive(I, False);
     end;
 
-  { The interpreter's own FOUR, in the original's order: 0x0046CE7C is
-    EventId, 0x0046D334 is StepIndex, 0x0046D028 is Arg - the delay that
-    re-fires the opcode-4 checkers - and 0x0046D218 is Cursor. Leaving the
-    delay set across a reset meant a countdown armed in one room could fire in
-    the next.
-
-    StepIndex was missing here until 2026-08-31 because the list below called
-    0x0046D334 a save-slot cursor. It is not, and EventRunner.pas has said so
-    for a while: EventScript_AdvanceStep increments it and compares it against
-    DynArrayHigh(steps), Event_Begin seeds it to -1, and EventScript_Execute
-    indexes the current step by it. Nothing observable turned on the omission -
-    StartEvent seeds it to -1 before any read, exactly as Event_Begin does -
-    but the original clears it here and so does this now. }
+  { The interpreter's own four, in the original's order: EventId 0x0046CE7C,
+    StepIndex 0x0046D334, Arg 0x0046D028 - the delay that re-fires the
+    opcode-4 checkers - and Cursor 0x0046D218. Arg matters most: a countdown
+    armed in one room would otherwise fire in the next. }
   if FRunner <> nil then
   begin
     FRunner.EventId := 0;
