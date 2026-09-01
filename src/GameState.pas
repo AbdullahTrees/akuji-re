@@ -93,108 +93,48 @@ type
     WaitOnFlag: Byte;        // +0x19  <- p_WaitOn        0x0046D2E4
     FullScreenFlag: Byte;    // +0x1A  <- p_FullScreenOn  0x0046D268
     DebugLogFlag: Byte;      // +0x1B  <- p_DebugLog      0x0046CDB8
-    { +0x1C and +0x1D are two PERSISTENT unlock flags. Game_StartOrLoad copies
-      each into the progress block at the start of every game - +0x1C into
-      Progress[1185], +0x1D into Progress[1194] - and each gates one half of a
-      locked-door pair in the event data:
+    { Two persistent unlock flags, each gating one half of a locked-door pair
+      (ev001 tile 24,7 and ev065 tile 10,7) into the game's last map. While the
+      flag is clear a variant-2 type-25 door stands there doing nothing; set,
+      that record retires and a variant-0 door appears carrying "load stage 65".
 
-          ev001 tile (24,7)   blocked by 1185 / needs 1185
-          ev065 tile (10,7)   blocked by 1194 / needs 1194
-
-      Both pairs are the same construction. While the flag is clear a type-25
-      door of VARIANT 2 stands there and does nothing; once it is set that
-      record retires and a variant-0 door appears in its place carrying
-      sub-op 0 - load stage 65. So these are two entrances to the game's last
-      map, and because they live in system.dat rather than in save.dat they
-      survive starting a new game. That is what makes them extras unlocks
-      rather than progress.
-
-      They are copied INTO the progress block, not read from it, which is why
-      no event ever sets 1185 or 1194: nothing in the game can. }
+      Game_StartOrLoad copies them INTO the progress block at the start of every
+      game and never back, which is why no event sets 1185 or 1194 - nothing in
+      the game can. They live in system.dat, not save.dat, so they survive a new
+      game: extras unlocks rather than progress. }
     ExtraDoor1: Byte;                // +0x1C  -> Progress[1185]
     ExtraDoor2: Byte;                // +0x1D  -> Progress[1194]
     Unknown1E: array[0..5] of Byte;  // +0x1E..+0x23
     Volume: Integer;         // +0x24  0..10, SE VOLUME
     GallerySel: Integer;     // +0x28  0..6
-    { The SEVEN GALLERY FLAGS, one per omake entry - not unidentified bytes.
-      Title_MainMenu indexes this by GallerySel and draws ON or OFF from it,
-      and Ending.pas copies Progress[1186..1192] into it when a run ends.
-      It was called Unknown2C while this comment already said what it was. }
+    { One flag per omake entry: Title_MainMenu indexes it by GallerySel, and
+      Ending.pas fills it from Progress[1186..1192] when a run ends. }
     GalleryUnlocked: array[0..6] of Byte;  // +0x2C..+0x32
     Pad33: Byte;
     InputDevice: Integer;    // +0x34  from system.ini [device] input
   end;
 
-{ THE p_* ADDRESSES BELOW ARE POINTER CELLS, NOT THE VARIABLES.
-
-  Recorded here because it is a systematic error in this project's notes, found
-  by running the game rather than reading it. tools/make_trace.py's first trace
-  reported gameState, screenPhase and titleSubMode as 0x47EF98, 0x47EF9C and
-  0x47EFA0 - three consecutive addresses that did not change across 862 frames
-  sitting on the title menu, where the state had to be GS_TITLE_MENU. The
-  disassembly at 0x00459EE5 says why:
-
-      mov edx, DWORD PTR ds:0x46d06c    ; load
-      mov edx, DWORD PTR [edx]          ; DEREFERENCE
-      sub edx, 0x3c                     ; compare with 60, which is GS_PLAY
-
-  and objdump confirms the shape across the whole set: of the seven cells
-  traced, every one is LOADED many times and STORED to never -
-
-      0x0046D06C  68 loads, 0 stores      0x0046CBBC   5 loads, 0 stores
-      0x0046CC14  46 loads, 0 stores      0x0046CEF8  16 loads, 0 stores
-      0x0046CF88  39 loads, 0 stores      0x0046D268   5 loads, 0 stores
-      0x0046D0E8  69 loads, 0 stores
-
-  A variable the game sets is written somewhere. These are not. By contrast
-  RandSeed at 0x0046E040 - which belongs to the RTL, not to the game - has 2
-  stores and is a real variable.
-
-  Following the pointer gives exactly the documented semantics: gameState* reads
-  0, then 10, then 20 through boot, matching GS_TITLE_INIT and GS_TITLE_MENU.
-  So the MEANINGS below are right and were always right; the addresses name the
-  wrong cell by one indirection.
-
-  Nothing here needs to change for behaviour - these are real globals in the
-  reconstruction and the addresses are documentation. It matters for anything
-  that reads the original's memory: a snapshot or trace using these addresses
-  reads a pointer and reports it as a value. WHAT the pointers point into has
-  not been established - the consecutive targets suggest fields of one
-  structure - and that is worth a pass of its own.
-
-  The addresses are left as they are rather than rewritten, because they are
-  what Ghidra labels and what every other note refers to; changing them here
-  alone would put the two out of step. }
+{ Every p_* address below names a POINTER CELL, not the variable: the original
+  loads the cell and dereferences it (0x00459EE5 is the clearest instance), and
+  none of the seven is ever stored to. The meanings are right; the addresses are
+  one indirection short, so a trace or snapshot that reads them gets a pointer
+  and reports it as a value. What the pointers point INTO is not established.
+  They are left as they are because Ghidra and every other note use them.
+  Census and trace in notes/trace_findings.md. }
 
 var
-  { Globals matching the original's. Names follow the p_* labels now in Ghidra.
-    See the note above: these addresses are pointer CELLS in the original. }
-  Settings: TGameSettings;                  // p_Settings        0x0046D0E8
-  FullScreenOn: Boolean = False;            // p_FullScreenOn    0x0046D268
-  WaitOn: Boolean = False;                  // p_WaitOn          0x0046D2E4
-  SoftwareVsync: Boolean = True;            // p_SoftwareVsync   0x0046CE60
-  DebugLog: Boolean = False;                // p_DebugLog        0x0046CDB8
-  GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       0x0046D06C
-  SavedGameState: Integer = 0;              // p_SavedGameState  0x0046CBBC
+  { Globals matching the original's, named after the p_* labels in Ghidra. }
+  Settings: TGameSettings;                  // p_Settings        cell 0x0046D0E8
+  FullScreenOn: Boolean = False;            // p_FullScreenOn    cell 0x0046D268
+  WaitOn: Boolean = False;                  // p_WaitOn          cell 0x0046D2E4
+  SoftwareVsync: Boolean = True;            // p_SoftwareVsync   cell 0x0046CE60
+  DebugLog: Boolean = False;                // p_DebugLog        cell 0x0046CDB8
+  GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       cell 0x0046D06C
+  SavedGameState: Integer = 0;              // p_SavedGameState  cell 0x0046CBBC
 
-  { --- the screen shake, from TFrm_main_AppIdle @ 0x00464F8A ---------------
-
-    Two globals and no state machine. While the flag is set, the frame loop
-    decrements the timer and draws the whole sprite pass offset by
-
-        RandomBelow($10) - 8
-
-    pixels - so the shake is a fresh random displacement of up to eight pixels
-    either way EVERY FRAME, not an oscillation, and it is applied once to the
-    entire pass rather than per sprite. When the timer reaches zero or below,
-    the flag clears itself.
-
-    GameState_Reset @ 0x004653C8 clears both, and exactly one thing in the
-    game sets them: EntityUpdate_Type77 @ 0x0045FF3F, the final boss, on the
-    frame its ground-slam lands. It asks for 60 frames.
-
-    Plain globals because that is what they are - the frame loop reads them
-    directly and nothing owns them. }
+  { The screen shake, from TFrm_main_AppIdle @ 0x00464F8A. A fresh random
+    displacement every frame rather than an oscillation, applied once to the
+    whole sprite pass. Only the final boss's ground slam sets it. }
   ScreenShakeOn: Boolean = False;           //                   0x00484EE9
   ScreenShakeTimer: Integer = 0;            //                   0x00484EEC
   { 0x0046CF88 is ONE global shared by the title menu and the pause menu -
@@ -208,15 +148,12 @@ var
   ScreenPhase: Integer = 0;                 //                   0x0046CC14
   { 0x0046CEF8. Which of NEW GAME / CONTINUE the title menu chose, and reset
     to 0 by the game-over screen on its way back to the title. }
-  TitleSubMode: Integer = 0;                // p_TitleSubMode    0x0046CEF8
-  { p_MenuIndex @ 0x0046CF88 - ONE variable, shared by the title menu, the
-    options screen and the pause menu. It was named MenuIndex and
-    Title.pas kept a private FIndex beside it whose comment claimed to be this
-    same address, so the two menus each had their own copy of a counter the
-    original shares. Renamed to what it is. }
-  MenuIndex: Integer = 0;                   // p_MenuIndex       0x0046CF88
-  SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  0x0046D2C0
-  Input: TInputState;                       // p_InputState      0x0046CC58
+  TitleSubMode: Integer = 0;                // p_TitleSubMode    cell 0x0046CEF8
+  { ONE variable, shared by the title menu, the options screen and the pause
+    menu - so moving the cursor in one moves it in the others. }
+  MenuIndex: Integer = 0;                   // p_MenuIndex       cell 0x0046CF88
+  SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  cell 0x0046D2C0
+  Input: TInputState;                       // p_InputState      cell 0x0046CC58
   { p_KeyMap 0x0046CEA8. DDDD1Init copies Settings.KeyMap into this on the way
     in and FormDestroy copies it back on the way out, so the two are the same
     four numbers held twice - which is why changing a key in the options
