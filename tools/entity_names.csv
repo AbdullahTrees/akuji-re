@@ -54,7 +54,7 @@ type,name,note
 67,Mon_TurtleBomb,turtle thats throws bombs
 69,GoroGoro,ball you roll around by shooting at it. Meant to be dropped on switch
 70,AngrySwitch,acts as a switch only switchable by dropping the RollBall on top of it which kills it
-71,Type_71,can't determine from here a wierd ball is following us
+71,BouncyCat,attacks made towards it will deflect- except during a brief period where it is stationary
 73,Boss_MidoriLizard, same lizard as Boss_MurasakiLizard but different color/style/attack. Considered a miniboss
 76,SpikePress_Lev,levitating spike press that moves left-right
 77,Boss_Hero,the Hero boss at the end of the game
