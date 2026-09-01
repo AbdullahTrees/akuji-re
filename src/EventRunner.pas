@@ -618,10 +618,34 @@ begin
       end;
 
     SUBOP_SOUL_GET:
-      begin
-        Host.SoulGet;
-        AdvanceStep(P, AGameState);
-      end;
+      { NO AdvanceStep - and that is the whole point of this opcode.
+
+        Sub-op 0x50 in EventScript_Execute @ 0x00455210 spans
+        0x00455E5A..0x00455FC6 and contains no call to EventScript_AdvanceStep
+        @ 0x0045509C. Ghidra's xrefs to that address list every call site in
+        the function - 00455246, 004557DC, 0045581E, 00455889, 004558E0,
+        00455917, 00455964, 004559BF, 00455B00, 00455BEC, 00455C8E, 00455DA5,
+        00455E04, 00455E50, 00455FC8 - and the two nearest bracket the arm
+        without entering it: 00455E50 is before it and 00455FC8 belongs to
+        sub-op 99.
+
+        Every other opcode hands the script on. This one TAKES OVER. Because
+        the step index never moves, the arm is re-entered every frame while
+        the state is GS_STATE_140 - GameSession.TickScript calls Execute
+        unconditionally in that state - and it walks itself through three
+        phases, ending in GS_ENDING rather than in the script at all. Nothing
+        is left to advance to.
+
+        Host.SoulGet holds those phases (TDialogueBox.SoulGet), in the
+        original's 1-0-2 test order.
+
+        THE BUG THIS FIXES: an AdvanceStep used to sit here, so the script
+        moved on during the very first frame. SoulGet ran phase 0 - sound
+        0x10, playlist entry 11 not looping, and the orb destroyed - and was
+        then never called again. Phases 1 and 2 never ran, so there was no
+        fade-out, no GS_ENDING and no credits; the fanfare played, the orb
+        vanished, and the game carried on as normal. }
+      Host.SoulGet;
 
     SUBOP_NOP:
       AdvanceStep(P, AGameState);

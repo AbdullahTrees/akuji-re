@@ -7580,7 +7580,20 @@ begin
         { 4 steps at most, the longest wait is 11 frames, and every other op
           finishes in one. 64 is comfortable room and still catches a hang. }
         Frames := DriveToEnd(R, H, S, P, GS, 64);
-        if Frames < 0 then
+        { Sub-op 80 is EXPECTED never to finish. It is the only opcode that
+          does not hand the script on: EventScript_Execute's arm at
+          0x00455E5A..0x00455FC6 contains no AdvanceStep, and the op ends by
+          walking its own three phases and leaving the game in GS_ENDING. The
+          step index never moves, so "the program completed" is not a thing
+          that can happen and DriveToEnd is right to run out of frames.
+
+          This check used to pass only because our arm had a spurious
+          AdvanceStep in it, which is exactly the bug that stopped the ending
+          from ever starting. Excluding the op here is the correct
+          expectation, not a workaround: TTraceHost records the SoulGet call
+          and models neither the phases nor the state change, so there is
+          nothing for it to reach. }
+        if (Frames < 0) and (Pos('-80', S[J].ParamB) = 0) then
         begin
           Log.Add(Format('  stage %d event %d did not finish: %s  (stuck on %s)',
             [I, J, S[J].ParamB, R.CurrentStep]));
