@@ -40,7 +40,7 @@ type,name,note
 50,Mon_Turtle,armored turtle thats vulnerably only when its shooting(regular interval)
 51,Mon_Ghost,blue spherical ghost that follows you. is passthrough - damages on touch
 52,Boss_FireLion,shoots fire and jumps around 
-54,Boss_54,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss. 
+54,Boss_FloatingMagician,guy who floats and teleports over the place while throwing an orb at you during transition
 56,Mon_AkaiKinoko,looks like a mushroom - swells/explodes when you get near throwing a projectile.
 58,Mon_NiseMana,looks like a ManaStone- is fake actually a crab
 59,Mon_RedEye,comes out of lava if too close- and travels towards player's current pos
@@ -58,4 +58,4 @@ type,name,note
 73,Boss_73,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss.
 76,SpikePress_Lev,levitating spike press that moves left-right
 77,Boss_Hero,the Hero boss at the end of the game
-80,Fx_ArenaEmber,decoration only - touch kind 0 so it cannot be touched or hurt, and the handler just animates. Placed twice in the whole game, both unconditional in the final boss room. Variant 1 is unreachable: nothing spawns type 80 and no record selects it
+80,Fx_ArenaEmber,decoration only - touch kind 0 so it cannot be touched or hurt and the handler just animates. Placed twice in the whole game- both unconditional in the final boss room. Variant 1 is unreachable: nothing spawns type 80 and no record selects it
