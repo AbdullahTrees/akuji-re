@@ -1440,41 +1440,24 @@ const
   T66_ANCHOR_DEPTH = 2;
   T66_SND_LAP = $2E;        { on every wrap of the orbit }
 
-  { --- Types 67 and 68, and the last of type 57 -------------------------
-    TYPE 67 walks type 60's walk, stops, LAYS AN EGG, and then runs away
-    from it. The egg is a type 57 with EF_VARIANT 3.
+  { Types 67 and 68, and the last of type 57. With type 67's egg, every
+    variant of type 57 has an owner - 56's burst, 63's skimmer, 65's fireball,
+    67's egg - so the four-things-in-one-handler at 0x0045D00C is four things
+    four different enemies needed rather than a grab bag.
 
-    With this one every variant of type 57 has an owner:
+    Type 67's retreat uses Compare(player.x, self.x), the AWAY arithmetic that
+    looks like a slip in type 61. Two handlers writing it settles that it is
+    not a typo.
 
-        variant 0   type 56's burst          shot
-        variant 1   type 63's one shot       skimmer
-        variant 2   type 65's fireball       homing
-        variant 3   type 67's egg            hatches
+    Type 68 rewrites BOTH its own hitbox insets from a per-FRAME table while
+    it animates in state 3. Types 50 and 52 also modify their own hitbox, but
+    from a state; this is the only one driving it frame by frame, and it is
+    why Entity_UpdateAll gives a state-3 type 68 a SECOND Entity_PlayerTouch -
+    the window to catch it is the animation.
 
-    so the four-things-in-one-handler at 0x0045D00C is four things four
-    different enemies needed, not a grab bag.
-
-    Its retreat uses Compare(player.x, self.x) - the AWAY arithmetic that
-    looked like a slip in type 61. Here it is unmistakably deliberate: it has
-    just laid an egg, it shifts to <<6 rather than <<4 for the sprint, and
-    then ApproachZero brings it to a halt and it turns back towards you. Two
-    handlers using the same expression settles that type 61's is not a typo.
-
-    TYPE 68 is what hatches. It only ever animates in state 3, and while it
-    does it REWRITES BOTH ITS OWN HITBOX INSETS from a per-frame table:
-
-        70, 55, 55, 40, 40, 50, 90, 90
-
-    one entry per animation frame, written to EF_INSET_PCT_X and
-    EF_INSET_PCT_Y from the same value. So it opens out, holds, and closes
-    again as it rises. Types 50 and 52 also modify their own hitbox, but from
-    a state; this is the only one driving it frame by frame off a table, and
-    it is why Entity_UpdateAll gives a state-3 type 68 a SECOND
-    Entity_PlayerTouch - the window to catch it is the animation.
-
-    Nothing here sets state 4. Whatever catches it does. In state 4 it simply
-    falls, and when it lands it destroys itself WITH loot - the only
-    Entity_Destroy in any handler translated so far that passes True. }
+    Nothing here sets state 4; whatever catches it does. Its landing is the
+    only Entity_Destroy in any handler translated so far that passes True, so
+    it is the only one that pays out loot. }
   T67_FRAMES = 4;  T67_TICKS = 4;
   T67_TABLE_ADDR = $0046C440;
   T67_SPRITES: array[0..4] of Integer = (438, 439, 440, 439, 441);
@@ -1597,40 +1580,18 @@ const
   T72_SELF_TYPE = $48;      { 72 - the flyer trails copies of itself }
   T72_TRAIL_VARIANT = 2;
 
-  { --- Types 73 and 74 --------------------------------------------------
-    TYPE 73 is the biggest parent-child state machine in the game. Types
-    31/35, 38/39, 50/39 and 52/53 each hand ONE state transition to a spawned
-    child; this one hands over three, to three DIFFERENT children:
+  { Types 73 and 74. Type 73 hands THREE state transitions to three different
+    children - state 3 to a type 75, state 5 to a type 74, state 8 to a type
+    35 - and nothing in its own handler leaves any of them. Read alone it
+    looks like it deadlocks three times over.
 
-        state 3   waits for a type 75 to move it on
-        state 5   waits for a type 74 to move it on - and type 74 below is
-                  where that write lives, `owner.EF_STATE := 6`
-        state 8   waits for a type 35, the same marker type 31 uses
+    `if EF_HP = 0 then frame := 4` sits BEFORE Entity_UpdateDying, so the dead
+    pose shows on the frame the death sequence starts rather than one later.
 
-    Nothing in its own handler leaves 3, 5 or 8. Read alone it looks like it
-    deadlocks three times over.
-
-    Its float wait is WAIT[difficulty] * (EF_HP div 4) + 20, so it is the
-    THIRD boss paced off its own health, after 52 and 54 - and the only one
-    where the multiplier is difficulty-keyed as well.
-
-    `if EF_HP = 0 then frame := 4` sits BEFORE Entity_UpdateDying, so the
-    dead pose shows on the same frame the death sequence starts rather than
-    one frame later.
-
-    TYPE 74 is its charge-up (variant 0) and the fan that charge-up throws
-    (variant 1). The fan is type 56's, rebuilt line for line - aim, add a
-    difficulty SKEW, wrap a negative by 64, then step the heading by four per
-    shot with the same `if next > 63 then next := aim - 0x3C` wrap.
-
-    And the three tables are the SAME NUMBERS as type 56's, at different
-    addresses: skew (0, -4, -8), count (0, 2, 4), speed (2, 2, 3). Types 52
-    and 54 duplicate an HP table the same way. Whoever built these bosses
-    copied a working attack and re-entered its constants rather than sharing
-    them.
-
-    Variant 0 destroys itself the moment it fires, after writing state 6 into
-    whatever spawned it. }
+    Type 74's fan is type 56's rebuilt line for line, and its three tables
+    hold the SAME NUMBERS as type 56's at different addresses. Types 52 and 54
+    duplicate an HP table the same way: these bosses were built by copying a
+    working attack and re-entering its constants, not by sharing them. }
   T73_FRAMES = 4;  T73_TICKS = 8;
   T73_TABLE_ADDR = $0046C5FC;
   T73_SPRITES: array[0..4] of Integer = (500, 501, 502, 501, 503);
@@ -2028,39 +1989,25 @@ const
   EMIT_SPAWN_TYPE  = $21;   { 33, the explosion }
   EMIT_RADIUS_SHIFT = 4;    { Random(r shl 4), centred by r * 8 }
 
-  { --- Entity_TakeProjectileHits @ 0x00457AB4 ---------------------------
-    A wide switch on the TARGET's EF_VULN_KIND, and the projectile's own
-    EF_STATE is its POWER. Three of the arms do something other than damage:
+  { Entity_TakeProjectileHits @ 0x00457AB4. A switch on the TARGET's
+    EF_VULN_KIND, with the projectile's own EF_STATE as its POWER. Most arms
+    are immunity, and several are conditional on that power, which is what
+    makes them armour rather than invulnerability:
 
-      7  REFLECTS the shot. It spawns a fresh type 2 travelling the other way,
-         with the same power, a 600-frame life, and a touch kind that makes it
-         hostile - 7 for power 2, otherwise 1. It also sizes the new shot's
-         collision box: all four percentage columns to 30 for power 2 and 60
-         otherwise, which is the only place in the game seen writing those at
-         runtime.
-      6  SPINS the target a fifth of a turn (24 of 64) and sets int $15.
-      5  SHOVES it sideways at the shot's direction times 64 and steps its
-         frame, wrapping 0..3.
+        2, $5C   immune outright
+        $5A      immune to power below 1
+        $5B      immune to power below 2
+        $5D      immune UNLESS the power is exactly 3
+        4        immune unless the power is exactly 4
 
-    The rest are immunity, and several are CONDITIONAL ON THE SHOT'S POWER,
-    which is what makes them armour rather than invulnerability:
+    A power-3 shot is skipped entirely unless the kind is $5D, so that power
+    exists to open exactly one kind of door.
 
-      2, $5C   immune outright
-      $5A      immune to power below 1
-      $5B      immune to power below 2
-      $5D      immune UNLESS the power is exactly 3
-      4        immune unless the power is exactly 4
-
-    A shot of power 3 is skipped entirely unless the target's kind is $5D, so
-    that power exists to open exactly one kind of door.
-
-    On a real hit the target loses the shot's EF_HP - the same slot being
-    damage on a projectile and hit points on a target - and gets 8 frames in
-    both timers. Powers 2 and 3 PIERCE: they are not destroyed and can hit
-    again. Power 4 is destroyed WITH loot.
-
-    Only the special arms return early; an ordinary hit carries on scanning,
-    so several shots can land in one pass until the target's HP reaches 0. }
+    Kind 7 REFLECTS, and is the only place in the game seen writing all four
+    hitbox percentage columns at runtime. Powers 2 and 3 PIERCE - not
+    destroyed, and able to hit again - and power 4 is destroyed WITH loot.
+    Only the special arms return early, so an ordinary hit carries on scanning
+    and several shots can land in one pass. }
   VULN_IMMUNE        = 2;
   VULN_ONLY_POWER4   = 4;
   VULN_SHOVE         = 5;
