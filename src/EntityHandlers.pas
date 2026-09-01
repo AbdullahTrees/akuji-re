@@ -522,36 +522,17 @@ const
   T2_SPARKS       = 6;
   T2_SPARK_SPEED_MAX = 2; { Random(2) + 1, so 1..2 - NOT type 33's 1..3 }
 
-  { --- Types 38 and 39, a turret and its shot ---------------------------
-    The same division of labour types 31 and 35 have, and seeing it twice is
-    what makes it a pattern rather than a quirk: the parent holds a state it
-    cannot leave on its own, and the CHILD is what moves it on.
+  { Types 38 and 39, a turret and its shot - the same division of labour
+    types 31 and 35 have, and seeing it twice is what makes it a pattern: the
+    parent holds a state it cannot leave, and the CHILD moves it on.
 
-    TYPE 38 faces by its VARIANT - facing is variant shifted left five, so 0
-    is heading 0 and 1 is heading 32, the two opposite directions - and the
-    variant is also its sprite row. Five states:
+    Type 38's state 1 counter is gated by Entity_IsOffScreen, so a turret you
+    cannot see never counts down and never fires. Its facing and its sprite
+    row are both its VARIANT.
 
-      0  settle 1 px and take the facing from the variant
-      1  wait, but ONLY while on screen. Entity_IsOffScreen(self, 2) gates the
-         counter, so a turret you cannot see never counts down and never
-         fires. The wait itself is difficulty-keyed: 120, 60 or 30 frames
-      2  wind up, four frames at five ticks
-      3  after 30 more frames, spawn the shot eight direction-steps ahead and
-         0xC0 above, hand it this entity as its owner and its own heading as
-         the shot's velocity, then go to 4
-      4  held. Nothing here leaves it - the shot does
-      5  wind the animation back down and return to 1
-
-    TYPE 39 charges before it flies. In state 0 it plays four frames at a
-    difficulty-keyed rate of 4, 2 or 1 ticks - so on hard it charges four
-    times as fast - and at the end it plays sound 0x19 and, IF ITS OWN HP IS
-    ZERO, puts its owner into state 5. That condition is the interesting one:
-    a shot that still has HP leaves its parent stuck in state 4.
-
-    In state 1 it flies at a difficulty-keyed multiple of its velocity - 2, 2
-    or 3 - looping frames 4..9, and ends either on a wall or after 60 frames.
-    Either way it leaves a type-7 puff with VARIANT 1, which is that type's
-    second sprite row. }
+    Type 39 writes its owner's state 5 only IF ITS OWN HP IS ZERO, so a shot
+    that still has HP leaves its parent stuck in state 4 - which is what type
+    40 relies on. }
   T38_VARIANTS = 2;
   T38_FRAMES = 4;  T38_TICKS = 4;
   T38_TABLE_ADDR = $0046BF24;
@@ -584,38 +565,19 @@ const
   T39_PUFF_TYPE = 7;
   T39_PUFF_VARIANT = 1;
 
-  { --- Type 40, the springboard -----------------------------------------
-    Two entities in one, by variant, and the first handler that reaches into
-    the PLAYER'S ENTITY and rewrites it.
+  { Type 40, the springboard - the first handler that reaches into the
+    PLAYER'S ENTITY and rewrites it. Nothing here sets state 2, the launch;
+    the touch handler does.
 
-    VARIANT 1 is a shooter. It only acts while on screen, counts a cooldown
-    down to zero, and then fires - but only if the player's box overlaps its
-    own at EIGHT times width and two times height, which is a very wide, flat
-    trigger area rather than a touch. The shot is a type 39 with its HP set to
-    1, which is what stops it releasing this parent the way type 38's does -
-    see type 39, where only a zero-HP shot writes to its owner. So the same
-    shot type serves two parents with different lifetimes.
+    The launch keeps the speed the player arrived with but takes the
+    DIRECTION from whatever is held at that moment, so you can turn round on
+    the spring. With no input the field is left alone entirely.
 
-    Its aim is Compare(self.x, player.x) shifted left five - a direction, not
-    an angle - and a zero is corrected to 0x20, so a shot fired at a player
-    standing exactly in line still goes somewhere.
-
-    STATE 2 is the launch, and it is worth reading in full because everything
-    it touches belongs to somebody else:
-
-        player.EF_VEL_Y   := -0xD0
-        player.EF_CHILD_A := abs(player.EF_VEL_X) * input.AxisX, if any
-        player.EF_STATE   := 2
-        player.block A[1] := 1
-        player.EF_RIDDEN  := 0
-        player.block A[8] := 1
-
-    The horizontal one is the interesting line: the player keeps the SPEED it
-    arrived with but takes the DIRECTION from whatever is being held at the
-    moment of the launch, so you can turn round on the spring. With no input
-    the field is left alone entirely.
-
-    Nothing here sets state 2. The touch handler does. }
+    Variant 1's shot is a type 39 with its HP set to 1, and only a ZERO-hp
+    type 39 writes back to its owner - which is how the same shot type serves
+    this parent and type 38's with different lifetimes. Its aim is a
+    direction rather than an angle, and a zero is corrected to 0x20 so a shot
+    fired at a player standing exactly in line still goes somewhere. }
   T40_VARIANTS = 2;
   T40_FRAMES = 4;
   T40_TABLE_ADDR = $0046BF90;
@@ -1190,37 +1152,22 @@ const
   T60_ANIM_STEP = -6;
   T60_LEDGE_PROBE = $400;   { one tile down - no floor there means turn }
 
-  { --- Type 57, four entities wearing one handler -----------------------
-    The only handler that switches on EF_VARIANT at the top and never shares
-    a line between the branches. Four separate things:
+  { Type 57, four entities wearing one handler, switched on EF_VARIANT with
+    no line shared between the branches: type 56's shot, type 63's skimmer,
+    type 65's homing fireball, type 67's egg.
 
-    VARIANT 0 - type 56's shot. Move by velocity, four frames, nothing else.
+    Variant 1 reads the SAME eight-int table two ways - state 0 as two rows of
+    four, picking by the sign of EF_VEL_X, state 1 as one linear walk.
 
-    VARIANT 1 - a skimmer that falls when it hits a wall. Its two states read
-    the SAME eight-int table two different ways: state 0 treats it as two rows
-    of four and shows element 0 or element 4 by the sign of EF_VEL_X, and
-    state 1 walks all eight linearly. One table, two shapes.
+    Variant 2 is type 55's state 0 down to the constants, including the
+    multiply by difficulty + 1 every frame.
 
-    VARIANT 2 - a homing fireball, the same construction as type 55's state 0
-    down to the constants: steer(1, 2), multiply both velocity components by
-    difficulty + 1 every frame, stop homing at 240 and end at 241. It differs
-    in what it leaves and what it becomes - a type 28 every eighth frame while
-    alive, and a type 7 with EF_VARIANT 1 when it ends.
-
-    VARIANT 3 - an egg. It bounces with shrinking hops, EF_VEL_Y being
-    (6 - bounces) * -0x10, so the sixth hop has no lift and settles it. Then it
-    rocks for a difficulty-keyed number of cycles - (8, 4, 1), so hard hatches
-    almost at once - and bursts: eight type-6 particles at random headings and
-    random speeds, then a type 68 spawned as an ACTOR with EF_STATE 3.
-
-    That last line is where the type-68-in-state-3 special case in
-    Entity_UpdateAll comes from. The extra Entity_PlayerTouch that
-    TYPE_TOUCH_IN_STATE_3 describes exists for whatever hatches out of here.
-
-    The bounce is worth reading twice. On the frame it hits a wall it writes
-    the EXACT distance to that wall into EF_VEL_X so it lands flush, which
-    would throw the reversed velocity away - so the reversal is parked in
-    EF_PARKED_VEL and picked up on the next frame. }
+    Variant 3's bounce is worth reading twice. On the frame it hits a wall it
+    writes the EXACT distance to that wall into EF_VEL_X so it lands flush,
+    which would throw the reversed velocity away - so the reversal is parked
+    in EF_PARKED_VEL and picked up the next frame. It bursts into a type 68
+    spawned as an ACTOR in EF_STATE 3, which is where Entity_UpdateAll's
+    type-68-in-state-3 special case comes from. }
   T57_V0_FRAMES = 4;  T57_V0_TICKS = 2;
   T57_V0_TABLE_ADDR = $0046C298;
   T57_V0_SPRITES: array[0..T57_V0_FRAMES - 1] of Integer =
@@ -1322,36 +1269,16 @@ const
   T62_VULN_AWAY = 1;
   T62_VULN_TOWARDS = 2;
 
-  { --- Types 63 and 64 --------------------------------------------------
-    TYPE 63 walks type 60's walk, with the same wall-and-ledge probe pair,
-    and stops to shoot when three things are true at once: its cooldown has
-    run out, the player is inside a 6x2 box, and it is already moving TOWARDS
-    the player. That last condition is the same expression type 62 uses to
-    pick its vulnerability - written out again rather than shared.
+  { Types 63 and 64. Type 63 fires on an EQUALITY test against the fire frame
+    rather than a threshold, and only while already moving TOWARDS the player
+    - the same expression type 62 uses to pick its vulnerability, written out
+    again rather than shared. Leaving state 2 negates EF_VEL_X, so it always
+    walks back the way it came.
 
-    It fires exactly one shot, on an EQUALITY test against the fire frame
-    rather than a threshold, and what it fires is a type 57 with EF_VARIANT
-    set to 1 - the skimmer that falls when it meets a wall. So type 57's
-    second variant has an owner.
-
-    Then it TURNS ROUND. Leaving state 2 negates EF_VEL_X, so it always
-    walks back the way it came after shooting, and its cooldown is reloaded
-    from a separate table so it cannot shoot again immediately.
-
-    TYPE 64 hangs from the ceiling, drops, and climbs back:
-
-      1  wait. The threshold is WAIT[difficulty] * EF_VARIANT, so a row of
-         them with variants 1, 2, 3 drops in sequence - and a variant 0 has a
-         threshold of zero and drops at once
-      2  fall at gravity 4. On landing it plays a sound and spawns TWO type-3
-         entities, one 24 px left with EF_VEL_X -0x20 and one 24 px right
-         with +0x20 - a shockwave running each way along the floor
-      3  rest
-      4  climb at RISE[difficulty] * -0x10 until it meets the ceiling, then
-         back to waiting
-
-    Its animation ticks at the top of the handler, outside every state, so it
-    flaps at the same rate whatever it is doing. }
+    Type 64's wait threshold is WAIT[difficulty] * EF_VARIANT, so a row of
+    them with variants 1, 2, 3 drops in sequence and a variant 0 drops at
+    once. Its animation ticks at the top of the handler, outside every state,
+    so it flaps at the same rate whatever it is doing. }
   T63_FRAMES = 2;  T63_TICKS = 8;
   T63_TABLE_ADDR = $0046C3A0;
   T63_SPRITES: array[0..1, 0..3] of Integer =
