@@ -257,10 +257,9 @@ const
 
     EF_EXTENT_* is halved before use (shr 1), so it is a full width/height and
     the box is centred on the position. }
-  { Not stored: Entity_UpdateAll refreshes both every frame from the sprite's
-    CURRENT frame, through 0x0044CF1C and 0x0044CF68, and only while the sprite
-    is visible. So an entity's extent is its art's size, and one whose animation
-    changes size gets a collision box that follows it. }
+  { Also not stored. Entity_UpdateAll refreshes both from the sprite's CURRENT
+    frame, and only while it is visible - so an entity that animates through
+    frames of different sizes has a collision box that changes with them. }
   EF_EXTENT_X    = $26;   { +0x98, sprite width }
   EF_EXTENT_Y    = $27;   { +0x9C, sprite height }
   EF_BOX_OFS_X   = $28;   { +0xA0, added going one way and subtracted the other }
@@ -293,45 +292,19 @@ const
   EF_HITBOX_INSET_X = $2A;  { +0xA8 }
   EF_HITBOX_INSET_Y = $2B;  { +0xAC }
 
-  { --- Where all four of those come from: Entity_UpdateAll @ 0x004608BC -----
-
-    Neither EF_BOX_OFS_* nor EF_HITBOX_INSET_* is a stored constant. All four
-    are RECOMPUTED every frame, while the game state is GS_PLAY, from the
-    sprite's current size and four PERCENTAGES held in the type table:
-
-        EF_BOX_OFS_X      := Round(HalfExtent(EF_EXTENT_X) * col11 / 100)
-        EF_BOX_OFS_Y      := Round(HalfExtent(EF_EXTENT_Y) * col12 / 100)
-        EF_HITBOX_INSET_X := Round(HalfExtent(EF_EXTENT_X) * col13 / 100)
-        EF_HITBOX_INSET_Y := Round(HalfExtent(EF_EXTENT_Y) * col14 / 100)
-
-    The divisor is a Single 100.0 at 0x004610C0 and the rounding is the x87's
-    round-half-to-even. Reproducing it is NOT a matter of writing Round instead
-    of Trunc: the original runs at 64-bit significands and no float type on
-    x86-64 does, so EntityHandlers.ScaleByPercent does the whole thing in
-    integers. See its header for why, and for how far the difference reaches.
-
-    Reading those columns as percentages does not rest on the divisor alone.
-    Across all 81 rows the four columns only ever hold 0, 5, 10, 20, 30, 33, 40,
-    50, 60, 70, 75 and 80, and nothing exceeds 100. The 33 and the 75 - exactly
-    one third and three quarters - are what no other reading of the columns
-    produces.
-
-    So a type does not carry a hitbox measured in pixels. It carries the
-    FRACTION of its own art that the box covers. }
+  { EF_BOX_OFS_* and EF_HITBOX_INSET_* are not stored. Entity_UpdateAll
+    recomputes all four every GS_PLAY frame from the sprite's current size and
+    these percentages - see EntityHandlers.pas, which also explains why the
+    scaling is done in integers rather than with Round. }
   EF_BOX_PCT_X   = $3A;   { +0xE8, type table column 11 }
   EF_BOX_PCT_Y   = $3B;   { +0xEC, column 12 }
   EF_INSET_PCT_X = $3C;   { +0xF0, column 13 }
   EF_INSET_PCT_Y = $3D;   { +0xF4, column 14 }
   BOX_PERCENT_DIVISOR: Single = 100.0;   { the Single at 0x004610C0 }
-  EF_SOLID          = $3E;  { +0xF8, the kind above. It comes from TYPE TABLE
-                              COLUMN 15, which the mapping above pins exactly,
-                              and the shipped table corroborates the reading:
-                              76 of 81 types are 0, four are kind 1 (types 17,
-                              19, 21, 45 - platforms, passable sideways) and
-                              exactly one is kind 2 (type 43 - a wall, passable
-                              vertically). NOTHING is 3 or more, so "blocks
+  EF_SOLID          = $3E;  { +0xF8, the kind above, from TYPE_COL_SOLID. The
+                              shipped table holds only 0, 1 and 2, so "blocks
                               both" is a case the code supports and this game
-                              never uses. Pinned by --selftest-dir. }
+                              never reaches. Pinned by --selftest-dir. }
   EF_RIDDEN         = $0A;  { +0x28, block A[2]. Entity_SolidCollideY sets it
                               on the SOLID when something lands on top of it. }
 
@@ -391,20 +364,6 @@ const
   EF_CHILD_A     = $13;   { +0x4C, destroyed with the parent when EF_CLASS = 5 }
   EF_CHILD_B     = $14;   { +0x50 }
 
-  { --- Fields confirmed by Entity_SpawnDebris @ 0x00461874 ------------------
-
-    That function spawns five particles and sets each one's fields directly, so
-    it names them by use rather than by inference. It writes +0x80 and +0x84 as
-    the velocity pair, +0x78/+0x7C as the position pair, +0x1C and +0x20 as
-    per-particle variation - all of which already carried those names here,
-    from other evidence. Nothing below is new; it is corroboration, recorded
-    because agreement from an unrelated function is what the naming rules ask
-    for.
-
-    Its X velocity is DIR_COS[Random(64)] div 2, times Random(3)+1, which is
-    also what ties Directions.pas to the entity system for the first time. Y is
-    (i + 4) * -8 for particle i, so the five fan upward at fixed speeds - screen
-    Y grows downward, so negative is up. }
   EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
   EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
 
@@ -430,39 +389,16 @@ const
   EF_CULL_OFFSCREEN = $39;
   CULL_MARGIN       = 4;        { Entity_IsOffScreen's argument in the update loop }
 
-  { --- The update loop, from Entity_UpdateAll @ 0x004608BC ------------------
+  { Entity_UpdateAll @ 0x004608BC is one switch on EF_TYPE, one arm per type -
+    which is the shape of EntityHandlers.pas. Types 0, 18 and 20 have no arm at
+    all. That nearly, but not exactly, coincides with the three rows whose
+    TYPE_COL_ANIM_ID is -1: those are 18, 20 and 32, and 32 does have an arm,
+    so it updates while drawing nothing. }
 
-    One switch on EF_TYPE with 80 arms, types 1..80, each its own handler. That
-    is the shape of the whole 0x456000-0x45FFFF block: it is one update
-    procedure per entity type.
-
-    Types 0, 18 and 20 have NO arm. Cross-checking against the type table, 18
-    and 20 are also two of the three rows whose column 0 is -1, i.e. that need
-    no sprite object - so they are inert markers. The third such row, type 32,
-    DOES have an arm: it updates but draws nothing. The two facts nearly
-    coincide but not exactly, which is worth stating plainly rather than
-    rounding off.
-
-    Entities.Alive is a BYTE at +0x08, read as such both here and in
-    Entity_Spawn - it is not an integer.
-
-    Slots above SLOT_ACTOR_LAST get two extra calls per frame (0x00457880 and
-    0x00457AB4) that the player and the actors do not, which is independent
-    confirmation of where that boundary sits. }
-
-  { --- A real asymmetry in the original, reproduced ------------------------
-
-    Entity_Spawn allocates across three ranges: slot 0 for kind 0, 1..$20 for
-    kind 1, and $21..$120 for kind 2. So the pool genuinely is ENTITY_COUNT
-    slots and SLOT_MINOR_LAST is right.
-
-    But Entity_UpdateAll iterates slots 0..$FF only - it returns after 256
-    iterations. Slots $100..$120 can therefore be spawned into and will never
-    be updated, drawn or culled.
-
-    That is not a misreading and it is not corrected here. Entity_Spawn's own
-    sprite search also stops at 256, so an entity in one of those slots could
-    not obtain a sprite either; the 33 extra slots are vestigial. }
+  { Deliberately smaller than ENTITY_COUNT: Entity_Spawn allocates as far as
+    slot $120 but Entity_UpdateAll returns after 256, so the last 33 slots can
+    be spawned into and are then never updated, drawn or culled. The sprite
+    search stops at 256 too, so they could not get art either. Reproduced. }
   ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
 
   { The two 10-int blocks Entity_Spawn zeroes, $08..$11 and $12..$1B:
