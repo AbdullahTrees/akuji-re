@@ -795,18 +795,12 @@ begin
 end;
 
 { One frame of the cutscene. True while it is still running, which is what
-  holds GameStartOrLoad at the door.
-
-  The trace has this at 4726 frames for ten slides - 480 each for 1..7, 120 for
-  the short slide 8, 480 for 9, and 765 for slide 10, which waits on the music
-  rather than on its own timer. Opening.pas already modelled all of that
-  correctly; nothing was driving it. }
+  holds GameStartOrLoad at the door. Ten slides, 4726 frames in the trace. }
 function TFrm_main.OpeningStep: Boolean;
 begin
-  { The real FadeBusy now. Passing a constant False here is why the opening's
-    last phase never waited: Opening_Update arms the fade, then holds at the
-    999 sentinel until it lands, and with the answer hard-coded it fell
-    through on the same frame and the screen cut straight to stage 1. }
+  { FadeBusy must be the live one: the last phase arms a fade and then holds
+    at Opening's 999 sentinel until it lands. A constant False here falls
+    through on the same frame and cuts straight to stage 1. }
   Result := FOpening.Update(ConfirmPressed(FSession.Input),
                             KbgmPlayer1.IsPlaying, DDDD1.FadeBusy);
   FOpening.Draw(DDDD1.Canvas, FFont, FOpeningBmp);
@@ -1406,28 +1400,16 @@ begin
   Joy.KeyDown(Key);
 end;
 
-{ There was no OnKeyUp at all, so Joy.Down only ever gained bits and a key
-  pressed once stayed down for the rest of the session. That did not show
-  while nothing read Joy.Down; the moment the controller did, it would have
-  meant walking right forever. }
 procedure TFrm_main.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
   Joy.KeyUp(Key);
 end;
 
-{ ---------------------------------------------------------------------------
-  FormDestroy @ 0x00466644 - which is really the settings writer.
-
-  The original copies the loose runtime globals back into the settings record
-  and writes all 56 bytes over data\system.dat, then mirrors the fullscreen
-  flag into system.ini's [disp] section as 'on' or 'off'. It also dumps
-  'debug.log' first when the debug flag is set, and that is not reproduced.
-
-  Note the order: p_KeyMap[0..3] -> +0x08..+0x14, then the four flag bytes,
-  then the write. GlobalsToSettings does the flags; the key map already lives
-  in the record.
-  --------------------------------------------------------------------------- }
+{ FormDestroy @ 0x00466644 - really the settings writer: the loose runtime
+  globals go back into the record, all 56 bytes over data\system.dat, and the
+  fullscreen flag is mirrored into system.ini. The original also dumps
+  'debug.log' first when the debug flag is set; that is not reproduced. }
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   { Give the multimedia timer period back - raising it is process-wide. }
