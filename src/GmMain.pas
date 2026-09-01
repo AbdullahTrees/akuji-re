@@ -228,16 +228,13 @@ end;
   defaults into the settings record, system.dat over the top, system.ini over
   THAT for two fields, then every global the frame loop reads.
 
-  Two things about the settings the record had wrong or missing:
+  Two things worth knowing about the settings record:
 
-    * +0x1A, fullscreen, DEFAULTS TO 1, not 0. CLAUDE.md said 1,0,0,0 for the
-      four flag bytes and it is 1,0,1,0. The default is almost always
-      overwritten anyway, because the INI read sets +0x1A unconditionally - 1
-      when [disp] fullscreen is exactly 'on', 0 otherwise - so it only stands
-      when system.ini is missing.
+    * +0x1A, fullscreen, DEFAULTS TO 1. It stands only when system.ini is
+      missing - the INI read sets it unconditionally either way.
     * +0x28, the gallery selection, is zeroed AFTER the file is read, so it
       does not persist across a run even though it sits inside the 56 bytes
-      that get written back.
+      written back.
 
   The last thing it does before installing the idle handler is clear the flag
   at 0x0046CFE8, which is what arms Title_Init's one-off 360 ms sleep. }
@@ -481,36 +478,16 @@ begin
     the same state value in the original and mutually exclusive arms of one
     case here, so no frame runs both and the position is equivalent. }
   FSession.Runner.TickDelay(FSession.Events, FSession.Player, GameStateValue);
-  { THE FADER, which Player_Update's soft-landing guard reads and nothing
-    here was writing. The original:
-
-        if (fall / 3 < 0xb)
-            if (fader[+0x0D] == 0)  PlaySound(8)
-
-    so a landing that happens while the screen is fading is SILENT. A door
-    transition fades - the warp waits on FadeBusy before it loads - and the
-    player is placed standing on the floor as it ends, with PF_LANDED at 0, so
-    its first update runs the whole just-landed sequence. Without this every
-    room change played a landing sound the original never plays.
-
-    Only the SOFT landing is guarded; the hard one at 0xb and above sounds
-    either way. TEntityWorld.Fading existed and Player.pas read it, but no
-    line ever assigned it, so it was False for the life of the process. }
+  { Player_Update's SOFT landing sound is suppressed while the screen fades.
+    That matters at every door: the transition fades, the player is placed
+    standing on the floor as it ends with PF_LANDED clear, and its first update
+    would otherwise run the whole just-landed sequence. The hard landing sounds
+    either way. }
   FSession.TickEntities(GameStateValue);
 
-  { THE SCREEN SHAKE, which was set and never applied. 0x00464D30 runs this
-    immediately after Entity_UpdateAll and before anything is drawn:
-
-        if (*p_ScreenShakeOn == 1)
-            *p_ScreenShakeTimer -= 1
-            off = Random(0x10) - 8
-            if (*p_ScreenShakeTimer < 1) *p_ScreenShakeOn = 0
-            for every live sprite:  sprite[+0x30] -= off
-
-    and the same `off` is ADDED to the background tilemap's scroll Y further
-    down, so the map and the sprites shift together. EntityHandlers sets
-    ScreenShakeOn for a type-77 impact and GameSession clears it on reset -
-    nothing in between ever read it. }
+  { After Entity_UpdateAll, before anything is drawn. The offset is subtracted
+    from every sprite here and ADDED to the tilemap's scroll Y further down, so
+    map and sprites shift together. }
   FShakeOffset := 0;
   if ScreenShakeOn then
   begin
@@ -619,19 +596,16 @@ begin
         if ((btn0 && !latch0) || (btn1 && !latch1) || (btn2 && !latch2))
             p_InputState[0x34] = 1;
 
-    THREE buttons, not the two Input_ConfirmPressed tests - button 2, the
-    pause/cancel button, counts here as well. The field existed in
-    TInputState with its offset and was never written, so anything reading it
-    saw False for the whole run. }
+    THREE buttons, not the two Input_ConfirmPressed tests - the pause/cancel
+    button counts here as well. }
   FSession.Input.AnyPressed :=
        (FSession.Input.Button[0] and not FSession.Input.ButtonLatch[0])
     or (FSession.Input.Button[1] and not FSession.Input.ButtonLatch[1])
     or (FSession.Input.Button[2] and not FSession.Input.ButtonLatch[2]);
 end;
 
-{ Step 7, which had been a TODO: the edge detection and the repeat timers, and
-  the double-tap window with them. AFTER the state handlers, so that what they
-  read is the previous frame's. }
+{ Step 7: edge detection, the repeat timers and the double-tap window. AFTER
+  the state handlers, so what they read is the previous frame's. }
 procedure TFrm_main.InputStep7;
 var
   Down: array[0..3] of Boolean;
@@ -754,23 +728,14 @@ begin
   FFont.TextOut(DDDD1.Canvas, 0, 16, 'S P:' + IntToStr(EntitiesDrawn));
 end;
 
-{ 0x00466C78. The fullscreen toggle, called from FormKeyDown.
+{ 0x00466C78. The fullscreen toggle, called from FormKeyDown. Either
+  direction can fail - no 320x240 at 16 bits going in, a desktop under 16-bit
+  colour coming out - and the original's answer to both is a Shift-JIS message
+  box and then Close. Restoring the border style only when NOT running from
+  bmp.qda is a quirk of the original, not a rule.
 
-  Going IN: ask the display component for 320x240 at 16 bits. If that fails
-  it shows a Shift-JIS message box - "the full screen cannot be used" - and
-  closes the form. Then it hides the cursor.
-
-  Coming OUT: if the desktop is under 16-bit colour it shows the other
-  message - "please change the display mode" - and closes; otherwise it
-  restores the mode, resizes the form back to 320x240, re-centres it, and
-  shows the cursor. The border style is only restored when the game is NOT
-  running from bmp.qda, which is a quirk of the original and not a rule.
-
-  The mode change itself belongs to the DirectDraw component, which this
-  reconstruction replaces wholesale, so what is reproducible here is the
-  decision and the window geometry. The two message strings are recorded
-  because they are the only Japanese text in the executable outside the
-  dialogue files. }
+  The mode change belongs to the DirectDraw component this replaces wholesale,
+  so what is reproducible here is the decision and the window geometry. }
 procedure TFrm_main.SetFullScreen(Enable: Boolean);
 begin
   if Enable then
@@ -1242,13 +1207,13 @@ begin
         { DRAW FIRST, THEN INPUT - the order inside Title_MainMenu, where
           each sub-mode arm draws and only then reads the stick.
 
-          It matters because p_TitleSubMode is OVERLOADED. On NEW GAME or
-          CONTINUE the menu arm stores p_MenuIndex into it to carry the CHOICE
-          into state 40, using the variable that means OPTIONS here. Drawing
-          after the update rendered the options screen for one frame on the way
-          into CONTINUE.
+          It matters because TitleSubMode is OVERLOADED: on NEW GAME or
+          CONTINUE the menu arm stores MenuIndex into it to carry the choice
+          into state 40, reusing the variable that means OPTIONS here. Update
+          first and the options screen appears for one frame on the way into
+          CONTINUE.
 
-          It also makes the cursor lag by design: the highlight drawn is the
+          It also makes the cursor lag by design - the highlight drawn is the
           position BEFORE this frame's input. }
         FTitleScreen.Draw(DDDD1.Canvas, FFont, FSurfaces[1], FSurfaces[2],
                           FEndingBmp);
