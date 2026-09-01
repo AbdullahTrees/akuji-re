@@ -57,5 +57,5 @@ type,name,note
 71,Type_71,can't determine from here a wierd ball is following us
 73,Boss_73,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss.
 76,SpikePress_Lev,levitating spike press that moves left-right
-77,Boss_77,[UNCONFIRMED]unsure what this is looks like Boss_MurasakiLizard- maybe its a boss.
-80,Type_80,[UNCONFIRMED]looks empty
+77,Boss_Hero,the Hero boss at the end of the game
+80,Fx_ArenaEmber,decoration only - touch kind 0 so it cannot be touched or hurt, and the handler just animates. Placed twice in the whole game, both unconditional in the final boss room. Variant 1 is unreachable: nothing spawns type 80 and no record selects it
