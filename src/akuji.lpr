@@ -35,7 +35,7 @@ uses
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
   SpritePool, Sprites, Dialogue, BgAnime, UnitInit, Title, Ending, Opening,
-  GameFont, DDDDComponent,
+  GameFont, DDDDComponent, Surfaces,
   Classes, SysUtils, TypInfo;
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
@@ -10766,6 +10766,167 @@ begin
     Log.Add('FAILED');
 end;
 
+{ --- A PROBE, not a test ----------------------------------------------------
+  Walks the exact sequence GmMain uses to bring a stage up, and prints what
+  each step produced. It exists because the game rendered a hand-made map as
+  black and dropped the player through it, while the ORIGINAL binary rendered
+  the same file correctly - so the fault is in this reconstruction and the
+  question is which lookup differs. Reading the code proved every step right
+  in isolation, which is exactly when a probe earns its place. }
+function SelfTestMapProbe(Log: TStringList): Integer;
+var
+  GameDir: string;
+  Stages: TStageTable;
+  Map: TTileMap;
+  Arch: TQdaArchive;
+  Surf: TSurfaceSet;
+  Bmp: TBitmap;
+  L: TLayerInfo;
+  MapId, Tileset, Terrain, Stage, Painted, PX, PY: Integer;
+begin
+  Result := 0;
+  GameDir := IncludeTrailingPathDelimiter(ParamStr(2));
+  Stage := StrToIntDef(ParamStr(3), 1);
+  Log.Add(Format('game dir: %s', [GameDir]));
+  Log.Add(Format('stage:    %d', [Stage]));
+
+  Stages := TStageTable.Create;
+  Map := TTileMap.Create;
+  try
+    if Stages.Load(GameDir) <= 0 then
+    begin
+      Log.Add('FAILED: stage table did not load');
+      Exit(1);
+    end;
+    Log.Add(Format('stage table rows: %d', [Stages.Count]));
+    if (Stage < 0) or (Stage >= Stages.Count) then
+    begin
+      Log.Add('FAILED: stage out of range');
+      Exit(1);
+    end;
+
+    MapId   := Stages.Layer[Stage, 0];
+    Tileset := Stages.Tileset[Stage, 0];
+    Terrain := Stages.TerrainId[Stage];
+    Log.Add(Format('Layer[%d,0]   = %d   (the map file to load)', [Stage, MapId]));
+    Log.Add(Format('Tileset[%d,0] = %d   (surface slot to draw from)', [Stage, Tileset]));
+    Log.Add(Format('TerrainId[%d] = %d', [Stage, Terrain]));
+
+    if MapId = LAYER_NONE then
+    begin
+      Log.Add('FAILED: no map for this stage - nothing would draw and');
+      Log.Add('        nothing would be solid, which is black plus a fall');
+      Exit(1);
+    end;
+
+    if not Map.Load(GameDir, MapId) then
+    begin
+      Log.Add(Format('FAILED: map %.3d did not load', [MapId]));
+      Exit(1);
+    end;
+    Log.Add(Format('map %.3d: %dx%d tiles, tile %dx%d, sheet %dx%d',
+      [MapId, Map.MapWidth, Map.MapHeight, Map.TileWidth, Map.TileHeight,
+       Map.SheetCols, Map.SheetRows]));
+
+    { --- and now actually DRAW it, which is where black comes from ------- }
+    Arch := TQdaArchive.Create(GameDir + 'bmp.qda');
+    Surf := TSurfaceSet.Create(Arch);
+    Bmp := TBitmap.Create;
+    try
+      Surf.LoadSet(GameDir, Stages.SurfaceSet[Stage]);
+      Log.Add(Format('surface set %d loaded; slot %d is %s',
+        [Stages.SurfaceSet[Stage], Tileset,
+         BoolToStr(Surf[Tileset] <> nil, 'present', 'NIL')]));
+
+      Bmp.SetSize(SCREEN_W, SCREEN_H);
+      Bmp.Canvas.Brush.Color := clBlack;
+      Bmp.Canvas.FillRect(0, 0, SCREEN_W, SCREEN_H);
+      Map.Draw(Bmp.Canvas, Surf, Tileset, 0, 0, SCREEN_W, SCREEN_H);
+
+      Painted := 0;
+      for PY := 0 to SCREEN_H - 1 do
+        for PX := 0 to SCREEN_W - 1 do
+          if Bmp.Canvas.Pixels[PX, PY] <> clBlack then
+            Inc(Painted);
+      Log.Add(Format('pixels painted at origin 0,0: %d of %d',
+        [Painted, SCREEN_W * SCREEN_H]));
+
+      { The camera clamp for a map this shape, and what the screen looks like
+        at the bottom-right corner it allows. A map SHORTER than the old one
+        has a smaller MaxScrollY, and an origin past it draws nothing. }
+      FillChar(L, SizeOf(L), 0);
+      L.TileW := Map.TileWidth;    L.TileH := Map.TileHeight;
+      L.MapTilesX := Map.MapWidth; L.MapTilesY := Map.MapHeight;
+      Log.Add(Format('MaxScrollX = %d, MaxScrollY = %d',
+        [Camera.MaxScrollX(L), Camera.MaxScrollY(L)]));
+
+      { AND at the camera a NEW GAME actually starts with. Stage_Begin sets
+        the origin straight from PlayerState.ScrollX/ScrollY and nothing
+        clamps it, so this is the view the player really gets. }
+      Bmp.Canvas.FillRect(0, 0, SCREEN_W, SCREEN_H);
+      Map.Draw(Bmp.Canvas, Surf, Tileset, 0, DEFAULT_SCROLL_Y,
+               SCREEN_W, SCREEN_H);
+      Painted := 0;
+      for PY := 0 to SCREEN_H - 1 do
+        for PX := 0 to SCREEN_W - 1 do
+          if Bmp.Canvas.Pixels[PX, PY] <> clBlack then
+            Inc(Painted);
+      Log.Add(Format('pixels painted at the NEW GAME camera (0,%d): %d',
+        [DEFAULT_SCROLL_Y, Painted]));
+      if Painted = 0 then
+      begin
+        Log.Add('FAILED: black on a new game - the camera opens outside the map');
+        Exit(1);
+      end;
+
+      Bmp.Canvas.FillRect(0, 0, SCREEN_W, SCREEN_H);
+      Map.Draw(Bmp.Canvas, Surf, Tileset,
+               Camera.MaxScrollX(L), Camera.MaxScrollY(L), SCREEN_W, SCREEN_H);
+      Painted := 0;
+      for PY := 0 to SCREEN_H - 1 do
+        for PX := 0 to SCREEN_W - 1 do
+          if Bmp.Canvas.Pixels[PX, PY] <> clBlack then
+            Inc(Painted);
+      Log.Add(Format('pixels painted at the clamped corner: %d', [Painted]));
+
+      { OUT OF RANGE ON PURPOSE. The original wraps - the scroll is taken
+        modulo the map's pixel size - so one whole map height down must show
+        the top of the map again, not blackness. This is the regression test
+        for the clamp-versus-wrap bug. }
+      Bmp.Canvas.FillRect(0, 0, SCREEN_W, SCREEN_H);
+      Map.Draw(Bmp.Canvas, Surf, Tileset,
+               0, Map.MapHeight * Map.TileHeight, SCREEN_W, SCREEN_H);
+      Painted := 0;
+      for PY := 0 to SCREEN_H - 1 do
+        for PX := 0 to SCREEN_W - 1 do
+          if Bmp.Canvas.Pixels[PX, PY] <> clBlack then
+            Inc(Painted);
+      Log.Add(Format('pixels painted one map-height down (must wrap): %d',
+        [Painted]));
+      if Painted = 0 then
+      begin
+        Log.Add('FAILED: the map CLAMPED instead of wrapping');
+        Exit(1);
+      end;
+      if Painted = 0 then
+      begin
+        Log.Add('FAILED: the map drew NOTHING - this is the black screen');
+        Exit(1);
+      end;
+    finally
+      Bmp.Free;
+      Surf.Free;
+      Arch.Free;
+    end;
+
+    Log.Add('');
+    Log.Add('OK - the load path produced a map and it draws');
+  finally
+    Map.Free;
+    Stages.Free;
+  end;
+end;
+
 function RunSelfTest: Integer;
 var
   Log: TStringList;
@@ -10784,6 +10945,8 @@ begin
         Result := MixDump(Log)
       else if ParamStr(1) = '--selftest-dir' then
         Result := SelfTestDirections(Log)
+      else if ParamStr(1) = '--selftest-mapprobe' then
+        Result := SelfTestMapProbe(Log)
       else if ParamStr(1) = '--selftest-events' then
         Result := SelfTestEvents(Log)
       else if ParamStr(1) = '--selftest-settings' then
@@ -10844,6 +11007,7 @@ begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or
      (ParamStr(1) = '--mixdump') or (ParamStr(1) = '--selftest-dir') or
+     (ParamStr(1) = '--selftest-mapprobe') or
      (ParamStr(1) = '--selftest-events') or
      (ParamStr(1) = '--selftest-settings') or
      (ParamStr(1) = '--selftest-script') or

@@ -277,41 +277,103 @@ begin
   FTiles[Y * FMapW + X] := Word(Tile);
 end;
 
+{ The original's positive modulus, both branches. TileMap_Draw @ 0x0044D818
+  reduces the scroll by it before doing anything else:
+
+      if (scroll < 0) scroll = ((span - scroll) - 1) / span * span + scroll;
+      else            scroll = scroll % span;
+
+  Delphi's own mod would give a negative answer for a negative scroll, which
+  is why the original spells the negative case out. }
+function WrapMod(A, Span: Integer): Integer;
+begin
+  if Span <= 0 then Exit(0);
+  if A < 0 then
+    Result := ((Span - A - 1) div Span) * Span + A
+  else
+    Result := A mod Span;
+end;
+
+{ TileMap_Draw @ 0x0044D818.
+
+  THE MAP WRAPS. This is the whole point of the function and it was missed on
+  the first pass, which clamped instead:
+
+      if X1 > FMapW then X1 := FMapW;
+      if Y1 > FMapH then Y1 := FMapH;
+
+  The original does not clamp anywhere. It reduces the scroll modulo the map's
+  PIXEL size (+0x60A0 and +0x60A4), and then wraps the tile indices as it
+  walks - `if (mapTilesX <= col) col = 0` at the right edge and the same for
+  the row at the bottom. So the map is a torus: scroll past the edge and the
+  opposite edge comes round.
+
+  HOW THE DIFFERENCE SURFACED. Every shipped map is big enough that the camera
+  never leaves it, so clamping and wrapping agree on all 65 of them and the
+  bug was invisible. A hand-made map exactly 448 pixels tall then put the
+  camera at DEFAULT_SCROLL_Y = 0x1C0 = 448 - precisely one map-height down -
+  and the two readings diverged completely: the original wrapped to the top
+  and drew the room, while this clamped every row away and drew nothing, so
+  the screen was black and the player appeared to fall through the world.
+
+  Nothing in the shipped game changes as a result of this fix; it only stops
+  being wrong outside the range the shipped data happens to use. }
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
   SurfaceIndex, OffsetX, OffsetY, ViewW, ViewH: Integer);
 var
   Sheet: TBitmap;
-  X0, Y0, X1, Y1, TX, TY, Idx, SrcX, SrcY, DX, DY: Integer;
+  MapPxW, MapPxH, SX, SY: Integer;
+  StartPxX, StartPxY, RemY: Integer;
+  FirstCol, FirstRow, Cols, Rows: Integer;
+  R, C, Col, Row, PxX, PxY, Idx: Integer;
 begin
   if (ASurfaces = nil) or (Length(FTiles) = 0) then Exit;
   Sheet := ASurfaces[SurfaceIndex];
   if Sheet = nil then Exit;
 
-  X0 := OffsetX div FTileW;
-  Y0 := OffsetY div FTileH;
-  X1 := (OffsetX + ViewW) div FTileW + 1;
-  Y1 := (OffsetY + ViewH) div FTileH + 1;
-  if X0 < 0 then X0 := 0;
-  if Y0 < 0 then Y0 := 0;
-  if X1 > FMapW then X1 := FMapW;
-  if Y1 > FMapH then Y1 := FMapH;
+  MapPxW := FMapW * FTileW;
+  MapPxH := FMapH * FTileH;
+  if (MapPxW <= 0) or (MapPxH <= 0) then Exit;
 
-  for TY := Y0 to Y1 - 1 do
-    for TX := X0 to X1 - 1 do
+  SX := WrapMod(OffsetX, MapPxW);
+  SY := WrapMod(OffsetY, MapPxH);
+
+  { The first column starts at a NEGATIVE pixel offset when the scroll is not
+    a whole tile, so the partly-visible tile at the left is drawn too. }
+  StartPxX := -(SX mod FTileW);
+  RemY     := SY mod FTileH;
+  StartPxY := -RemY;
+
+  FirstCol := (StartPxX + SX) div FTileW;
+  FirstRow := (StartPxY + SY) div FTileH;
+
+  Cols := ((ViewW + FTileW - StartPxX) - 1) div FTileW;
+  Rows := (ViewH + FTileH + RemY - 1) div FTileH;
+
+  Row := WrapMod(FirstRow, FMapH);
+  PxY := StartPxY;
+  for R := 0 to Rows - 1 do
+  begin
+    Col := WrapMod(FirstCol, FMapW);
+    PxX := StartPxX;
+    for C := 0 to Cols - 1 do
     begin
-      Idx := GetTile(TX, TY);
-      if Idx >= FSheetCols * FSheetRows then
-        Continue;
-
-      { From the per-tile table, not recomputed - see FTileDefs. }
-      if (Idx < 0) or (Idx >= Length(FTileDefs)) then
-        Continue;
-
-      DX := TX * FTileW - OffsetX;
-      DY := TY * FTileH - OffsetY;
-      Dest.CopyRect(Rect(DX, DY, DX + FTileW, DY + FTileH), Sheet.Canvas,
-                    FTileDefs[Idx]);
+      Idx := GetTile(Col, Row);
+      { The original skips 0xFFFF - "no tile" - and complains about anything
+        above 0x400; here anything without a definition is simply skipped. }
+      if (Idx >= 0) and (Idx < Length(FTileDefs)) then
+        Dest.CopyRect(Rect(PxX, PxY, PxX + FTileW, PxY + FTileH),
+                      Sheet.Canvas, FTileDefs[Idx]);
+      Inc(PxX, FTileW);
+      Inc(Col);
+      if Col >= FMapW then
+        Col := 0;
     end;
+    Inc(PxY, FTileH);
+    Inc(Row);
+    if Row >= FMapH then
+      Row := 0;
+  end;
 end;
 
 end.

@@ -69,12 +69,26 @@ TILE_W = TILE_H = 32
 SHEET_C = SHEET_R = 10
 
 PITCH = 4          # 3-tile cell + 1-tile divider
-LEFT = 3           # player spawns around tile 3
-H = 14
-CELL_FLOOR_Y = 5
-CORRIDOR_FLOOR_Y = 10
-ENTITY_Y = 4       # stands on the cell floor
-SIGN_Y = 9         # stands on the corridor floor
+LEFT = 6           # cages start here; the spawn shaft is at tile 3
+SPAWN_X = 3        # DEFAULT_SPAWN_X is 0x60 = 96px = tile 3
+
+# THE HEIGHT AND THE ROWS ARE NOT ARBITRARY. A new game starts with
+# PlayerState.ScrollY = DEFAULT_SCROLL_Y = 0x1C0 = 448 pixels = tile 14, and
+# Stage_Begin sets the camera straight from it. Nothing clamps that: the
+# original's Camera_ApplyMoveY only ADDS VelY when a scroll is called for, so
+# a camera that starts outside the map stays outside it.
+#
+# A first attempt made the map 14 tiles tall - exactly 448 pixels - so the
+# camera began precisely at the bottom edge, the draw loop ran zero times and
+# the screen was black with the player somewhere off it. The map has to be
+# tall enough that row 14 is real, and the interesting part has to BE at
+# row 14, because that is where the camera opens.
+H = 24
+CAGE_CEIL_Y = 11
+CELL_FLOOR_Y = 16          # cages occupy rows 12..15
+CORRIDOR_FLOOR_Y = 20      # corridor is rows 17..19
+ENTITY_Y = 15              # stands on the cage floor
+SIGN_Y = 19                # stands on the corridor floor
 
 TARGETS = ('map/001.map', 'data/ev001.dat', 'data/tk001.dat')
 
@@ -86,8 +100,11 @@ def build_map(width):
         if 0 <= x < width and 0 <= y < H:
             t[y * width + x] = v
 
+    # everything above the cages is solid rock, so the player falls down the
+    # one shaft rather than wandering across the roof
     for x in range(width):
-        put(x, 0, WALL)                      # ceiling
+        for y in range(0, CAGE_CEIL_Y + 1):
+            put(x, y, WALL)
         put(x, CELL_FLOOR_Y, WALL)           # cage floor / corridor ceiling
         put(x, CORRIDOR_FLOOR_Y, WALL)       # corridor floor
         for y in range(CORRIDOR_FLOOR_Y + 1, H):
@@ -99,8 +116,13 @@ def build_map(width):
     # the dividers between cages
     for i in range(len(TYPES) + 1):
         x = LEFT + i * PITCH - 1
-        for y in range(1, CELL_FLOOR_Y):
+        for y in range(CAGE_CEIL_Y + 1, CELL_FLOOR_Y):
             put(x, y, WALL)
+
+    # the spawn shaft: the player appears at tile 3 row 3 and drops into the
+    # corridor. Everything from the surface down to the corridor is opened.
+    for y in range(1, CORRIDOR_FLOOR_Y):
+        put(SPAWN_X, y, AIR)
 
     hdr = struct.pack('<6i', width, H, TILE_W, TILE_H, SHEET_C, SHEET_R)
     return hdr + struct.pack('<%dH' % (width * H), *t)
