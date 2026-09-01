@@ -408,27 +408,23 @@ const
   EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
   EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
 
-  { The type table's columns. Entity_Spawn copies each into the entity field
-    named beside it; TC_PAD is the one it skips. }
-  TC_ANIM_ID      = 0;    { -> EF_ANIM_ID    }
-  TC_HP           = 1;    { -> EF_HP,    and note 1 and 2 CROSS OVER }
-  TC_DEPTH        = 2;    { -> EF_DEPTH  }
-  TC_TOUCH_KIND   = 3;    { -> EF_TYPEF_0C .. +3, a run of four }
-  TC_PAD          = 7;    { never copied; zero in all 81 rows }
-  TC_NO_DROP      = 8;    { -> EF_NO_DROP .. +9, a run of ten }
-  TC_SCREEN_SPACE = 5;    { 1 = does not scroll with the map }
-  TC_CULL_OFFSCREEN = 10; { 1 = destroyed once Entity_IsOffScreen(e, 4) }
-  TC_TILE_OFS_X   = 16;   { -> EF_TILE_OFS_X/Y, runtime offsets, zero here }
-  TC_TILE_OFS_Y   = 17;
-  TYPE_COL_SCREEN_SPACE = 5;    { -> [$34] }
-  TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
-  TYPE_COL_UNUSED = 7;   { never copied, zero for all 81 types }
-  TYPE_COL_SOLID  = 15;  { -> int $3E, EF_SOLID }
-  TYPE_COL_DEPTH       = 2;   { -> [$23], the draw layer }
-  TYPE_COL_BOX_PCT_X   = 11;  { -> [$3A] }
-  TYPE_COL_BOX_PCT_Y   = 12;  { -> [$3B] }
-  TYPE_COL_INSET_PCT_X = 13;  { -> [$3C] }
-  TYPE_COL_INSET_PCT_Y = 14;  { -> [$3D] }
+  { The type table's 18 columns, in order, each named for the entity field
+    Entity_Spawn copies it into. }
+  TYPE_COL_ANIM_ID     = 0;   { -> EF_ANIM_ID; -1 means the type has no art }
+  TYPE_COL_HP          = 1;   { -> EF_HP    } { 1 and 2 CROSS OVER: the HP }
+  TYPE_COL_DEPTH       = 2;   { -> EF_DEPTH } { column lands in the depth field }
+  TYPE_COL_TOUCH_KIND  = 3;   { -> EF_TYPEF_0C, first of a run of four }
+  TYPE_COL_SCREEN_SPACE = 5;  { -> EF_SCREEN_SPACE; 1 = does not scroll }
+  TYPE_COL_UNUSED      = 7;   { never copied; zero in all 81 rows }
+  TYPE_COL_NO_DROP     = 8;   { -> EF_NO_DROP, first of a run of ten }
+  TYPE_COL_CULL_OFFSCREEN = 10; { -> EF_CULL_OFFSCREEN }
+  TYPE_COL_BOX_PCT_X   = 11;  { -> EF_BOX_PCT_X   }
+  TYPE_COL_BOX_PCT_Y   = 12;  { -> EF_BOX_PCT_Y   }
+  TYPE_COL_INSET_PCT_X = 13;  { -> EF_INSET_PCT_X }
+  TYPE_COL_INSET_PCT_Y = 14;  { -> EF_INSET_PCT_Y }
+  TYPE_COL_SOLID       = 15;  { -> EF_SOLID }
+  TYPE_COL_TILE_OFS_X  = 16;  { -> EF_TILE_OFS_X; a runtime offset, 0 here }
+  TYPE_COL_TILE_OFS_Y  = 17;  { -> EF_TILE_OFS_Y }
 
   EF_SCREEN_SPACE   = $34;
   EF_CULL_OFFSCREEN = $39;
@@ -1980,24 +1976,24 @@ begin
 
   { Then the type table is copied over those defaults. }
   T := EntityType(TypeId);
-  E^.Raw[EF_ANIM_ID]  := T.Raw[TC_ANIM_ID];
-  E^.Raw[EF_TYPEF_04] := T.Raw[TC_HP];
-  E^.Raw[EF_TYPEF_08] := T.Raw[TC_DEPTH];
+  E^.Raw[EF_ANIM_ID]  := T.Raw[TYPE_COL_ANIM_ID];
+  E^.Raw[EF_TYPEF_04] := T.Raw[TYPE_COL_HP];
+  E^.Raw[EF_TYPEF_08] := T.Raw[TYPE_COL_DEPTH];
   for I := 0 to 3 do
-    E^.Raw[EF_TYPEF_0C + I] := T.Raw[TC_TOUCH_KIND + I];
+    E^.Raw[EF_TYPEF_0C + I] := T.Raw[TYPE_COL_TOUCH_KIND + I];
   for I := 0 to 9 do
-    E^.Raw[EF_TYPEF_20 + I] := T.Raw[TC_NO_DROP + I];
+    E^.Raw[EF_TYPEF_20 + I] := T.Raw[TYPE_COL_NO_DROP + I];
 
   { An entity's EXTENTS come off its sprite every frame, and every collision
     box is built from those - so a spawn without one has no size and collides
-    with nothing. Three of the eighty-one types ask for TC_ANIM_ID = -1 and
+    with nothing. Three of the eighty-one types ask for TYPE_COL_ANIM_ID = -1 and
     are meant to be that way.
 
     A full sprite pool FAILS THE SPAWN, alive flag and all, which is what
     makes the pool size a hard limit rather than a guard. }
-  if (Sprites <> nil) and (T.Raw[TC_ANIM_ID] <> SPRITE_NONE) then
+  if (Sprites <> nil) and (T.Raw[TYPE_COL_ANIM_ID] <> SPRITE_NONE) then
   begin
-    I := Sprites.AllocSprite(T.Raw[TC_ANIM_ID]);
+    I := Sprites.AllocSprite(T.Raw[TYPE_COL_ANIM_ID]);
     if I = SPRITE_NONE then
     begin
       E^.Raw[EF_ALIVE] := 0;
