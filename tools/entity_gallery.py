@@ -43,15 +43,30 @@ nothing standing on their own.
 
 USAGE
 
-    python tools/entity_gallery.py "English Translated Version 1.1 (D)" out/gallery
-    src/akuji.exe out/gallery
+    python tools/entity_gallery.py --install "English Translated Version 1.1 (D)"
+    src/akuji.exe                       # run normally; the row is in every room
+    python tools/entity_gallery.py --restore "English Translated Version 1.1 (D)"
 
-Start a new game and walk right. The legend below tells you which tile holds
-which type; the order is also simply ascending, so counting works too.
+WHY IT INSTALLS IN PLACE
+
+The game does NOT take a data directory on the command line. FindGameData
+scans fixed paths relative to the executable; ParamStr(1) is read by the
+--selftest modes only. So writing a modified copy elsewhere and pointing the
+game at it does nothing - the copy is never loaded. It has to go into the
+directory the game already finds.
+
+Every ev*.dat is backed up to ev*.dat.orig on the first install and put back
+by --restore, so this is reversible and never destroys the shipped data.
+
+WHY EVERY STAGE
+
+A new game leaves Settings.CurrentStage at 0 and an event script decides where
+you actually end up, so predicting the room is unreliable. Appending the row
+to every stage means it is wherever you are. The stage's own events are KEPT -
+the row is appended, not substituted - so the game still plays normally.
 """
 
 import os
-import shutil
 import sys
 from collections import Counter
 
@@ -64,54 +79,68 @@ START_X = 6          # leave the player's spawn clear
 STEP_X = 1           # one tile apart; the screen is 10 tiles wide
 
 
-def main():
-    if len(sys.argv) < 3:
-        print(__doc__)
-        return 2
-    src, dst = sys.argv[1], sys.argv[2]
-    stage = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+def ev_files(gamedir):
+    d = os.path.join(gamedir, 'data')
+    return sorted(f for f in os.listdir(d)
+                  if f.startswith('ev') and f.endswith('.dat'))
 
-    ev = os.path.join(src, 'data', 'ev%03d.dat' % stage)
-    if not os.path.isfile(ev):
-        print('no such stage file: %s' % ev)
-        return 2
 
-    # Reuse a row the stage already puts entities on, so the floor is real.
-    ys = Counter()
-    for line in open(ev, encoding='latin-1'):
-        f = [c.strip() for c in line.split(',')]
-        if len(f) >= 5 and f[4].isdigit():
-            ys[int(f[4])] += 1
-    if not ys:
-        print('stage %d places nothing; pick another' % stage)
-        return 2
-    row_y = ys.most_common(1)[0][0]
+def install(gamedir):
+    d = os.path.join(gamedir, 'data')
+    n = 0
+    for name in ev_files(gamedir):
+        path = os.path.join(d, name)
+        orig = path + '.orig'
+        if not os.path.isfile(orig):
+            with open(path, 'rb') as fh:
+                open(orig, 'wb').write(fh.read())
+        # always rebuild from the pristine copy, so re-installing is idempotent
+        base = open(orig, encoding='latin-1').read().rstrip(chr(10))
 
-    if os.path.isdir(dst):
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
+        ys = Counter()
+        for line in base.split(chr(10)):
+            f = [c.strip() for c in line.split(',')]
+            if len(f) >= 5 and f[4].isdigit():
+                ys[int(f[4])] += 1
+        row_y = ys.most_common(1)[0][0] if ys else 8
 
-    out = []
-    legend = []
-    for i, t in enumerate(TYPES):
-        x = START_X + i * STEP_X
-        out.append('0,0000,0000,%04d,%04d,%04d-*,*' % (x, row_y, t))
-        legend.append((x, row_y, t))
-
-    with open(os.path.join(dst, 'data', 'ev%03d.dat' % stage), 'w',
-              encoding='latin-1') as fh:
-        fh.write('\n'.join(out) + '\n')
-
-    print('gallery written: %s' % dst)
-    print('stage %d, row y=%d, %d types from tile x=%d'
-          % (stage, row_y, len(TYPES), START_X))
-    print()
-    print('  run:  src/akuji.exe "%s"' % dst)
-    print('  then: new game, walk right')
+        rows = ['0,0000,0000,%04d,%04d,%04d-*,*' % (START_X + i * STEP_X,
+                                                    row_y, t)
+                for i, t in enumerate(TYPES)]
+        out = (base + chr(10) if base else '') + chr(10).join(rows) + chr(10)
+        open(path, 'w', encoding='latin-1').write(out)
+        n += 1
+    print('installed the gallery row into %d stages of %s' % (n, gamedir))
+    print('originals saved beside them as ev*.dat.orig')
     print()
     print('  tile x   type')
-    for x, y, t in legend:
-        print('  %6d   %d' % (x, t))
+    for i, t in enumerate(TYPES):
+        print('  %6d   %d' % (START_X + i * STEP_X, t))
+
+
+def restore(gamedir):
+    d = os.path.join(gamedir, 'data')
+    n = 0
+    for name in ev_files(gamedir):
+        path = os.path.join(d, name)
+        orig = path + '.orig'
+        if os.path.isfile(orig):
+            with open(orig, 'rb') as fh:
+                open(path, 'wb').write(fh.read())
+            os.remove(orig)
+            n += 1
+    print('restored %d stages of %s' % (n, gamedir))
+
+
+def main():
+    if len(sys.argv) < 3 or sys.argv[1] not in ('--install', '--restore'):
+        print(__doc__)
+        return 2
+    gamedir = sys.argv[2]
+    if not os.path.isdir(os.path.join(gamedir, 'data')):
+        print('no data/ under %s' % gamedir)
+        return 2
+    (install if sys.argv[1] == '--install' else restore)(gamedir)
     return 0
 
 
