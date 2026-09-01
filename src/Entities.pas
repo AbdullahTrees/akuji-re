@@ -456,29 +456,18 @@ const
   EF_DEBRIS_SPEEDS = 5;   { the burst is always five particles }
   EF_DEBRIS_TYPE   = $0D; { the type they are spawned as }
 
-  { The type table's 18 columns and where Entity_Spawn @ 0x004610C4 puts each.
-    TEntityType is a raw array, so this mapping lives nowhere else.
-
-        col  type+   entity int      col  type+   entity int
-        ---  -----   ----------      ---  -----   ----------
-         0   +0x00   [$05]            9   +0x24   [$38]
-         1   +0x04   [$24]           10   +0x28   [$39]
-         2   +0x08   [$23]           11   +0x2C   [$3A]
-         3   +0x0C   [$32]           12   +0x30   [$3B]
-         4   +0x10   [$33]           13   +0x34   [$3C]
-         5   +0x14   [$34]           14   +0x38   [$3D]
-         6   +0x18   [$35]           15   +0x3C   [$3E]
-         7   +0x1C   NOT COPIED      16   +0x40   [$3F]
-         8   +0x20   [$37]           17   +0x44   [$40]
-
-    Columns 1 and 2 CROSS OVER - 1 lands on [$24] and 2 on [$23]. That is the
-    original's, not a slip. Column 7 is dead: never copied, zero in all 81 rows.
-
-    Two are decoded: col 5 is SCREEN-SPACE (Entity_UpdateAll adds the layer
-    scroll only when it is 0, and it is set only for types 0..13, the
-    code-spawned ones), and col 10 is CULL WHEN OFF SCREEN. Columns 16 and 17
-    land on EF_TILE_OFS_X/Y, which is why they are zero throughout - they are
-    runtime offsets. }
+  { The type table's columns. Entity_Spawn copies each into the entity field
+    named beside it; TC_PAD is the one it skips. }
+  TC_ANIM_ID      = 0;    { -> EF_ANIM_ID    }
+  TC_HP           = 1;    { -> EF_HP,    and note 1 and 2 CROSS OVER }
+  TC_DEPTH        = 2;    { -> EF_DEPTH  }
+  TC_TOUCH_KIND   = 3;    { -> EF_TYPEF_0C .. +3, a run of four }
+  TC_PAD          = 7;    { never copied; zero in all 81 rows }
+  TC_RUN2_FIRST   = 8;    { -> EF_TYPEF_20 .. +9, a run of ten }
+  TC_SCREEN_SPACE = 5;    { 1 = does not scroll with the map }
+  TC_CULL_OFFSCREEN = 10; { 1 = destroyed once Entity_IsOffScreen(e, 4) }
+  TC_TILE_OFS_X   = 16;   { -> EF_TILE_OFS_X/Y, runtime offsets, zero here }
+  TC_TILE_OFS_Y   = 17;
   TYPE_COL_SCREEN_SPACE = 5;    { -> [$34] }
   TYPE_COL_CULL_OFFSCREEN = 10; { -> [$39] }
   TYPE_COL_UNUSED = 7;   { never copied, zero for all 81 types }
@@ -2050,14 +2039,13 @@ begin
 
   { Then the type table is copied over those defaults. }
   T := EntityType(TypeId);
-  E^.Raw[5]           := T.Raw[0];
-  E^.Raw[EF_TYPEF_04] := T.Raw[1];
-  E^.Raw[EF_TYPEF_08] := T.Raw[2];
+  E^.Raw[EF_ANIM_ID]  := T.Raw[TC_ANIM_ID];
+  E^.Raw[EF_TYPEF_04] := T.Raw[TC_HP];
+  E^.Raw[EF_TYPEF_08] := T.Raw[TC_DEPTH];
   for I := 0 to 3 do
-    E^.Raw[EF_TYPEF_0C + I] := T.Raw[3 + I];
-  { Table index 7 (+0x1C) is skipped - padding, zero in all 81 rows. }
+    E^.Raw[EF_TYPEF_0C + I] := T.Raw[TC_TOUCH_KIND + I];
   for I := 0 to 9 do
-    E^.Raw[EF_TYPEF_20 + I] := T.Raw[8 + I];
+    E^.Raw[EF_TYPEF_20 + I] := T.Raw[TC_RUN2_FIRST + I];
 
   { The sprite. Column 0 is the entity's initial anim id, and -1 means the
     type has no sprite at all - three of the eighty-one.
@@ -2071,9 +2059,9 @@ begin
     A full pool FAILS THE SPAWN, alive flag and all. That is the original's
     behaviour and it is why the pool size is a real limit rather than a
     guard. }
-  if (Sprites <> nil) and (T.Raw[0] <> SPRITE_NONE) then
+  if (Sprites <> nil) and (T.Raw[TC_ANIM_ID] <> SPRITE_NONE) then
   begin
-    I := Sprites.AllocSprite(T.Raw[0]);
+    I := Sprites.AllocSprite(T.Raw[TC_ANIM_ID]);
     if I = SPRITE_NONE then
     begin
       E^.Raw[EF_ALIVE] := 0;
