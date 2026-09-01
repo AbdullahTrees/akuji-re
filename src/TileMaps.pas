@@ -30,11 +30,10 @@ const
   MAP_HEADER_SIZE = 24;
 
 { Where a tile id's picture sits in its tileset - row-major, from Load_Map
-  @ 0x00466340. Here rather than inline because two unrelated things need
-  them: the drawing code below, and Stages.pas's terrain animation table. }
-{ Row-major over the tileset. Load_Map pushes these to TileMap_DefineTile Y
-  first, and the Rect builder takes that pair as (top, left) - so arg5 is the
-  top and arg6 the left, with no ambiguity. }
+  @ 0x00466340, which pushes them to TileMap_DefineTile Y first and whose Rect
+  builder takes that pair as (top, left). Here rather than inline because two
+  unrelated things need them: the drawing code below, and Stages.pas's terrain
+  animation table. }
 function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
 function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
 
