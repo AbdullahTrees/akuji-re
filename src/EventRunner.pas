@@ -1,48 +1,37 @@
-{ EventRunner - the event script machinery, as running code.
-
-  EventScripts.pas reads the table and EventCommands.pas parses the little
-  language. Neither of them RUNS anything: until now the interpreter existed
-  only as prose. This is the machinery itself, translated one function at a
-  time from:
+{ EventRunner - the event script machinery, as running code. EventScripts.pas
+  reads the table and EventCommands.pas parses the little language; this runs
+  it, translated from:
 
       0x00454EF4  Event_Begin              start a script
       0x0045509C  EventScript_AdvanceStep  move to the next step
       0x00455210  EventScript_Execute      run the current one, per frame
       0x00454790  Events_SpawnNearCamera   decide what exists at all
 
-  ## The shape of it
-
   A record's ParamB is a program. Event_Begin splits it on '/' into STEPS and
   hands the first to AdvanceStep. Each step is split on '.' into ALTERNATIVES,
-  and exactly one of those runs - the LAST one whose guard flag is set, because
-  the scan goes backwards. That is why a `0000-` alternative is written first:
-  flag 0 is always set, so it is the default the scan reaches last.
+  and exactly one runs - the LAST one whose guard flag is set, because the scan
+  goes backwards. That is why a `0000-` alternative is written first: flag 0 is
+  always set, so it is the default the scan reaches last.
 
   While a script runs the game sits in GS_STATE_140 rather than GS_PLAY, and
   Event_Begin refuses to start a second one while it is there. Running off the
   end of the steps puts the game back into GS_PLAY.
 
-  ## Progress[1..4] are SCRATCH, and Progress[3] is the dialogue answer
-
-  Event_Begin clears exactly those four bytes every time a script starts. They
-  are an event's local variables: no shipped record SETS one, and clearing them
-  on entry is what stops one event seeing the last one's.
-
-  What they are FOR is legible in the data, and this once read "nothing in the
-  692 records reads or writes them", which was wrong. 86 alternatives guard on
-  a scratch flag, and all 86 guard on flag 3 specifically. Every one of them
-  has a dialogue step earlier in its own program whose line ends in \w - the
-  yes/no prompt. So Progress[3] is where the player's ANSWER goes, and a
-  guarded step is the yes branch. The Devil Statue is the whole idea in one
-  record, identical in all 43 stages that have one:
+  PROGRESS[1..4] ARE SCRATCH - an event's local variables, cleared by
+  Event_Begin every time a script starts so one event cannot see the last
+  one's. Progress[3] is the dialogue ANSWER: all 86 alternatives in the shipped
+  data that guard on a scratch flag guard on 3, and every one has an earlier
+  dialogue step whose line ends in \w, the yes/no prompt. So a guarded step is
+  the yes branch. The Devil Statue is the whole idea in one record, identical
+  in all 43 stages that have one:
 
       0000-03-0000/0003-13/0003-03-0001
 
   ask, save if yes, say so if yes. --selftest-runner drives it both ways.
 
-  Flags 1 and 2 really are untouched by the shipped data. What writes them is
-  sub-op 6, which no event uses - a cut comparison feature whose plumbing is
-  all still here. Flag 4 is written by nothing at all. }
+  Flags 1 and 2 are untouched by the shipped data - they belong to sub-op 6,
+  a cut comparison feature whose plumbing is all still here. Flag 4 is written
+  by nothing at all. }
 
 unit EventRunner;
 
@@ -95,22 +84,19 @@ type
     function FadeBusy: Boolean; virtual;
   end;
 
-  { The interpreter's state. In the original these are six loose globals; they
-    are gathered here because they are one thing, and because a test wants to
-    make one without disturbing the game's.
+  { The interpreter's state - six loose globals in the original, gathered so a
+    test can make one without disturbing the game's.
 
         0x0046D24C  the steps array        0x0046D334  which step
         0x0046CE7C  which event            0x0046D028  the delay it began with
         0x0046D218  the cursor within a step
-        0x0046D334  the STEP INDEX. EventScript_AdvanceStep increments it and
-                    compares it against DynArrayHigh(steps), and Event_Begin
-                    seeds it to -1 so the first increment lands on 0. It was
-                    recorded as "the save slot cursor", which it is not.
-        0x0046CC14  ScreenPhase - the SAME global the pause menu, the game-over
-                    screen, the ending and the message box step through. This
-                    unit kept a separate `Waiting` field for it, so a step
-                    boundary cleared one copy and every other screen read the
-                    other. AdvanceStep clears it as its FIRST statement. }
+
+    The step index is seeded to -1 by Event_Begin, so the first increment lands
+    on 0. There is deliberately NO wait flag here: the interpreter waits on
+    GameState.ScreenPhase, the same global the pause menu, the game-over
+    screen, the ending and the message box step through, and AdvanceStep
+    clears it as its first statement. A private copy would leave every other
+    screen reading the other one. }
   TEventRunner = class
   public
     Steps: array of string;
@@ -317,10 +303,8 @@ end;
   checker with Event_Begin(i, 4), so a checker re-runs four frames later - which
   is how a puzzle that is not yet solved keeps testing itself.
 
-  Arg was being STORED and never counted, and the field comment above already
-  said what it was for. Re-entry is safe because StartEvent refuses while the
-  state is 140, exactly as Event_Begin's own guard does, so at most one of them
-  takes. }
+  Re-entry is safe because StartEvent refuses while the state is 140, exactly
+  as Event_Begin's own guard does, so at most one of them takes. }
 procedure TEventRunner.TickDelay(Events: TEventScript; var P: TPlayerState;
                                  var AGameState: Integer);
 var
@@ -448,25 +432,11 @@ begin
       end;
 
     SUBOP_DIALOGUE:
-      { RAISE IT ONCE, and the guard is the MESSAGE MODE - not ScreenPhase.
-        0x00455210's arm is
-
-            case 3:
-              if (*PTR_DAT_0046cf28 == 0)          <- the message mode
-                  *PTR_DAT_0046cf28 = 1;
-                  *PTR_DAT_0046cc98 = 1;           page start
-                  *PTR_DAT_0046cf24 = 1;           reveal cursor
-                  ...set the text...
-
-        This used ScreenPhase as its one-shot, and ScreenPhase is shared with
-        the pause menu, the game-over screen and - fatally - the message box's
-        own \k page turn, which clears it exactly as the original does. So
-        turning a page re-armed the guard, and EventScript_Execute runs EVERY
-        FRAME in state 140: page 1 was re-raised forever and the rest of the
-        message was unreachable. Reported on tk013's two-page 'Your Fire has
-        increased!'.
-
-        The box itself decides when it is done and calls AdvanceStep. }
+      { RAISE IT ONCE, and the one-shot guard must be the MESSAGE MODE at
+        0x0046CF28 - never ScreenPhase. Execute runs every frame in state 140,
+        and the message box's own \k page turn clears ScreenPhase, so a guard
+        on that re-raises page 1 forever and the rest of the message is
+        unreachable. The box decides when it is done and calls AdvanceStep. }
       if not Host.MessageBusy then
         Host.ShowLine(StepArg(Step, Op, 0));
 
@@ -571,11 +541,8 @@ begin
         door opens - and the '0' form is a switch that must be left alone.
 
         The two leading fields go through ArgPosition like every other
-        argument. That was not true when this was first written: ArgPosition
-        returned False for sub-op 15, so the count came back 0, the loop never
-        ran, and the test vacuously passed - it set flag 0, which is already 1
-        and always will be. Nothing observable happened, which is exactly the
-        kind of defect a test that only checks "no crash" cannot see. }
+        argument. A count that comes back 0 makes the test pass VACUOUSLY and
+        set flag 0, which is already 1 - so a failure here is silent. }
       begin
         Count := StepArg(Step, Op, 1);
         Ok := True;
@@ -618,33 +585,16 @@ begin
       end;
 
     SUBOP_SOUL_GET:
-      { NO AdvanceStep - and that is the whole point of this opcode.
+      { NO AdvanceStep, and DO NOT ADD ONE. Every other opcode hands the script
+        on; this one TAKES OVER. The arm at 0x00455E5A..0x00455FC6 contains no
+        call to EventScript_AdvanceStep @ 0x0045509C - the two nearest calls
+        bracket it without entering.
 
-        Sub-op 0x50 in EventScript_Execute @ 0x00455210 spans
-        0x00455E5A..0x00455FC6 and contains no call to EventScript_AdvanceStep
-        @ 0x0045509C. Ghidra's xrefs to that address list every call site in
-        the function - 00455246, 004557DC, 0045581E, 00455889, 004558E0,
-        00455917, 00455964, 004559BF, 00455B00, 00455BEC, 00455C8E, 00455DA5,
-        00455E04, 00455E50, 00455FC8 - and the two nearest bracket the arm
-        without entering it: 00455E50 is before it and 00455FC8 belongs to
-        sub-op 99.
-
-        Every other opcode hands the script on. This one TAKES OVER. Because
-        the step index never moves, the arm is re-entered every frame while
-        the state is GS_STATE_140 - GameSession.TickScript calls Execute
-        unconditionally in that state - and it walks itself through three
-        phases, ending in GS_ENDING rather than in the script at all. Nothing
-        is left to advance to.
-
-        Host.SoulGet holds those phases (TDialogueBox.SoulGet), in the
-        original's 1-0-2 test order.
-
-        THE BUG THIS FIXES: an AdvanceStep used to sit here, so the script
-        moved on during the very first frame. SoulGet ran phase 0 - sound
-        0x10, playlist entry 11 not looping, and the orb destroyed - and was
-        then never called again. Phases 1 and 2 never ran, so there was no
-        fade-out, no GS_ENDING and no credits; the fanfare played, the orb
-        vanished, and the game carried on as normal. }
+        Because the step index never moves, Execute re-enters this arm every
+        frame in GS_STATE_140, and Host.SoulGet walks itself through three
+        phases into GS_ENDING. There is nothing to advance TO. Advance here and
+        SoulGet runs phase 0 once - fanfare, orb destroyed - and is never called
+        again: no fade, no credits, and the game just carries on. }
       Host.SoulGet;
 
     SUBOP_NOP:
