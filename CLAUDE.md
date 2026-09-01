@@ -234,9 +234,23 @@ something contradicted it:
 **Keep:** an address, a measured constant, why an apparent bug is deliberate,
 a hazard invisible at the call site, how to re-check a claim.
 
-**A comment pass is safe.** `tools/audited.py` strips `{ }`, `(* *)` and `//`
-before fingerprinting, so editing prose cannot trip the freeze gate - and if
-code is touched by accident, the gate fails. Trim freely; run `tools/check.sh`.
+**Deleting is the second choice, not the first.** A comment pass is not a
+comment CULL. Read each comment and ask *is this discernible from the code?*
+
+- **Yes** - delete it. `Camera.pas`'s header restated the dead-zone bounds that
+  `DEADZONE_LEFT/RIGHT/TOP/BOTTOM` already name twenty lines below.
+- **No** - the comment is there because the code is not saying it. **Change the
+  code.** Name the constant, rename the variable, extract the helper. Only when
+  that genuinely cannot carry the fact (an address, a measurement, a hazard) does
+  it stay as prose. `Entities.pas` described the type table's 18 columns in 23
+  lines because `Entity_Spawn` read them as `T.Raw[0]`, `T.Raw[3 + I]`; naming
+  the columns deleted the table and improved the code in one move.
+
+Deleting an undiscernible comment does not tidy the file, it loses the fact.
+
+`tools/audited.py` strips `{ }`, `(* *)` and `//` before fingerprinting, so pure
+prose edits cannot trip the freeze gate. Edits that change code CAN - check
+`notes/audited.md` first, and run `tools/check.sh` either way.
 
 ## 3b. Working rule: write the code as you read the disassembly
 

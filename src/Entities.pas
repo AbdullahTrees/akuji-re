@@ -134,29 +134,6 @@ const
   DROP_TIMER     = 30;
   DROP_LIFT      = -96;   { EF_VEL_Y, so it pops upward before falling }
 
-  { --- Entity_Destroy @ 0x00461400 --------------------------------------
-    Far more than "mark the slot free". It settles debts in four directions,
-    and two of them corroborate fixes made elsewhere from the other side:
-
-      class 4  decrements Entities[ THIS ENTITY'S int 1 ].int $15. Int 1 is
-               the owner slot and $15 is that owner's live shot count - which
-               is exactly what the Player.pas audit concluded when it moved
-               PF_OWNER from $04 to $01 and put the projectile lifetime in
-               $14. A projectile dying gives its owner a shot back.
-
-      class 5  destroys its two children, EF_CHILD_A and EF_CHILD_B, which is
-               what those fields were named for before this function was read.
-
-      class 7  scatters a kind-2 debris burst, but only on a loot-bearing
-               destroy.
-
-    The loot itself is gated on type table column 8 being zero, so that column
-    is a NO DROP flag.
-
-    Then the event bookkeeping, which matches what EventScripts.pas worked out
-    from the data: opcode 7 fires the event, opcode 5 sets the progress flag
-    named by ParamB's first four characters, and either way the event's "an
-    entity for this exists" byte is cleared so it can spawn again. }
   DESTROY_CLASS_PROJECTILE = 4;
   DESTROY_CLASS_PARENT     = 5;
   DESTROY_CLASS_SHATTER    = 7;
@@ -167,32 +144,7 @@ const
   EVENT_OPCODE_FLAG    = 5;
   EVENT_BEGIN_FROM_DESTROY = 4;
 
-  { --- Entity_SolidCollideX/Y @ 0x00456B4C / 0x00456E0C -----------------
-    Entity-versus-entity blocking, and the pair is NOT symmetric.
-
-    SOFTNESS IS PER AXIS. With SkipSoft set, the X sweep ignores EF_SOLID
-    kind 1 and the Y sweep ignores kind 2 - so kind 1 blocks vertically only
-    and kind 2 horizontally only, which is what "EF_SOLID is a kind" meant.
-    With SkipSoft clear both kinds block on both axes.
-
-    Y HAS NO ZERO-DELTA GUARD. The X sweep does nothing when Delta is 0; the
-    Y sweep runs anyway, which is how an entity standing still on a platform
-    keeps being told it is standing on one.
-
-    LANDING ON TOP ALSO SETS PushX. When the subject comes down onto a solid
-    within SOLID_TOP_TOLERANCE, the Y sweep writes the horizontal offset
-    between the two - INCLUDING this frame's layer scroll - into PushX as well
-    as the vertical push. That is the riding mechanic: it is what carries a
-    rider along with a moving platform, and it is the reason PushX is read
-    after a Y collision at all.
-
-    The air dash phases through anything whose EF_VULN_KIND is $5C, which is
-    the same fact Player_UpdateAirDash was written from - the two agree from
-    opposite directions.
-
-    Only slot 0 - the player - can fire the push-against events, opcode 2
-    while holding the axis into the solid and opcode 3 on confirm. The X sweep
-    reads the X axis for that and the Y sweep reads the Y axis. }
+  PLAYER_SLOT = 0;       { the player always occupies pool slot 0 }
   SOLID_SOFT_IN_X = 1;   { skipped by the X sweep when SkipSoft }
   SOLID_SOFT_IN_Y = 2;   { skipped by the Y sweep when SkipSoft }
   SOLID_PHASE_VULN = $5C;    { the air dash goes through these }
@@ -463,7 +415,7 @@ const
   TC_DEPTH        = 2;    { -> EF_DEPTH  }
   TC_TOUCH_KIND   = 3;    { -> EF_TYPEF_0C .. +3, a run of four }
   TC_PAD          = 7;    { never copied; zero in all 81 rows }
-  TC_RUN2_FIRST   = 8;    { -> EF_TYPEF_20 .. +9, a run of ten }
+  TC_NO_DROP      = 8;    { -> EF_NO_DROP .. +9, a run of ten }
   TC_SCREEN_SPACE = 5;    { 1 = does not scroll with the map }
   TC_CULL_OFFSCREEN = 10; { 1 = destroyed once Entity_IsOffScreen(e, 4) }
   TC_TILE_OFS_X   = 16;   { -> EF_TILE_OFS_X/Y, runtime offsets, zero here }
@@ -1522,7 +1474,7 @@ procedure TEntityWorld.MaybePushEvent(Slot, Blocker, Axis: Integer);
 var
   EventId, Op: Integer;
 begin
-  if Slot <> 0 then
+  if Slot <> PLAYER_SLOT then     { only the player can push against a solid }
     Exit;
   EventId := Pool.Entity(Blocker)^.Raw[EF_EVENT_ID];
   Op := EventOpcode(EventId);
@@ -2045,7 +1997,7 @@ begin
   for I := 0 to 3 do
     E^.Raw[EF_TYPEF_0C + I] := T.Raw[TC_TOUCH_KIND + I];
   for I := 0 to 9 do
-    E^.Raw[EF_TYPEF_20 + I] := T.Raw[TC_RUN2_FIRST + I];
+    E^.Raw[EF_TYPEF_20 + I] := T.Raw[TC_NO_DROP + I];
 
   { The sprite. Column 0 is the entity's initial anim id, and -1 means the
     type has no sprite at all - three of the eighty-one.
