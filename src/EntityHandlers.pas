@@ -151,11 +151,11 @@ const
     the constant under test, which is what the old check did. The extent is now
     checked against the neighbouring pointer instead. }
 
-  ITEM_VARIANTS = 2;
-  ITEM_FRAMES   = 4;
-  ITEM_SPRITE_TABLE_ADDR = $0046BDA0;
-  ITEM_SPRITE_TABLE_PTR  = $0046CBA0;
-  ITEM_SPRITES: array[0..ITEM_VARIANTS - 1, 0..ITEM_FRAMES - 1] of Integer = (
+  MANA_VARIANTS = 2;
+  MANA_FRAMES   = 4;
+  MANA_SPRITE_TABLE_ADDR = $0046BDA0;
+  MANA_SPRITE_TABLE_PTR  = $0046CBA0;
+  MANA_SPRITES: array[0..MANA_VARIANTS - 1, 0..MANA_FRAMES - 1] of Integer = (
     ( 71,  72,  73,  72),
     (118, 119, 120, 119));
 
@@ -221,8 +221,8 @@ const
 
   { The one-shot drop applied on the first update, in 1/32 pixel - five pixels.
     Events place things on a tile boundary and this settles them onto it. }
-  ITEM_SETTLE_DROP = $A0;
-  ITEM_FRAME_TICKS = 4;   { advance when the timer EXCEEDS this, so every 5 }
+  MANA_SETTLE_DROP = $A0;
+  MANA_FRAME_TICKS = 4;   { advance when the timer EXCEEDS this, so every 5 }
 
   { Slots this handler uses. int 5 is the drawn sprite id, the same slot
     Player_Update writes - it is entity-wide, not the player's. int 6 is the
@@ -2539,15 +2539,26 @@ const
 function EntityUpdateDying(var E: TEntity; AGameState: Integer;
                            World: TEntityWorld): Boolean;
 
-{ 0x0045A3E0. An animated pickup: four frames on a five-frame cycle, and a
-  one-shot settle downward the first time it updates.
+{ 0x0045A3E0. THE MANA STONE - the collectible the HUD counter counts.
+
+  Identified two ways that agree. In the game it is the pickup the player
+  gathers, confirmed on screen; and in the data its type-table column 3 is 2,
+  which is TOUCH_KIND_MANA, so Entity_PlayerTouch routes it to
+  Entity_TouchPickup @ 0x00458274 - the routine this file has always called
+  "the Mana Stone". Types 24 and 25 use touch kind 3 and are something else.
+
+  It is also by far the most placed collectible: 122 records over 32 stages,
+  every one opcode 9, and its GET popup is type 26.
+
+  An animated pickup: four frames on a five-frame cycle, and a one-shot settle
+  downward the first time it updates.
 
   It animates ONLY while GameState is GS_PLAY, so items freeze during an event
   script or a pause rather than continuing behind the dialogue box. It does not
   call Entity_UpdateDying and has no touch handling of its own - what happens
   when the player walks into it is decided by EF_TOUCH_KIND from the type table,
   in Entity_PlayerTouch. }
-procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
+procedure EntityUpdate_Type14_ManaStone(var E: TEntity; AGameState: Integer);
 
 { 0x00458274. The Mana Stone. The counter climbs by the entity's variant, and
   when it reaches MANA_TARGETS[TargetIndex] the player gains a life of maximum
@@ -8554,7 +8565,7 @@ begin
   end;
 end;
 
-procedure EntityUpdate_Type14(var E: TEntity; AGameState: Integer);
+procedure EntityUpdate_Type14_ManaStone(var E: TEntity; AGameState: Integer);
 var
   Variant, Frame: Integer;
 begin
@@ -8582,28 +8593,28 @@ begin
     That is the corroboration from the other side, and it is worth more than
     either half: the table's extent says two rows, and the placement data
     independently uses two. Frame needs no such argument - only the line
-    below writes it, mod ITEM_FRAMES. }
+    below writes it, mod MANA_FRAMES. }
   { DIVERGENCE DIV-011: the original does not check. }
-  if (Variant < 0) or (Variant >= ITEM_VARIANTS) then
+  if (Variant < 0) or (Variant >= MANA_VARIANTS) then
     Variant := 0;
-  if (Frame < 0) or (Frame >= ITEM_FRAMES) then
+  if (Frame < 0) or (Frame >= MANA_FRAMES) then
     Frame := 0;
-  E.Raw[EF_ANIM_ID] := ITEM_SPRITES[Variant][Frame];
+  E.Raw[EF_ANIM_ID] := MANA_SPRITES[Variant][Frame];
 
   if E.Raw[EF_STATE] = 0 then
   begin
     E.Raw[EF_STATE] := 1;
-    E.Raw[EF_POS_Y] := E.Raw[EF_POS_Y] + ITEM_SETTLE_DROP;
+    E.Raw[EF_POS_Y] := E.Raw[EF_POS_Y] + MANA_SETTLE_DROP;
   end;
 
   if AGameState <> GS_PLAY then
     Exit;
 
   Inc(E.Raw[EF_BLOCK_B]);
-  if E.Raw[EF_BLOCK_B] > ITEM_FRAME_TICKS then
+  if E.Raw[EF_BLOCK_B] > MANA_FRAME_TICKS then
   begin
     E.Raw[EF_BLOCK_B] := 0;
-    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod ITEM_FRAMES;
+    E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod MANA_FRAMES;
   end;
 end;
 
@@ -8730,7 +8741,7 @@ procedure EntityRunHandler(var E: TEntity; var P: TPlayerState;
 begin
   case E.Raw[EF_TYPE] of
     1:  PlayerUpdate(E, P, L, Inp, World, AGameState);
-    14: EntityUpdate_Type14(E, AGameState);
+    14: EntityUpdate_Type14_ManaStone(E, AGameState);
     24: EntityUpdate_Type24(E, AGameState, World);
     25: EntityUpdate_Type25(E);
     27: EntityUpdate_Type27(E, AGameState);

@@ -2951,15 +2951,15 @@ begin
 
       { Type 14's item table, 16 variants x 4 frames, read back the same way. }
       Bad := 0;
-      SetLength(Table, ITEM_VARIANTS * ITEM_FRAMES);
-      Exe.Position := ITEM_SPRITE_TABLE_ADDR - DATA_VA_BIAS;
-      Exe.ReadBuffer(Table[0], ITEM_VARIANTS * ITEM_FRAMES * SizeOf(Integer));
-      for I := 0 to ITEM_VARIANTS - 1 do
-        for J := 0 to ITEM_FRAMES - 1 do
-          if Table[I * ITEM_FRAMES + J] <> ITEM_SPRITES[I][J] then
+      SetLength(Table, MANA_VARIANTS * MANA_FRAMES);
+      Exe.Position := MANA_SPRITE_TABLE_ADDR - DATA_VA_BIAS;
+      Exe.ReadBuffer(Table[0], MANA_VARIANTS * MANA_FRAMES * SizeOf(Integer));
+      for I := 0 to MANA_VARIANTS - 1 do
+        for J := 0 to MANA_FRAMES - 1 do
+          if Table[I * MANA_FRAMES + J] <> MANA_SPRITES[I][J] then
             Inc(Bad);
       Log.Add(Format('type 14 item table at 0x%.6X:            %d of %d wrong',
-        [ITEM_SPRITE_TABLE_ADDR, Bad, ITEM_VARIANTS * ITEM_FRAMES]));
+        [MANA_SPRITE_TABLE_ADDR, Bad, MANA_VARIANTS * MANA_FRAMES]));
       Inc(Result, Bad);
     end;
   finally
@@ -4735,7 +4735,7 @@ end;
 
   This exists because of a real defect. Type 14's table was recorded as sixteen
   rows of four and it is TWO, and the old check could not see it: it read
-  ITEM_VARIANTS * ITEM_FRAMES ints out of akuji.exe and compared them, so the
+  MANA_VARIANTS * MANA_FRAMES ints out of akuji.exe and compared them, so the
   length it verified was the very constant under test. Shrinking sixteen to two
   makes it read eight values instead of sixty-four, and it passes either way.
 
@@ -4932,8 +4932,8 @@ begin
     end;
 
     Bad := 0;
-    CheckTable('type 14', ITEM_SPRITE_TABLE_PTR, ITEM_SPRITE_TABLE_ADDR,
-               ITEM_VARIANTS * ITEM_FRAMES);
+    CheckTable('type 14', MANA_SPRITE_TABLE_PTR, MANA_SPRITE_TABLE_ADDR,
+               MANA_VARIANTS * MANA_FRAMES);
     CheckTable('type 24', ITEM24_TABLE_PTR, ITEM24_TABLE_ADDR, ITEM24_VARIANTS);
     CheckTable('type 24 beat', ITEM24_BEAT_PTR, ITEM24_BEAT_ADDR,
                ITEM24_BEAT_FRAMES);
@@ -4948,7 +4948,7 @@ begin
       nothing checks. }
     Bad := 0;
     Swept := 0;
-    Pin('type 14 sprites', ITEM_SPRITE_TABLE_ADDR, 8, @ITEM_SPRITES[0][0], 8);
+    Pin('type 14 sprites', MANA_SPRITE_TABLE_ADDR, 8, @MANA_SPRITES[0][0], 8);
     Pin('type 24 sprites', ITEM24_TABLE_ADDR, 16, @ITEM24_SPRITES[0], 16);
     Pin('type 24 beat', ITEM24_BEAT_ADDR, 2, @ITEM24_BEAT_SPRITES[0], 2);
     Pin('type 25 sprites', ITEM25_TABLE_ADDR, 3, @ITEM25_SPRITES[0], 3);
@@ -6547,7 +6547,7 @@ begin
     { The dispatcher's arms actually reach the handlers they name. Every other
       check of types 24 and 25 calls them DIRECTLY, so a case arm wired to the
       wrong handler goes unnoticed - and one did, until this was added: pointing
-      type 25's arm at EntityUpdate_Type14 survived the whole suite. }
+      type 25's arm at EntityUpdate_Type14_ManaStone survived the whole suite. }
     Pool.Clear;
     Place($21, 25, SPRITE_NONE, 160, 120);
     Pool.Entity($21)^.Raw[EF_VARIANT] := 2;
