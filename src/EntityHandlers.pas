@@ -1416,63 +1416,18 @@ const
   T57_V3_HATCHLING_HP = 8;
   T57_V3_HATCHLING_DEPTH = 5;
 
-  { --- Types 61 and 62 --------------------------------------------------
-    TYPE 61 hovers until you get close and then runs AWAY from you. That is
-    not a slip in the transcription - the acceleration is
+  { TYPE 61 runs AWAY from you, and the argument order below is how:
 
         Compare(player.x, self.x) * 4
 
-    and Compare(A, B) is the sign of B - A, so this is the sign of
-    self.x - player.x: positive when the critter is to the RIGHT of the
-    player, which accelerates it further right. Every other chaser in the
-    game writes Compare(self.x, player.x). Reproduced as written.
+    Compare(A, B) is the sign of B - A, so this is the sign of self.x -
+    player.x, accelerating it further from the player. Every other chaser in
+    the game writes the arguments the other way round. It is not a
+    transcription slip - type 67 flees an egg with the identical expression,
+    and two binaries agree byte for byte here (tools/bindiff.py).
 
-    THREE INDEPENDENT LINES SAY THIS IS RIGHT, and they are worth listing
-    because it looks so much like a transcription slip:
-
-      * the disassembly, read twice before it was written down
-      * type 67 at 0x0045E714 uses the identical expression to flee after
-        laying an egg, where fleeing is unmistakably the intent
-      * someone who has PLAYED the game remembers a monster that runs away
-
-    That last one is the only evidence here that comes from outside the
-    binary, which is exactly what a reading like this needs. Two binaries
-    also agree byte for byte on this function - see tools/bindiff.py - so it
-    is not a translator's patch either.
-
-    It also zeroes its OWN EF_HP whenever its box overlaps the player's at
-    1x1, at the very end of the handler and in BOTH states - so catching it
-    is what kills it.
-
-    Its idle is another heading-as-oscillator, this one stepping a QUARTER
-    turn a frame, so DirVelX runs 32, 0, -32, 0 and it sways over four
-    frames. Type 52's circle uses the same quarter step.
-
-    Its wake box is 6x2 - wide and flat, so it notices you from across the
-    room but not from above.
-
-    TYPE 62 walks a platform like type 60, with the same wall-and-ledge
-    double probe, and rewrites its own EF_VULN_KIND EVERY FRAME from the
-    geometry:
-
-        2 when it is moving TOWARDS the player, 1 otherwise
-
-    Type 50 changes its own vulnerability too, but as part of an animation.
-    This one recomputes it from where you are standing, which makes it the
-    only enemy whose weak side depends on your position rather than its own
-    state.
-
-    Its opening move is an offset BACKWARDS along its line of travel:
-
-        POS_X += Compare(VEL_X, 0) * 0x400 * EF_VARIANT
-
-    and Compare(VEL_X, 0) is -sign(VEL_X), so a group of them placed on one
-    spot with variants 0, 1, 2 ... spreads into a column 32 pixels apart, all
-    marching the same way. The variant is a rank in a queue.
-
-    EF_CHILD_A is a freeze counter - while it is non-zero the walker does not
-    move and the counter runs down instead. Nothing in this handler ever sets
-    it, so whatever freezes a type 62 is somewhere else. }
+    It also zeroes its OWN EF_HP wherever its box overlaps the player's, in
+    both states, so catching it is what kills it. }
   T61_FRAMES = 2;  T61_TICKS = 2;
   T61_TABLE_ADDR = $0046C368;
   T61_SPRITES: array[0..3] of Integer = (175, 176, 177, 178);
@@ -1500,8 +1455,14 @@ const
   T62_SPEED_ADDR = $0046C394;
   T62_SPEED: array[0..2] of Integer = (1, 2, 4);
   T62_SPEED_SCALE = $10;
-  T62_RANK_STEP = $400;     { 32 px per variant, BACKWARDS along its travel }
+  { Backwards along its own line of travel, so a stack of them placed on one
+    spot with variants 0, 1, 2... spreads into a column all marching the same
+    way. The variant is a rank in a queue. }
+  T62_RANK_STEP = $400;
   T62_LEDGE_PROBE = $400;
+  { Rewritten EVERY FRAME from the geometry. Type 50 also changes its own
+    vulnerability, but as part of an animation; this is the only enemy whose
+    weak side depends on where the PLAYER is standing. }
   T62_VULN_AWAY = 1;
   T62_VULN_TOWARDS = 2;
 
@@ -2523,7 +2484,8 @@ procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DA28. Sways until you get near, then runs away. See the T61_
+{ 0x0045DA28. Sways a quarter turn a frame until you get near, then runs
+  away. See the T61_
   block, and note that the acceleration really is away from the player. }
 procedure EntityUpdate_Type61(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
