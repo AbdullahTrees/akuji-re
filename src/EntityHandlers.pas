@@ -5,107 +5,11 @@
   disassembly - see CLAUDE.md section 3a for why that ordering is the rule
   rather than a preference.
 
-  Each handler carries the address it came from. That address is not decoration:
-  tools/coverage.py reads it, and it is the thing to re-decompile against when
-  auditing this file.
-
-  Handlers translated so far:
-
-      0x004615A8  Entity_UpdateDying - the shared guard, not a handler
-      0x0045A3E0  type 14  animated pickup
-      0x0045A43C  type 24  bobbing pickup, sixteen variants
-      0x0045A4F0  type 25  static scenery - the smallest handler in the game
-      0x0045A540  type 27  the save point
-      0x00458274  Entity_TouchPickup - the Mana Stone
-      0x00458490  Entity_TouchHeal
-      0x00458404  Entity_TouchLife
-      0x00458138  Player_TakeDamage
-      0x00457880  Entity_PlayerTouch - the dispatcher over all seven kinds
-      0x00457AB4  Entity_TakeProjectileHits
-      0x0045A5D4  type 32  the invisible emitter
-      0x0045A698  type 33  the explosion it spawns
-      0x0045A7BC  type 36  the falling item a kill drops
-      0x0045A944  type 16  the sign
-      0x0045AA60  type 22  a one-sprite entity that can die
-      0x0045A0E4  type 8   the four-frame puff a move leaves behind
-      0x0045A50C  type 26  the pickup's rising GET
-      0x00459EB4  type 3   a moving three-frame puff, sprite row by heading
-      0x00459F1C  type 4   two frames, then gone
-      0x00459F6C  type 5   an effect that hangs off another entity
-      0x0045A020  type 6   the explosion's spark
-      0x0045A08C  type 7   four frames in one of two rows
-      0x0045A120  type 9   a particle that circles
-      0x0045A184  type 10  six frames, then gone
-      0x0045A1C0  type 11  a four-frame loop that never ends
-      0x0045A20C  type 12  the same, slower
-      0x0045A24C  type 13  debris - four states, four motions
-      0x0045A95C  type 15  a switch, thrown once
-      0x0045A9D4  type 17  nothing at all
-      0x0045A9D0  type 19  nothing at all
-      0x0045AA10  type 21  an oscillating platform
-      0x0045AA78  type 23  a torch, and the two flames it holds
-      0x0045A580  type 28  four frames, gated on its variant
-      0x0045AB64  type 29  an idle that speeds up when the player is close
-      0x0045ABD8  type 30  a patroller, and the first thing that reads
-                           DIFFICULTY
-      0x0045AC94  type 31  a floating attacker with a six-state machine
-      0x0045A848  type 37  something that drops, lands and lies there
-      0x0045AF2C  type 34  type 31's shot
-      0x0045AFA8  type 35  type 31's telegraph - and what moves it to state 4
-      0x00459A0C  type 2   the PLAYER'S SHOT
-      0x0045B0CC  type 38  a turret, and the second thing to use a child as
-                           its own state machine
-      0x0045B260  type 39  its shot, which charges before it flies
-      0x0045B3EC  type 40  a springboard - the first thing that writes to the
-                           PLAYER
-      0x0045B62C  type 41  a hopper
-      0x0045B7C4  type 42  a boss - six states, five difficulty tables
-      0x0045BBD8  type 43  armour, chosen by variant
-      0x0045BC00  type 44  type 42's shot
-      0x0045BCC4  type 45  a crumbling platform
-      0x0045BD9C  type 46  a homing enemy that wakes when you come close
-      0x0045BF58  type 47  a lobber, on a wait-wind-rest cycle
-      0x0045C0F4  type 48  its shot - a ball that bounces four times
-      0x0045C250  type 49  a hovering diver
-      0x0045C430  type 50  a patroller that opens up to fire, and changes its
-                           own vulnerability while open
-      0x0045C608  type 51  a pure chaser
-      0x0045CA28  type 53  a charger, by facing
-      0x0045CE78  type 56  a trap that bursts when you get near
-      0x0045C678  type 52  a boss: circles, dives twice, then summons
-      0x0045CAD8  type 54  a second boss: hovers, blinks out, hops a fixed
-                           circuit and fires
-      0x0045CC98  type 55  its fireball, and the trail the fireball leaves
-      0x0045D00C  type 57  four different things in one handler, by variant
-      0x0045D598  type 58  a dormant thing that wakes on contact
-      0x0045D670  type 59  a sleeper that rises, aims once, and flies
-      0x0045D7D8  type 60  a walker that turns at ledges and enrages when hurt
-      0x0045DA28  type 61  a critter that wakes and RUNS AWAY
-      0x0045DC84  type 62  a walker whose vulnerability depends on which way it
-                           is facing relative to you
-      0x0045DDF4  type 63  a walker that stops to shoot, then turns round
-      0x0045E030  type 64  a slammer that drops, sends a wave each way, and
-                           climbs back to the ceiling
-      0x0045E25C  type 65  a third boss - you have to HIT it to start it
-      0x0045E4EC  type 66  an anchor and the satellite that orbits it
-      0x0045E714  type 67  lays the egg, then bolts
-      0x0045EA40  type 68  what hatches out of it
-      0x0045EB1C  type 69  a pushable that has to go down a HOLE
-      0x0045EC4C  type 70  a hundred-hp thing that dies of any wound at all
-      0x0045ED88  type 71  a walker that is only vulnerable while it rests
-      0x0045EFC8  type 72  a faller, a flyer, and the flyer's trail
-      0x0045F218  type 73  a fourth boss, driven by THREE different children
-      0x0045F498  type 74  its charge-up and the fan that charge-up fires
-      0x0045F668  type 75  the door that lets type 73 out of state 3
-      0x0045F744  type 76  a sweeper that turns a full circle by steps
-      0x0045F85C  type 77  the final boss - six phases, each a six-step script
-      0x0046023C  type 78  the boss's other half, positioned off it every frame
-      0x004603B4  type 79  everything the boss emits, six variants of it
-      0x004607E8  type 80  two small effects sharing one counter
-
-  And the dispatcher they hang off:
-
-      0x004608BC  Entity_UpdateAll
+  Each handler carries the address it came from, and that address is not
+  decoration: tools/coverage.py reads it, and it is what to re-decompile
+  against when auditing. HANDLER_ADDR below maps every type to its arm,
+  including the arms not translated yet - there is deliberately no second list
+  of what is done, because a hand-kept one drifts.
 
   The other ~49 created handlers are named in notes/game_functions.txt but
   their bodies have not been read. A name there asserts only which switch arm
