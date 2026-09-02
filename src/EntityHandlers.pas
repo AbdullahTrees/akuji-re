@@ -214,23 +214,14 @@ const
     ((204, 205, 206, 207), (208, 209, 210, 211));
 
   T7_FRAMES = 4;  T7_TICKS = 4;
-  { TWO rows, and I briefly made it three. Worth recording because the wrong
-    answer looked well-evidenced.
+  { TWO rows - eight ints. The bound is TYPE8_SPRITES at 0x0046BCCC, exactly
+    0x20 past this table, and a twelve-int reading of it overruns into type
+    8: the 50 --emudiff sees the original return for variant 2 is type 8's
+    first sprite, reached by running off the end of this one. That is
+    DIV-011 again.
 
-    --emudiff ran type 7 with EF_VARIANT 2 and the original answered 50 where
-    this answers 40. Reading the image at index 8 gives (50, 51, 52, 53), and
-    the next address I happened to have recorded was T9's at 0x0046BCDC - which
-    is 0x30 further on, twelve ints, three rows. So a third row was added.
-
-    It is type 8's table. TYPE8_SPRITES is at 0x0046BCCC, exactly 0x20 past
-    T7's, and tools/table_extents.py said so within minutes of being written:
-    a twelve-int T7_SPRITES overruns into it. The 50 the original returned is
-    type 8's first sprite, reached by running off the end of type 7's.
-
-    Which makes this DIV-011, the same shape as DIV-010, and makes the lesson
-    the one already written down: an adjacent table's contents are evidence
-    about the ADJACENT table. Picking the next recorded address, rather than
-    the next actual one, is how a boundary check gets the boundary wrong. }
+    An adjacent table's contents are evidence about the ADJACENT table.
+    tools/table_extents.py is what pins this one. }
   T7_ROWS = 2;
   T7_TABLE_ADDR = $0046BCAC;
   T7_SPRITES: array[0..T7_ROWS - 1, 0..T7_FRAMES - 1] of Integer =
@@ -2252,25 +2243,17 @@ const
   HANDLER_NO_ARM_TARGET = $00460DE1;
 
   { Type 68 gets an extra Entity_PlayerTouch, outside the slot range that
-    normally gets one, whenever its EF_STATE is 3. An entity of type 68 sitting
-    in a minor slot in state 3 therefore gets touch-tested TWICE in one frame,
-    and that is the original's behaviour rather than a slip in the
-    transcription.
+    normally gets one, whenever its EF_STATE is 3 - so one sitting in a minor
+    slot is touch-tested TWICE in a frame. That is the original.
 
-    WHAT IT IS FOR - corrected. This was first written up as a generosity, on
-    the guess that state 3 was a prize and the extra test helped you catch it.
-    The type table says otherwise. Type 68's column 3 is 0, so a type 68
-    spawned from the table has EF_TOUCH_KIND 0 and Entity_PlayerTouch returns
-    without doing anything at all. The only type 68 that touches the player is
-    the one type 57's egg hatches, and the EGG sets EF_TOUCH_KIND to 1 on it -
-    kind 1 is Player_TakeDamage(1).
+    It is a HAZARD, not a generosity. Type 68's own table column 3 is 0, so a
+    table-spawned one has EF_TOUCH_KIND 0 and the test does nothing; the only
+    type 68 that touches the player is the one type 57's egg hatches, and the
+    EGG sets its kind to 1 - Player_TakeDamage. The extra test doubles the
+    chance of it hitting you.
 
-    So state 3 is a rising HAZARD, and the extra test doubles the chance of it
-    landing a hit on you, not of you catching it.
-
-    State 4 has nothing to do with being caught either: type 69 spawns a type
-    68 directly into it, leaving EF_TOUCH_KIND at the table's 0 so that one is
-    harmless. It falls and pays out. Two unrelated uses of one type. }
+    State 4 is unrelated: type 69 spawns a type 68 straight into it, leaving
+    the kind at 0, so that one is harmless. Two uses of one type. }
   TYPE_TOUCH_IN_STATE_3 = $44;   { 68 }
 
 type
@@ -5833,22 +5816,12 @@ begin
     E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
     { A quarter of the heading's Y component.
 
-      THIS WAS `shr` AND HAD TO BE `div`. The original is
-
-          if v < 0 then v := v + 3;
-          v := v sar 2
-
-      which is not a shift the author wrote - it is what Delphi EMITS for
-      `div 4` on a signed value: the +3 turns the arithmetic shift's floor
-      into truncation toward zero. Transcribing the codegen literally is what
-      caused the bug, because Pascal's `shr` on an Integer is a LOGICAL shift.
-      With Step = -1 the original gives -1 and `shr 2` gives $3FFFFFFF, so
-      EF_POS_Y came out $400103BF against the original's $000103BF - the low
-      bits identical and $40000000 of nonsense on top.
-
-      Caught by --emudiff on type 49 in states 0, 1 and 3. `div` is both the
-      correct behaviour and, being what the codegen came from, the more
-      faithful transcription. }
+      `div`, NOT `shr`. The original's `if v < 0 then v := v + 3; v := v sar
+      2` is not a shift the author wrote - it is what Delphi EMITS for a
+      signed `div 4`, the +3 turning the arithmetic shift's floor into
+      truncation toward zero. Transcribing that codegen literally gives a
+      LOGICAL shift in Pascal: with Step = -1 the original gives -1 and `shr
+      2` gives $3FFFFFFF. Caught by --emudiff on type 49. }
     Inc(E.Raw[EF_POS_Y],
         DirVelY(E.Raw[EF_FACING]) div (1 shl T49_BOB_SHIFT));
   end;
@@ -7823,29 +7796,15 @@ var
 begin
   Variant := E.Raw[EF_VARIANT];
   Frame := E.Raw[EF_FLAG1C];
-  { The original indexes without bounds checks and would read past the table on
-    a bad variant. Clamping instead of faulting is the one deviation here.
+  { The original indexes without bounds checks and would read past the table
+    on a bad variant; clamping instead of faulting is the one deviation here,
+    and it is DIV-011's class.
 
-    CORRECTED. This used to claim the range was 0..15 against a 16-row table.
-    That is TYPE 24's table, not this one: type 14's is 2 rows of 4 frames -
-    eight ints at 0x0046BDA0, bounded above by type 24's table at 0x0046BDC0 -
-    and the disassembly agrees, indexing it as `Variant * 0x10 + Frame * 4`
-    with a row stride of four ints. The wrong table's dimensions were copied
-    in with the surrounding prose.
-
-    The clamp is still unreachable for shipped data, but for its own reason
-    rather than type 24's. `tools/entity_usage.py akuji_ver101 --type 14`
-    finds 122 placements over 32 stages, every one of them opcode 9, and
-    their ParamA programs are only two: `0014-*` 91 times, which carries no
-    argument and leaves the field as Entity_Spawn left it, and `0014-A-001`
-    31 times. Kind 'A' is the one that writes EF_VARIANT - see EventRunner's
-    dispatch on ParamA[6] - and its argument here is 1 in all 31. So the
-    shipped variants are exactly 0 and 1, against a 2-row table.
-
-    That is the corroboration from the other side, and it is worth more than
-    either half: the table's extent says two rows, and the placement data
-    independently uses two. Frame needs no such argument - only the line
-    below writes it, mod MANA_FRAMES. }
+    It is unreachable for shipped data. tools/entity_usage.py finds 122
+    placements of type 14 over 32 stages, all opcode 9, with only two ParamA
+    forms: `0014-*` 91 times, which writes no variant at all, and
+    `0014-A-001` 31 times. So the shipped variants are exactly 0 and 1,
+    against a table the layout independently says is two rows. }
   { DIVERGENCE DIV-011: the original does not check. }
   if (Variant < 0) or (Variant >= MANA_VARIANTS) then
     Variant := 0;
