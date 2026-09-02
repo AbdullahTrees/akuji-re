@@ -172,6 +172,10 @@ type
     procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
+    function EndingMusicPlaying: Boolean;
+    function EndingFadeBusy: Boolean;
+    procedure EndingStartFade;
+    procedure DrawEndingSlide;
     procedure EndingMusic(Track: Integer; Loop: Boolean);
     procedure EndingStopMusic;
     procedure SessionResetHost;
@@ -364,6 +368,9 @@ begin
   FEnding.OnPicture := EndingPicture;
   FEnding.OnMusic := EndingMusic;
   FEnding.OnStopMusic := EndingStopMusic;
+  FEnding.OnMusicPlaying := EndingMusicPlaying;
+  FEnding.OnFadeBusy := EndingFadeBusy;
+  FEnding.OnStartFade := EndingStartFade;
   { PowerUp_Show's fanfare. The panel closes when this track ends, so without
     it the overlay was waiting on the looping stage music - see Dialogue.pas. }
   FDialogue.OnSound := TitleSound;
@@ -860,8 +867,47 @@ end;
 procedure TFrm_main.EndingPicture(Index: Integer);
 begin
   FreeAndNil(FEndingBmp);
-  if FArchive <> nil then
+  { The original frees the surface unconditionally and only creates a new one
+    when the slide has an image, so a -1 leaves the screen without one. }
+  if (Index >= 0) and (FArchive <> nil) then
     FEndingBmp := FArchive.LoadBitmapByName(Format(ENDING_PICTURE_FMT, [Index]));
+end;
+
+function TFrm_main.EndingMusicPlaying: Boolean;
+begin
+  Result := KbgmPlayer1.IsPlaying;
+end;
+
+function TFrm_main.EndingFadeBusy: Boolean;
+begin
+  Result := DDDD1.FadeBusy;
+end;
+
+procedure TFrm_main.EndingStartFade;
+begin
+  { Fader_StartFade(fader, 0, 1) - fade OUT. The original also writes 4 to the
+    fader's +0x10 step first, which this component does not model. }
+  DDDD1.StartFade(0, True);
+end;
+
+{ Phase 1, the slide show: the picture at (0x28, 8) and two rows of outlined
+  text under it. Ending.pas holds which slide and which words; where they go
+  is the host's. }
+procedure TFrm_main.DrawEndingSlide;
+begin
+  DDDD1.Canvas.Brush.Color := clBlack;
+  DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
+  if (FEndingBmp <> nil) and (FEnding.SlideImage >= 0) then
+    DDDD1.Canvas.StretchDraw(
+      Rect(ENDING_PIC_X, ENDING_PIC_Y,
+           ENDING_PIC_X + ENDING_PIC_W, ENDING_PIC_Y + ENDING_PIC_H),
+      FEndingBmp);
+  Game_DrawTextOutlined(ENDING_LINE_X, ENDING_LINE1_Y, FEnding.SlideLine(0),
+                        ENDING_TEXT_OUTLINE, ENDING_TEXT_FILL, 10,
+                        DDDD1.Canvas);
+  Game_DrawTextOutlined(ENDING_LINE_X, ENDING_LINE2_Y, FEnding.SlideLine(1),
+                        ENDING_TEXT_OUTLINE, ENDING_TEXT_FILL, 10,
+                        DDDD1.Canvas);
 end;
 
 procedure TFrm_main.EndingMusic(Track: Integer; Loop: Boolean);
@@ -1237,7 +1283,11 @@ begin
     GS_ENDING:
       begin
         FEnding.Update(Settings, FSession.Player, GameStateValue);
-        DrawScene;
+        { Phase 1 is the slide show and owns the whole screen. The later
+          phases are the staff roll and the results, which the host does not
+          draw yet - but the game scene is gone by then either way. }
+        if ScreenPhase = 1 then
+          DrawEndingSlide;
       end;
     GS_QUIT:
       begin

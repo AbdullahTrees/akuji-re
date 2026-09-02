@@ -37,6 +37,60 @@ const
 
   { AutoLoadMidis[14] is midi\end05, which the sequence plays under itself. }
   ENDING_MIDI = 14;
+
+  { --- Phase 1, the slide show. Six slides, indexed 1..6, so entry 0 is slide
+    one. Both extents are pinned from outside: ENDING_SECONDS' seventh int
+    reads as a string pointer, and ENDING_TEXT's twelfth entry is 'EASY',
+    which Title.pas already records at 0x00452308 as the level names. }
+  ENDING_SLIDES = 6;
+
+  ENDING_IMAGE_ADDR = $00468FDC;
+  { bmp\ed%.3d.bmp, or -1 for a slide that is text only. }
+  ENDING_IMAGE: array[0..ENDING_SLIDES - 1] of Integer = (1, 2, 3, 3, -1, 4);
+
+  ENDING_TEXT_ID_ADDR = $00468FF4;
+  { Indexes ENDING_TEXT; the slide's second line is the entry after it. }
+  ENDING_TEXT_ID: array[0..ENDING_SLIDES - 1] of Integer = (0, 2, 4, 6, 8, 10);
+
+  ENDING_SECONDS_ADDR = $0046900C;
+  ENDING_SECONDS: array[0..ENDING_SLIDES - 1] of Integer = (8, 8, 2, 8, 4, 8);
+  ENDING_SECONDS_SCALE = $3C;   { the table is in seconds; Timer is in frames }
+
+  ENDING_TEXT_ADDR = $00469024;
+  ENDING_TEXT: array[0..11] of string = (
+    '    Light covered Akuji as',
+    '    he broke the last seal... ',
+    ' He''s transforming back!',            '',
+    'What''s going on?!?',                  '',
+    'His horns are all that grew..!',       '',
+    '  Akuji learned a lesson. ',           '',
+    'Disgusted, he decides to  ',
+    'not cause mischief anymore. ');
+
+  { Slides 4 and 6 hold until their own music ENDS instead of counting down,
+    which is why those two are started UNLOOPED. }
+  ENDING_SLIDE_WAIT_A = 4;
+  ENDING_SLIDE_WAIT_B = 6;
+  ENDING_MIDI_SLIDE_1 = 10;
+  ENDING_MIDI_SLIDE_4 = 12;
+  ENDING_MIDI_SLIDE_6 = 13;
+  ENDING_SLIDE_STOP_AT = 3;   { the slide that stops midi 10 }
+
+  { Timer holds this instead of a count while the last slide waits on its fade
+    out. 999 is a sentinel in the original too, in both the slide and the
+    timer, and means "waiting on a fade" rather than a number of frames. }
+  ENDING_WAIT_FADE = 999;
+
+  { Where the host puts the slide: the picture at (0x28, 8) at 240x180, and
+    the two lines left-aligned at x 0x38. }
+  ENDING_PIC_X = $28;    ENDING_PIC_Y = 8;
+  ENDING_PIC_W = $F0;    ENDING_PIC_H = $B4;
+  ENDING_LINE_X  = $38;
+  ENDING_LINE1_Y = 200;
+  ENDING_LINE2_Y = $D8;
+  { Game_RGB(0xFF, 0xDF, 0xA3) over Game_RGB(0x7E, 0x5B, 0x35). }
+  ENDING_TEXT_FILL    = $A3DFFF;
+  ENDING_TEXT_OUTLINE = $355B7E;
   { bmp\ed%.3d.bmp - 0x00464450 loose, 0x00464468 inside the archive. }
   ENDING_PICTURE_FMT = 'ed%.3d.bmp';
   { 0x00464410 and 0x00464440. The second one is a trap for anyone reading it
@@ -84,14 +138,24 @@ type
 
     Its phases run on GameState.ScreenPhase, the counter it shares with the
     game-over screen and the message box, and its step within a phase on a
-    second global at 0x0046D298. Phase 1 is a HOLE - nothing in the original
-    leaves it - which is the same shape the game-over screen has, where the
-    fade is what moves it on. }
+    second global at 0x0046D298.
+
+    PHASE 1 IS THE SLIDE SHOW, and it is easy to miss: the original tests the
+    phase 0, 2, 3, 4, 5, else, so phase 1 is the unlabelled `else` at the
+    BOTTOM of the function rather than where you would look for it. Step is
+    the slide there and Timer counts its frames down. }
+  { Asked, not handed in - the same reason the game-over screen asks. Phase 1
+    starts a track and then waits for it in a later frame of the same run. }
+  TEndingQuery = function: Boolean of object;
+
   TEndingScreen = class
   private
     FOnPicture: TEndingPicture;
     FOnMusic: TEndingMusic;
     FOnStopMusic: TEndingStopMusic;
+    FOnMusicPlaying: TEndingQuery;
+    FOnFadeBusy: TEndingQuery;
+    FOnStartFade: TEndingStopMusic;
   public
     { 0x0046D298, the step inside a phase. }
     Step: Integer;
@@ -101,7 +165,17 @@ type
     procedure Update(var S: TGameSettings; const P: TPlayerState;
                      var AGameState: Integer);
 
+    { What the host draws for the current slide. Image is -1 when the slide
+      carries no picture; Line 0 and 1 are its two rows of text. }
+    function SlideImage: Integer;
+    function SlideLine(N: Integer): string;
+
     property OnPicture: TEndingPicture read FOnPicture write FOnPicture;
+    property OnMusicPlaying: TEndingQuery
+      read FOnMusicPlaying write FOnMusicPlaying;
+    property OnFadeBusy: TEndingQuery read FOnFadeBusy write FOnFadeBusy;
+    property OnStartFade: TEndingStopMusic
+      read FOnStartFade write FOnStartFade;
     property OnMusic: TEndingMusic read FOnMusic write FOnMusic;
     property OnStopMusic: TEndingStopMusic read FOnStopMusic write FOnStopMusic;
   end;
@@ -167,6 +241,25 @@ begin
   Result := Format(ENDING_PERCENT_FMT, [EndingPercent(Counter)]);
 end;
 
+function TEndingScreen.SlideImage: Integer;
+begin
+  if (Step < 1) or (Step > ENDING_SLIDES) then
+    Exit(-1);
+  Result := ENDING_IMAGE[Step - 1];
+end;
+
+function TEndingScreen.SlideLine(N: Integer): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  if (Step < 1) or (Step > ENDING_SLIDES) or (N < 0) or (N > 1) then
+    Exit;
+  I := ENDING_TEXT_ID[Step - 1] + N;
+  if (I >= 0) and (I <= High(ENDING_TEXT)) then
+    Result := ENDING_TEXT[I];
+end;
+
 procedure TEndingScreen.Update(var S: TGameSettings; const P: TPlayerState;
                                var AGameState: Integer);
 begin
@@ -177,7 +270,66 @@ begin
     Timer := 0;
     if Assigned(FOnStopMusic) then
       FOnStopMusic;
-    { And nothing here leaves phase 1 - see the note on the class. }
+    Exit;
+  end;
+
+  if ScreenPhase = 1 then
+  begin
+    { Waiting on the fade out that follows the last slide. }
+    if Timer = ENDING_WAIT_FADE then
+    begin
+      if not (Assigned(FOnFadeBusy) and FOnFadeBusy()) then
+      begin
+        if Assigned(FOnStopMusic) then
+          FOnStopMusic;
+        ScreenPhase := 2;
+        Step := 0;
+        Timer := 0;
+      end;
+      Exit;
+    end;
+
+    { Slides 4 and 6 do not count down at all - they end when their track
+      does, which is why the countdown is skipped for them rather than the
+      test being widened. }
+    if (Step <> ENDING_SLIDE_WAIT_A) and (Step <> ENDING_SLIDE_WAIT_B) then
+      Dec(Timer);
+
+    if (Timer < 1)
+    or (not (Assigned(FOnMusicPlaying) and FOnMusicPlaying())
+        and ((Step = ENDING_SLIDE_WAIT_A) or (Step = ENDING_SLIDE_WAIT_B))) then
+    begin
+      Inc(Step);
+      { The original reads ENDING_SECONDS[Step - 1] here even when Step has
+        reached 7, one past the table - and then overwrites Timer with the
+        sentinel in the branch below, so the overrun value is never used.
+        Guarded rather than reproduced; DIV-011's class. }
+      if Step <= ENDING_SLIDES then
+        Timer := ENDING_SECONDS[Step - 1] * ENDING_SECONDS_SCALE;
+
+      if Step = 1 then
+        if Assigned(FOnMusic) then FOnMusic(ENDING_MIDI_SLIDE_1, True);
+      if Step = ENDING_SLIDE_STOP_AT then
+        if Assigned(FOnStopMusic) then FOnStopMusic;
+      { Unlooped, so that the slide can wait for it to finish. }
+      if Step = ENDING_SLIDE_WAIT_A then
+        if Assigned(FOnMusic) then FOnMusic(ENDING_MIDI_SLIDE_4, False);
+      if Step = ENDING_SLIDE_WAIT_B then
+        if Assigned(FOnMusic) then FOnMusic(ENDING_MIDI_SLIDE_6, False);
+
+      if Step > ENDING_SLIDES then
+      begin
+        { Pinned on the last slide, which stays on screen through the fade. }
+        Step := ENDING_SLIDES;
+        Timer := ENDING_WAIT_FADE;
+        if Assigned(FOnStartFade) then
+          FOnStartFade;
+        Exit;
+      end;
+
+      if Assigned(FOnPicture) then
+        FOnPicture(SlideImage);
+    end;
     Exit;
   end;
 
