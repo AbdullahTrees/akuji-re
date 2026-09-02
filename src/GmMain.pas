@@ -174,6 +174,10 @@ type
     procedure EndingPicture(Index: Integer);
     procedure EndingPictureNamed(const Name: string);
     procedure DrawEndingCredits;
+    procedure DrawEndingStill;
+    procedure DrawEndingResults;
+    function EndingConfirm: Boolean;
+    procedure EndingStartFadeIn;
     function EndingMusicPlaying: Boolean;
     function EndingFadeBusy: Boolean;
     procedure EndingStartFade;
@@ -371,6 +375,9 @@ begin
   FEnding.OnMusic := EndingMusic;
   FEnding.OnStopMusic := EndingStopMusic;
   FEnding.OnPictureNamed := EndingPictureNamed;
+  FEnding.OnSound := TitleSound;
+  FEnding.OnConfirm := EndingConfirm;
+  FEnding.OnStartFadeIn := EndingStartFadeIn;
   FEnding.OnMusicPlaying := EndingMusicPlaying;
   FEnding.OnFadeBusy := EndingFadeBusy;
   FEnding.OnStartFade := EndingStartFade;
@@ -907,6 +914,97 @@ begin
              CREDITS_LAYOUT[I][CREDITS_SY] + CREDITS_LAYOUT[I][CREDITS_H]));
 end;
 
+{ Phases 3 and 4: one crop of the phase-2 sheet, its right edge growing, drawn
+  at the same place each time so the picture fills in. }
+procedure TFrm_main.DrawEndingStill;
+var
+  R: Integer;
+begin
+  DDDD1.Canvas.Brush.Color := clBlack;
+  DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
+  R := FEnding.StillRight;
+  if (FEndingBmp = nil) or (R < 0) then
+    Exit;
+  DDDD1.Canvas.CopyRect(
+    Rect(STILL_X, STILL_Y,
+         STILL_X + (R - STILL_SRC_LEFT),
+         STILL_Y + (STILL_SRC_BOTTOM - STILL_SRC_TOP)),
+    FEndingBmp.Canvas,
+    Rect(STILL_SRC_LEFT, STILL_SRC_TOP, R, STILL_SRC_BOTTOM));
+end;
+
+{ Phase 5: Option.bmp, then a line a second over it. }
+procedure TFrm_main.DrawEndingResults;
+var
+  Shown, I, SrcX: Integer;
+  P: TPlayerState;
+begin
+  if FEndingBmp <> nil then
+    DDDD1.Canvas.Draw(0, 0, FEndingBmp)
+  else
+  begin
+    DDDD1.Canvas.Brush.Color := clBlack;
+    DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
+  end;
+  if FFont = nil then
+    Exit;
+
+  P := FSession.Player;
+  Shown := FEnding.ResultsRevealed;
+
+  if Shown > 1 then
+  begin
+    FFont.TextOut(DDDD1.Canvas, RESULT_TITLE_X, RESULT_TITLE_Y,
+                  RESULT_TITLE, RESULT_LABEL_VARIANT);
+    FFont.TextOut(DDDD1.Canvas, RESULT_TITLE_X, RESULT_RULE_Y,
+                  RESULT_RULE, RESULT_LABEL_VARIANT);
+  end;
+  if Shown > 2 then
+  begin
+    FFont.TextOut(DDDD1.Canvas, RESULT_LABEL_X, RESULT_TIME_Y,
+                  RESULT_TIME_LABEL, RESULT_LABEL_VARIANT);
+    FFont.TextOut(DDDD1.Canvas, RESULT_VALUE_X, RESULT_TIME_Y,
+                  EndingTimeText(P.ElapsedSec), RESULT_VALUE_VARIANT);
+  end;
+  if Shown > 3 then
+  begin
+    FFont.TextOut(DDDD1.Canvas, RESULT_LABEL_X, RESULT_MANA_Y,
+                  RESULT_MANA_LABEL, RESULT_LABEL_VARIANT);
+    FFont.TextOut(DDDD1.Canvas, RESULT_VALUE_X, RESULT_MANA_Y,
+                  EndingPercentText(P.Counter), RESULT_VALUE_VARIANT);
+  end;
+  if (Shown > 4) and (FSurfaces[GALLERY_SURFACE] <> nil) then
+    for I := 0 to GALLERY_COUNT - 1 do
+    begin
+      { A locked entry is the one dark cell; an unlocked one is its own. }
+      if P.Progress[GALLERY_FIRST_FLAG + I] = 0 then
+        SrcX := GALLERY_DARK_X
+      else
+        SrcX := (I + GALLERY_LIT_COL0) * GALLERY_CELL;
+      DDDD1.Canvas.CopyRect(
+        Rect(I * GALLERY_STEP + GALLERY_X0, GALLERY_Y,
+             I * GALLERY_STEP + GALLERY_X0 + GALLERY_CELL,
+             GALLERY_Y + (GALLERY_SRC_BOTTOM - GALLERY_SRC_TOP)),
+        FSurfaces[GALLERY_SURFACE].Canvas,
+        Rect(SrcX, GALLERY_SRC_TOP, SrcX + GALLERY_CELL, GALLERY_SRC_BOTTOM));
+    end;
+  if Shown > 5 then
+    { The rank flickers - its variant is the frame timer mod 3. }
+    FFont.TextOut(DDDD1.Canvas, RANK_X, RANK_Y,
+                  FEnding.RankName(P.Counter, P.ElapsedSec),
+                  FEnding.Timer mod RANK_VARIANTS);
+end;
+
+function TFrm_main.EndingConfirm: Boolean;
+begin
+  Result := ConfirmPressed(FSession.Input);
+end;
+
+procedure TFrm_main.EndingStartFadeIn;
+begin
+  DDDD1.StartFade(0, False);
+end;
+
 function TFrm_main.EndingMusicPlaying: Boolean;
 begin
   Result := KbgmPlayer1.IsPlaying;
@@ -1320,10 +1418,12 @@ begin
         { Phase 1 is the slide show and owns the whole screen. The later
           phases are the staff roll and the results, which the host does not
           draw yet - but the game scene is gone by then either way. }
-        if ScreenPhase = 1 then
-          DrawEndingSlide
-        else if ScreenPhase = 2 then
-          DrawEndingCredits;
+        case ScreenPhase of
+          1:    DrawEndingSlide;
+          2:    DrawEndingCredits;
+          3, 4: DrawEndingStill;
+          5:    DrawEndingResults;
+        end;
       end;
     GS_QUIT:
       begin

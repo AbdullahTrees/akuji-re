@@ -122,8 +122,59 @@ const
   CREDITS_Y = 0;  CREDITS_H = 1;  CREDITS_W = 2;
   CREDITS_SY = 3; CREDITS_SX = 4;
 
-  { Phase 5's background, by name like phase 2's. }
+  { --- Phases 3 and 4, the four stills. Each is the SAME crop of the phase-2
+    sheet grown to the right - top and bottom fixed, only the right edge moves
+    - held a second each and drawn at one place, so the picture fills in
+    rather than changing. Phase 4 then holds the widest for 600 frames. }
+  STILL_COUNT = 4;
+  STILL_SRC_LEFT = $40;  STILL_SRC_TOP = $20;  STILL_SRC_BOTTOM = $40;
+  STILL_SRC_RIGHT: array[0..STILL_COUNT - 1] of Integer =
+    ($5C, $7A, $93, $B3);
+  STILL_X = $66;  STILL_Y = $68;
+  STILL_FRAMES = $3C;         { one second each }
+  STILL_HOLD_FRAMES = 600;    { phase 4, on the widest crop }
+  SND_STILL_STEP = $0E;
+  SND_STILL_LAST = $0C;       { on the one that ends phase 3 }
+  RESULTS_MIDI = 6;
+
+  { --- Phase 5, the results screen. One line a second over Option.bmp. }
   RESULTS_PICTURE = 'Option.bmp';
+  RESULTS_LINE_FRAMES = $3C;
+  RESULTS_LAST_LINE = 6;
+  SND_RESULT_LINE = 1;
+  SND_RESULT_RANK = $2C;
+
+  RESULT_TITLE = '---- RESULT ----';
+  RESULT_RULE  = '----------------';
+  RESULT_TITLE_X = $60;  RESULT_TITLE_Y = $30;  RESULT_RULE_Y = $B8;
+  RESULT_LABEL_X = $68;  RESULT_VALUE_X = $98;
+  RESULT_TIME_Y  = $50;  RESULT_MANA_Y  = $60;
+  RESULT_TIME_LABEL = 'TIME';
+  RESULT_MANA_LABEL = 'MANA';
+  { Game_DrawText's variant: 2 for the labels, 0 for the numbers. }
+  RESULT_LABEL_VARIANT = 2;
+  RESULT_VALUE_VARIANT = 0;
+
+  { The seven gallery icons, off surface 4. A lit one is its own 0x20 cell;
+    an unlocked-nothing one is the single dark cell at 0x120. }
+  GALLERY_X0 = $28;   GALLERY_STEP = $22;   GALLERY_Y = $78;
+  GALLERY_CELL = $20;
+  GALLERY_SRC_TOP = $A0;  GALLERY_SRC_BOTTOM = $C0;
+  GALLERY_LIT_COL0 = 2;      { lit icon i is cell (i + 2) }
+  GALLERY_DARK_X = $120;
+  GALLERY_SURFACE = 4;
+
+  { p_RankNames @ 0x00469088. Five, and the sixth pointer is nil - which is
+    what bounds the table. EndingRank returns the index. }
+  RANK_NAMES: array[0..4] of string =
+    ('RANK C', 'RANK B', 'RANK A', 'RANK S', 'RANK SS');
+  RANK_X = $88;  RANK_Y = $A8;
+  { The rank line flickers: its variant is the frame timer mod 3. }
+  RANK_VARIANTS = 3;
+
+  { Confirm parks this in Step and the screen waits for its fade, exactly as
+    the last slide of phase 1 parks it in Timer. }
+  RESULTS_LEAVING = 999;
 
   { Where the host puts the slide: the picture at (0x28, 8) at 240x180, and
     the two lines left-aligned at x 0x38. }
@@ -199,6 +250,8 @@ type
     Ending_ShowPicture takes a filename - so they cannot go through
     OnPicture's ed%.3d.bmp. }
   TEndingPictureNamed = procedure(const Name: string) of object;
+  { The sound effects the stills and the result lines tick over on. }
+  TEndingMusicCue = procedure(Id: Integer) of object;
 
   TEndingScreen = class
   private
@@ -206,6 +259,9 @@ type
     FOnMusic: TEndingMusic;
     FOnStopMusic: TEndingStopMusic;
     FOnPictureNamed: TEndingPictureNamed;
+    FOnSound: TEndingMusicCue;
+    FOnConfirm: TEndingQuery;
+    FOnStartFadeIn: TEndingStopMusic;
     FOnMusicPlaying: TEndingQuery;
     FOnFadeBusy: TEndingQuery;
     FOnStartFade: TEndingStopMusic;
@@ -235,9 +291,19 @@ type
     function CreditX(I: Integer): Integer;
     procedure CreditsTick;
 
+    { Phases 3 and 4: the right edge of the crop to show, or -1 for none. }
+    function StillRight: Integer;
+    { Phase 5: how many result lines have been revealed, and the rank text. }
+    function ResultsRevealed: Integer;
+    function RankName(Counter, ElapsedSec: Integer): string;
+
     property OnPicture: TEndingPicture read FOnPicture write FOnPicture;
     property OnPictureNamed: TEndingPictureNamed
       read FOnPictureNamed write FOnPictureNamed;
+    property OnSound: TEndingMusicCue read FOnSound write FOnSound;
+    property OnConfirm: TEndingQuery read FOnConfirm write FOnConfirm;
+    property OnStartFadeIn: TEndingStopMusic
+      read FOnStartFadeIn write FOnStartFadeIn;
     property OnMusicPlaying: TEndingQuery
       read FOnMusicPlaying write FOnMusicPlaying;
     property OnFadeBusy: TEndingQuery read FOnFadeBusy write FOnFadeBusy;
@@ -476,18 +542,124 @@ begin
     Exit;
   end;
 
-  { Phases 3, 4 and 5 walk the staff roll and then the results. The flags are
-    banked when the results appear, which is phase 5 - once, and before the
-    player can leave. }
-  if ScreenPhase >= 3 then
+  { Phase 3: four stills, one a second. Step 4 is never drawn here - reaching
+    it hands over to phase 4, which shows that crop itself. }
+  if ScreenPhase = 3 then
   begin
     Inc(Timer);
-    if (ScreenPhase = 5) and (Step = 0) then
+    if Timer > STILL_FRAMES then
     begin
+      Timer := 0;
+      if Step < STILL_COUNT then
+      begin
+        Inc(Step);
+        if Step = STILL_COUNT then
+        begin
+          if Assigned(FOnSound) then FOnSound(SND_STILL_LAST);
+          ScreenPhase := 4;
+          Step := 0;
+          Timer := 0;
+        end
+        else
+          if Assigned(FOnSound) then FOnSound(SND_STILL_STEP);
+      end;
+    end;
+    Exit;
+  end;
+
+  { Phase 4: hold the widest crop, fade the music out, and leave when it has
+    actually stopped. }
+  if ScreenPhase = 4 then
+  begin
+    if Step = 0 then
+    begin
+      Inc(Timer);
+      if Timer > STILL_HOLD_FRAMES then
+      begin
+        Step := 1;
+        Timer := 0;
+        if Assigned(FOnStopMusic) then FOnStopMusic;
+      end;
+    end;
+    if (Step = 1) and not (Assigned(FOnMusicPlaying) and FOnMusicPlaying()) then
+    begin
+      ScreenPhase := 5;
+      Step := 0;
+      Timer := 0;
+      if Assigned(FOnMusic) then FOnMusic(RESULTS_MIDI, True);
+    end;
+    Exit;
+  end;
+
+  { Phase 5, the results - and the only place the persistent unlocks are
+    written. Banked once as the screen appears rather than in the two draw
+    arms the original writes them from; the outcome is the same and neither
+    arm can be skipped. }
+  if ScreenPhase = 5 then
+  begin
+    if Step = 0 then
+    begin
+      if Assigned(FOnStartFadeIn) then FOnStartFadeIn;
+      if Assigned(FOnPictureNamed) then FOnPictureNamed(RESULTS_PICTURE);
       Step := 1;
       EndingApplyUnlocks(S, P);
     end;
+
+    Inc(Timer);
+    if (Timer > RESULTS_LINE_FRAMES) then
+    begin
+      Timer := 0;
+      if (Step < RESULTS_LAST_LINE) and (Step <> RESULTS_LEAVING) then
+      begin
+        Inc(Step);
+        if Assigned(FOnSound) then
+          if Step = RESULTS_LAST_LINE then FOnSound(SND_RESULT_RANK)
+          else FOnSound(SND_RESULT_LINE);
+      end;
+    end;
+
+    { Confirm is only offered once the rank is up. }
+    if (Step >= RESULTS_LAST_LINE) and (Step <> RESULTS_LEAVING)
+    and (Assigned(FOnConfirm) and FOnConfirm()) then
+    begin
+      Step := RESULTS_LEAVING;
+      if Assigned(FOnStartFade) then FOnStartFade;
+    end;
+
+    if (Step = RESULTS_LEAVING)
+    and not (Assigned(FOnFadeBusy) and FOnFadeBusy()) then
+    begin
+      if Assigned(FOnStopMusic) then FOnStopMusic;
+      ScreenPhase := 0;
+      AGameState := GS_TITLE_INIT;
+    end;
   end;
+end;
+
+function TEndingScreen.StillRight: Integer;
+begin
+  Result := -1;
+  if (ScreenPhase = 4) then
+    Exit(STILL_SRC_RIGHT[STILL_COUNT - 1]);
+  if (ScreenPhase = 3) and (Step >= 1) and (Step <= STILL_COUNT) then
+    Result := STILL_SRC_RIGHT[Step - 1];
+end;
+
+function TEndingScreen.ResultsRevealed: Integer;
+begin
+  if Step = RESULTS_LEAVING then
+    Exit(RESULTS_LAST_LINE);
+  Result := Step;
+end;
+
+function TEndingScreen.RankName(Counter, ElapsedSec: Integer): string;
+var
+  R: Integer;
+begin
+  R := EndingRank(Counter, ElapsedSec);
+  if (R < 0) or (R > High(RANK_NAMES)) then
+    R := 0;
+  Result := RANK_NAMES[R];
 end;
 
 end.
