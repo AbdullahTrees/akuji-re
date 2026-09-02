@@ -143,7 +143,11 @@ type
     PHASE 1 IS THE SLIDE SHOW, and it is easy to miss: the original tests the
     phase 0, 2, 3, 4, 5, else, so phase 1 is the unlabelled `else` at the
     BOTTOM of the function rather than where you would look for it. Step is
-    the slide there and Timer counts its frames down. }
+    the slide there and Timer counts its frames down.
+
+    Phases 2, 3 and 4 - the credits, the four stills and the hold - are
+    presentation over the component this project replaces, so only their
+    bookkeeping is here. notes/ending_sequence.md has all six. }
   { Asked, not handed in - the same reason the game-over screen asks. Phase 1
     starts a track and then waits for it in a later frame of the same run. }
   TEndingQuery = function: Boolean of object;
