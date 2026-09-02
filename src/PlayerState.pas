@@ -105,6 +105,19 @@ const
     with each flag, not for the game's own words, and the two do not obviously
     agree - 'Jump++' reads like a second jump, 'Bat' like a form. The INDICES
     are certain; the labels are a reading. }
+  { PowerUp_Show's pickup variants - the value ParamA's 'A' letter carries.
+    4..7 are the Head abilities below. }
+  PICKUP_FIRE       = 0;
+  PICKUP_FIRE_PLUS  = 1;
+  PICKUP_CHARGE     = 2;
+  PICKUP_JUMP_PLUS  = 3;
+
+  { What TPlayerState.Weapon holds. Player.pas indexes WEAPONS by it. }
+  WEAPON_NONE       = 0;
+  WEAPON_FIRE       = 1;
+  WEAPON_FIRE_PLUS  = 2;
+  WEAPON_CHARGE     = 3;
+
   ABILITY_DASH      = 4;
   ABILITY_WALLKICK  = 5;
   ABILITY_AIRDASH   = 6;
@@ -271,22 +284,13 @@ function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
 function ManaTarget(Index: Integer): Integer;
 
 { 0x00456698. The ability pickup - what sub-op 10 reaches, and what the
-  full-screen "... was recovered!" panel announces.
+  full-screen "... was recovered!" panel announces. It grants by the event
+  entity's variant; see PICKUP_* above.
 
-  It grants by the EVENT ENTITY's variant, the field ParamA's 'A' letter sets.
-  Three of the eight are the weapon, one is the jump, four are Head flags:
-
-      0  Fire     Weapon := 1, but only if it is still 0
-      1  Fire+    Weapon := 2, unless it is already 3
-      2  Charge   Weapon := 3
-      3  Jump+    JumpStrength := 0x84, up from the starting 0x68
-      4..7        Head[variant] := 1
-
-  The two guards on the weapon are the whole reason it is not a plain
-  assignment: picking up Fire after Charge must not demote you. Reproduced as
-  written rather than tidied into a max(), because they are not the same
-  function - variant 1 refuses only the value 3, so Fire+ over Fire+ does
-  re-apply.
+  The two weapon guards are why this is a chain of independent ifs and not a
+  case: picking up Fire after Charge must not demote you. They are not the
+  same function either - PICKUP_FIRE_PLUS refuses only WEAPON_CHARGE, so
+  Fire+ over Fire+ does re-apply.
 
   Presentation - the panel, the fanfare, destroying the entity - is the
   caller's. This is only the state change. }
@@ -455,13 +459,13 @@ procedure PowerUpGrant(var P: TPlayerState; Variant: Integer);
 begin
   { The original's chain of independent ifs, not a case - two of them carry
     conditions a case would invite tidying away. }
-  if (Variant = 0) and (P.Weapon = 0) then
-    P.Weapon := 1;
-  if (Variant = 1) and (P.Weapon <> 3) then
-    P.Weapon := 2;
-  if Variant = 2 then
-    P.Weapon := 3;
-  if Variant = 3 then
+  if (Variant = PICKUP_FIRE) and (P.Weapon = WEAPON_NONE) then
+    P.Weapon := WEAPON_FIRE;
+  if (Variant = PICKUP_FIRE_PLUS) and (P.Weapon <> WEAPON_CHARGE) then
+    P.Weapon := WEAPON_FIRE_PLUS;
+  if Variant = PICKUP_CHARGE then
+    P.Weapon := WEAPON_CHARGE;
+  if Variant = PICKUP_JUMP_PLUS then
     P.JumpStrength := POWERUP_JUMP_STRENGTH;
   if (Variant >= ABILITY_DASH) and (Variant <= ABILITY_GLIDE) then
     P.Head[Variant] := 1;
