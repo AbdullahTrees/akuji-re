@@ -421,27 +421,17 @@ begin
   case MenuIndex of
     0, 1:
       begin
-        { The original does SEVEN things here, and this used to do two.
-          GameState_Reset(mode 0) comes first, then the state, then the
-          sub-mode records which of NEW GAME / CONTINUE was chosen, then the
-          cursor, and then the OPENING's slide and timer are both zeroed -
-          which is what makes the cutscene start from its first slide rather
-          than wherever a previous run left it.
+        { THE INDEX IS READ INTO A TEMPORARY BEFORE THE RESET, because
+          GameState_Reset ZEROES MenuIndex - read it afterwards and it is
+          always 0, which is NEW GAME whichever row the cursor was on.
 
-          THE INDEX IS READ INTO A TEMPORARY FIRST, and that ordering is the
-          whole fix for "CONTINUE starts a new game". The original does:
-
-              uVar3 = *p_MenuIndex;         <- saved BEFORE the reset
+              uVar3 = *p_MenuIndex;       <- before
               GameState_Reset(form, 0);
-              *p_GameState    = 0x28;
-              *p_TitleSubMode = uVar3;      <- the saved copy, not a reload
+              *p_TitleSubMode = uVar3;    <- the saved copy, not a reload
 
-          because GameState_Reset ZEROES p_MenuIndex. Reading the index after
-          the reset always yields 0, which is NEW GAME, whichever row the
-          cursor was on. This code read it afterwards and so could never
-          record a continue. It became reachable when MenuIndex stopped being
-          a private field and became the shared global the original has - the
-          merge was right, and this ordering is the rest of that same fact. }
+          The reset also zeroes the opening's slide and timer, which is what
+          makes the cutscene start from its first slide rather than wherever
+          a previous run left it. }
         PlaySound(SND_OK);
         Chosen := MenuIndex;
         if Assigned(FOnResetState) then
@@ -543,23 +533,16 @@ begin
   end;
 end;
 
-{ 0x004629A0, the options arm's switch. Two things here were missing and both
-  are audible or visible to the player.
+{ 0x004629A0, the options arm's switch.
 
-  EVERY ROW ACKNOWLEDGES A CHANGE, and the sound is not the same on all of
-  them. The original plays SND_OK on the level, the three toggles and the
-  volume, and SND_PI - the quieter cursor blip - on the gallery row. It sounds
-  only when the value actually MOVED: the clamp works by zeroing the delta
-  first and then testing it, so a press against either end of a range is
-  silent. The toggles have no range, so they always sound.
+  Every row acknowledges a change, and not with the same sound - SND_PI on
+  the gallery row, SND_OK on the rest. It sounds only when the value actually
+  MOVED: the clamp zeroes the delta first and then tests it, so a press
+  against either end of a range is silent. The toggles have no range, so they
+  always sound.
 
-  THE VOLUME TAKES EFFECT IMMEDIATELY. The original follows the volume write
-  with the same 57-channel sweep Title_Init does -
-
-      for i := 0 to $38 do SetVolume(chan[i], (10 - vol) * -0x1C2)
-
-  so the next sound you hear is at the new level. Storing the number and
-  waiting for the next Title_Init meant the slider moved and nothing changed. }
+  The volume write is followed by the same 57-channel sweep Title_Init does,
+  so the next sound you hear is already at the new level. }
 procedure TTitleScreen.AdjustValue(Delta: Integer);
 begin
   if Delta = 0 then Exit;

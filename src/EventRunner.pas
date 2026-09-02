@@ -737,20 +737,11 @@ begin
        and (P.Progress[Rec.BlockedBy] = 1) then
     begin
       Events.Disable(I);
-      { ENTITY_DESTROY, NOT A KILL. The original's disable branch ends
-
-            if (*(char *)(tbl + 5 + i*0x24) == 1)
-                Entity_Destroy(pool + slot * 0x104, 0);
-
-        and the difference is the whole bug: Kill clears EF_ALIVE and nothing
-        else, so the sprite stays in the pool, still visible. Entity_UpdateAll
-        skips dead entities, so that sprite is never repositioned again - it
-        stays at the SCREEN coordinates it last had and appears to follow the
-        player around the room. Reported for a door that had just been
-        unlocked, which is exactly when this branch fires: the door's
-        BlockedBy flag goes up and the event is disabled forever.
-
-        The same distinction left the power-up orb on screen. }
+      { ENTITY_DESTROY, NOT Kill. Kill clears EF_ALIVE and nothing else, so
+        the sprite stays in the pool still visible - and Entity_UpdateAll
+        skips dead entities, so it is never repositioned again and sits at
+        the SCREEN coordinates it last had, appearing to follow the player
+        around the room. This branch fires the moment a door is unlocked. }
       if Rec.Active then
       begin
         if World <> nil then

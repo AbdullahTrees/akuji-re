@@ -5,48 +5,24 @@
       0x00459624  air dash    state 7
       0x00459828  knockback   state 8
 
-  This is the first piece of the game's BEHAVIOUR written as running code
-  rather than described in a comment. Everything before it was formats, tables
-  and structure.
+  It reaches the tilemap, the entity pool, the sound device and the camera
+  through TPlayerWorld, which keeps the controller deterministic and lets
+  --selftest-trace drive it over a hand-built world.
 
-  ## What the world has to provide
+  THE PF_* FIELDS ARE THE PLAYER'S MEANING FOR SHARED SLOTS. PF_LANDED and
+  Entities.EF_RIDDEN are the same slot, 8+2, used for different things by
+  different types - the trap EF_HP set earlier.
 
-  The controller does not own the tilemap, the entity pool, the sound device or
-  the camera. It reaches all of them through TPlayerWorld, which exists for two
-  reasons. It keeps this unit honest - the parts that are decoded are here, and
-  the parts that are not are behind a method that says so. And it makes the
-  controller DETERMINISTIC and testable: --selftest-trace drives it over a
-  hand-built world with a scripted input sequence and records a frame-by-frame
-  trace.
-
-  That trace is not proof that this matches the original. Nothing here is, yet.
-  It is the shape the eventual differential test needs: run both executables on
-  the same input from the same state and diff the traces. Until then it locks
-  the reconstruction against silent drift, which is the weaker thing it can do.
-
-  ## Fields
-
-  The player's block A and B slots are per-type runtime state, so their meaning
-  here is the PLAYER'S, not a general one. Written out as PF_* to keep them
-  from being mistaken for entity-wide fields - PF_LANDED and Entities.EF_RIDDEN
-  are the same slot, 8+2, used for different things by different types, which
-  is exactly the trap EF_HP set earlier.
-
-  ## Two original bugs are reproduced
-
-  Player_UpdateGlide clamps the VERTICAL velocity by writing the HORIZONTAL
-  one, twice:
+  TWO ORIGINAL BUGS ARE REPRODUCED. Player_UpdateGlide clamps the VERTICAL
+  velocity by writing the HORIZONTAL one, twice:
 
       if vy >  $200 then vx :=  $200
       if vy < -$100 then vx := -$100
 
-  That is what the binary does. It is reproduced, not corrected, and marked so
-  at the site. A fixed version would be a different game.
-
-  The second is smaller: the landing branch reads PF_FALL_FRAMES div 3 to pick
-  the sound and then uses the same value as the recovery length, so a long fall
-  both thumps and takes longer to get up. That one is probably deliberate; it
-  is only noted because it looks like a copy-paste at a glance. }
+  and the landing branch reads PF_FALL_FRAMES div 3 both to pick the sound
+  and as the recovery length, so a long fall thumps AND takes longer to get
+  up. The first is marked at its site; the second is probably deliberate and
+  is noted only because it looks like a copy-paste. }
 
 unit Player;
 
@@ -149,25 +125,16 @@ const
   PLAYER_SPAWN_KIND = EKIND_SINGLE;
   PLAYER_SPAWN_TYPE = 1;
 
-{ 0x00462210. What GS_STAGE_BEGIN runs, once, and it ends by setting GS_PLAY -
-  so the state exists for exactly one frame. Everything a stage needs is set up
-  here and nothing is torn down afterwards.
+{ 0x00462210. What GS_STAGE_BEGIN runs, once - it ends by setting GS_PLAY, so
+  the state exists for exactly one frame.
 
-  The order matters and is kept: the assets are loaded BEFORE the layer origin
-  is written and the player is spawned, because loading replaces the tilemaps
-  and the surfaces the other two depend on.
+  The order is kept: assets load BEFORE the layer origin is written and the
+  player spawned, because loading replaces the tilemaps and surfaces the
+  other two depend on.
 
-  What is reconstructible is the last three steps, and they are the ones that
-  say what the player state's fields mean:
-
-      LayerInfo[0].Origin := (ScrollX, ScrollY) shl 5 + POSITION_BIAS
-      player := Spawn(EKIND_SINGLE, 1, SpawnX shl 5, SpawnY shl 5)
-      player.EF_FACING := P.SpawnFacing
-
-  All four of those are PIXELS shifted into 1/32 units, which is what settled
-  that SpawnX and SpawnY are not tile numbers - see PlayerState.pas.
-
-  It also clears the event interpreter's wait state and the title's sub-mode,
+  The layer origin, the spawn position and the facing are all PIXELS shifted
+  into 1/32 units, which is what settled that SpawnX and SpawnY are not tile
+  numbers - see PlayerState.pas. It also clears the interpreter's wait state,
   which is why a script cannot be left half-run across a stage change. }
 procedure StageBegin(Pool: TEntityPool; var L: TLayerInfo;
                      var P: TPlayerState; Host: TStageHost;
