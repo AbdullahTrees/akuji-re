@@ -271,11 +271,22 @@ begin
   { The fade is the last thing before the surface reaches the screen, which is
     where DirectDraw would have applied it too. }
   ApplyFade;
-  { The original branched on a fullscreen flag at +0x3C: DirectDraw Flip when
-    set, otherwise Blt to the window's screen origin. Windowed is the shipped
-    configuration (system.ini fullscreen=off), so that is the path to build. }
+  { The original branches on a fullscreen flag at +0x3C: DirectDraw Flip when
+    set, otherwise Blt. Windowed is the shipped configuration (system.ini
+    fullscreen=off), so that is the path to build.
+
+    IT BLITS TO THE CLIENT RECT, NOT TO THE ORIGIN. TDDDD_Present @ 0x00449D00
+    takes the form's rect, translates it to screen coordinates with
+    ClientToScreen, and hands DirectDraw that as the destination against a
+    source of the whole surface - and a Blt whose rects differ in size
+    STRETCHES. So the picture fills whatever the window has become, which is
+    why maximising the original scales it (and distorts it - there is no
+    aspect correction anywhere in the call).
+
+    At the shipped 320x240 the two are the same blit. }
   if (Owner is TCustomForm) and TCustomForm(Owner).HandleAllocated then
-    TCustomForm(Owner).Canvas.Draw(0, 0, FSurface);
+    TCustomForm(Owner).Canvas.StretchDraw(
+      TCustomForm(Owner).ClientRect, FSurface);
 end;
 
 procedure TDDDD.DrawSprite(Src: TBitmap; X, Y: Integer; const SrcRect: TRect;
