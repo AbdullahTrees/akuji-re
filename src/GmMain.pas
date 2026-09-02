@@ -786,7 +786,12 @@ end;
 
 procedure TFrm_main.DialogueStartFade(FadeOut: Boolean);
 begin
-  { Every caller writes the step to self+0x10 first and passes Mode 0. }
+  { Every caller writes the step to self+0x10 first and passes Mode 0 - and it
+    has to be written, not assumed: the field persists, and the ending's
+    results screen leaves 2 in it. Every event-script site writes 4
+    (0x00455331, 0x0045536E, 0x004554FD, 0x0045553A, 0x00455712, 0x00455E8C,
+    0x00455F41). }
+  DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, FadeOut);
 end;
 
@@ -822,6 +827,7 @@ begin
   { Opening_Update makes the same pair of calls every other screen does -
     self+0x10 := 4, then 0x0044DC48 with the direction. The argument here is
     named FadeIn and StartFade takes FadeOut, so it inverts. }
+  DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, not FadeIn);
 end;
 
@@ -1096,6 +1102,8 @@ end;
 
 procedure TFrm_main.StageBeginFade;
 begin
+  { Stage_Begin @ 0x00462229 writes 4 like the rest. }
+  DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, False);
 end;
 
@@ -1150,7 +1158,8 @@ end;
 procedure TFrm_main.GameOverFade(FadeIn: Boolean);
 begin
   { The original sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48
-    with FadeIn as its third argument. }
+    with FadeIn as its third argument - 0x00461A7E and 0x00461B2D, both 4. }
+  DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, not FadeIn);
 end;
 

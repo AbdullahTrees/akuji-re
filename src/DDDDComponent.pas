@@ -186,8 +186,19 @@ end;
 
 procedure TDDDD.TickFade;
 begin
+  { DRAW, THEN ADVANCE - Fader_Tick @ 0x0044DC70 does both, in that order,
+    inside one `busy` test.
+
+    Advancing first loses the last frame of the fade. On the step that crosses
+    the end the flag clears and nothing is painted, so the frame shows the
+    scene UN-FADED - and whatever was waiting on the fade only reacts on the
+    frame after that, which is long enough to see the old room before a
+    transition completes. }
   if not FFadeBusy then
     Exit;
+  if FFadeMode <> 0 then
+    Exit;
+  ApplyFade;
   { The bounds are STRICT and the level is not clamped - 0x0044DC70 tests
     `> 0x78` and `< 0`, so the counter runs one step past the end before the
     fade stops being busy. Clamping it would end the fade a frame early. }
@@ -241,18 +252,12 @@ procedure TDDDD.ApplyFade;
 var
   L, W, H: Integer;
 begin
-  { ONLY WHILE BUSY. Fader_Tick @ 0x0044DC70 draws the four bars INSIDE its
-    `busy` test, so an idle fader paints nothing whatever its level says.
-
-    Painting on the level instead held the screen black after any fade OUT,
-    because the level stops one step past FADE_FULL and stays there. Every
-    other fade out in the game is followed by a fade in, which takes the level
-    back down - the ending's phase 1 is the one place that is not, so it is
-    the only place the difference ever showed. }
-  if not FFadeBusy then
-    Exit;
-  { Mode 0 only, as 0x0044DC70's guard has it - and every caller passes 0. }
-  if FFadeMode <> 0 then
+  { The painter alone. TickFade owns the guards, because the original's
+    single Fader_Tick draws and advances inside one `busy` and mode-0 test -
+    an idle fader paints nothing whatever its level says. }
+  { Nothing to paint on until the surface has been sized - the fade self-test
+    drives a bare component with no screen behind it. }
+  if (FSurface = nil) or (FSurface.Width = 0) or (FSurface.Height = 0) then
     Exit;
   L := FFadeLevel;
   if L <= 0 then
@@ -268,9 +273,6 @@ end;
 
 procedure TDDDD.Present;
 begin
-  { The fade is the last thing before the surface reaches the screen, which is
-    where DirectDraw would have applied it too. }
-  ApplyFade;
   { The original branches on a fullscreen flag at +0x3C: DirectDraw Flip when
     set, otherwise Blt. Windowed is the shipped configuration (system.ini
     fullscreen=off), so that is the path to build.
