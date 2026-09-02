@@ -23,6 +23,10 @@ const
   { 0x78 and the step every caller writes to self+0x10 before starting one.
     120 at 4 a frame is thirty frames. }
   FADE_FULL = $78;
+  { The default step. It is not a constant in the original: the CALLER writes
+    the step to the fader's +0x10 before starting a fade, so the same fader
+    runs at different speeds - 4 for the ending's slide show, 2 for its
+    results screen. }
   FADE_STEP = 4;
   { 0x78 / 4 = 30 steps to cover, plus the one that pushes the level
     strictly outside and ends the fade. }
@@ -51,6 +55,7 @@ type
     FSurface: TBitmap;
     { The fade's four fields, at the original's own offsets. }
     FFadeLevel: Integer;      { +0x08 }
+    FFadeStep: Integer;       { +0x10, written by the caller before a fade }
     FFadeMode: Integer;       { +0x04 }
     FFadeOut: Boolean;        { +0x0C }
     FFadeBusy: Boolean;       { +0x0D }
@@ -101,6 +106,9 @@ type
     procedure ApplyFade;
     procedure TickFade;
     function FadeBusy: Boolean;
+    { How far the level moves per frame. The original's +0x10. }
+    property FadeStep: Integer read FFadeStep write FFadeStep;
+
     { 0 = clear, FADE_FULL = black. What a real fader would draw. }
     property FadeLevel: Integer read FFadeLevel;
     procedure DrawSprite(Src: TBitmap; X, Y: Integer; const SrcRect: TRect;
@@ -130,6 +138,10 @@ begin
   FInitialScreenWidth := 320;
   FInitialScreenHeight := 240;
   FBackColor := 0;
+  { Nothing zeroes this on the original's side either - the callers that care
+    write it, and the rest inherit whatever the last one set. Seeded with the
+    step the slide show and every ordinary transition use. }
+  FFadeStep := FADE_STEP;
   FSurface := TBitmap.Create;
 end;
 
@@ -181,13 +193,13 @@ begin
     fade stops being busy. Clamping it would end the fade a frame early. }
   if FFadeOut then
   begin
-    Inc(FFadeLevel, FADE_STEP);
+    Inc(FFadeLevel, FFadeStep);
     if FFadeLevel > FADE_FULL then
       FFadeBusy := False;
   end
   else
   begin
-    Dec(FFadeLevel, FADE_STEP);
+    Dec(FFadeLevel, FFadeStep);
     if FFadeLevel < 0 then
       FFadeBusy := False;
   end;

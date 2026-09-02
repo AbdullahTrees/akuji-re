@@ -177,13 +177,12 @@ type
     procedure DrawEndingStill;
     procedure DrawEndingResults;
     function EndingConfirm: Boolean;
-    procedure EndingStartFadeIn;
+    procedure EndingFade(Step: Integer; FadeOut: Boolean);
     function EndingMusicPlaying: Boolean;
     function EndingFadeBusy: Boolean;
-    procedure EndingStartFade;
+    procedure EndingStopMusicFade(FadeSeconds: Integer);
     procedure DrawEndingSlide;
     procedure EndingMusic(Track: Integer; Loop: Boolean);
-    procedure EndingStopMusic;
     procedure SessionResetHost;
     procedure StageBeginFade;
     procedure TitleVolume;
@@ -373,14 +372,13 @@ begin
   FEnding := TEndingScreen.Create;
   FEnding.OnPicture := EndingPicture;
   FEnding.OnMusic := EndingMusic;
-  FEnding.OnStopMusic := EndingStopMusic;
+  FEnding.OnStopMusic := EndingStopMusicFade;
   FEnding.OnPictureNamed := EndingPictureNamed;
   FEnding.OnSound := TitleSound;
   FEnding.OnConfirm := EndingConfirm;
-  FEnding.OnStartFadeIn := EndingStartFadeIn;
+  FEnding.OnFade := EndingFade;
   FEnding.OnMusicPlaying := EndingMusicPlaying;
   FEnding.OnFadeBusy := EndingFadeBusy;
-  FEnding.OnStartFade := EndingStartFade;
   { PowerUp_Show's fanfare. The panel closes when this track ends, so without
     it the overlay was waiting on the looping stage music - see Dialogue.pas. }
   FDialogue.OnSound := TitleSound;
@@ -1000,9 +998,11 @@ begin
   Result := ConfirmPressed(FSession.Input);
 end;
 
-procedure TFrm_main.EndingStartFadeIn;
+{ The original writes the step to the fader's +0x10 and then starts it. }
+procedure TFrm_main.EndingFade(Step: Integer; FadeOut: Boolean);
 begin
-  DDDD1.StartFade(0, False);
+  DDDD1.FadeStep := Step;
+  DDDD1.StartFade(0, FadeOut);
 end;
 
 function TFrm_main.EndingMusicPlaying: Boolean;
@@ -1015,12 +1015,7 @@ begin
   Result := DDDD1.FadeBusy;
 end;
 
-procedure TFrm_main.EndingStartFade;
-begin
-  { Fader_StartFade(fader, 0, 1) - fade OUT. The original also writes 4 to the
-    fader's +0x10 step first, which this component does not model. }
-  DDDD1.StartFade(0, True);
-end;
+
 
 { Phase 1, the slide show: the picture at (0x28, 8) and two rows of outlined
   text under it. Ending.pas holds which slide and which words; where they go
@@ -1047,9 +1042,9 @@ begin
   KbgmPlayer1.Play(Track, Loop);
 end;
 
-procedure TFrm_main.EndingStopMusic;
+procedure TFrm_main.EndingStopMusicFade(FadeSeconds: Integer);
 begin
-  KbgmPlayer1.Stop;
+  KbgmPlayer1.StopOrFade(FadeSeconds);
 end;
 
 { Title_Init @ 0x0046214C, in the order the original does it. It does NOT

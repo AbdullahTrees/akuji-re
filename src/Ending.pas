@@ -176,6 +176,13 @@ const
     the last slide of phase 1 parks it in Timer. }
   RESULTS_LEAVING = 999;
 
+  { Kbgm_StopOrFade's argument. }
+  MUSIC_STOP_HARD = 0;
+  MUSIC_STOP_FADE = 2;
+  { The fader step each part of the ending asks for. }
+  FADE_STEP_SLIDES = 4;
+  FADE_STEP_RESULTS = 2;
+
   { Where the host puts the slide: the picture at (0x28, 8) at 240x180, and
     the two lines left-aligned at x 0x38. }
   ENDING_PIC_X = $28;    ENDING_PIC_Y = 8;
@@ -199,7 +206,6 @@ type
     component layer, named for what it means rather than for the component. }
   TEndingPicture = procedure(Index: Integer) of object;
   TEndingMusic = procedure(Track: Integer; Loop: Boolean) of object;
-  TEndingStopMusic = procedure of object;
 
 { The completion percentage, INCLUDING the two places the original's x87
   route comes out a point low - see the header. }
@@ -252,19 +258,25 @@ type
   TEndingPictureNamed = procedure(const Name: string) of object;
   { The sound effects the stills and the result lines tick over on. }
   TEndingMusicCue = procedure(Id: Integer) of object;
+  { Kbgm_StopOrFade's argument: 0 stops at once, 2 fades. Phase 4 and the
+    results screen both fade, and phase 4 then WAITS for the track to finish
+    falling - a hard stop there makes that wait instant. }
+  TEndingMusicStop = procedure(FadeSeconds: Integer) of object;
+  { The caller sets the fader's step before starting it, so this carries it. }
+  TEndingFade = procedure(Step: Integer; FadeOut: Boolean) of object;
 
   TEndingScreen = class
   private
     FOnPicture: TEndingPicture;
     FOnMusic: TEndingMusic;
-    FOnStopMusic: TEndingStopMusic;
+    FOnStopMusic: TEndingMusicStop;
     FOnPictureNamed: TEndingPictureNamed;
     FOnSound: TEndingMusicCue;
     FOnConfirm: TEndingQuery;
-    FOnStartFadeIn: TEndingStopMusic;
+    FOnFade: TEndingFade;
     FOnMusicPlaying: TEndingQuery;
     FOnFadeBusy: TEndingQuery;
-    FOnStartFade: TEndingStopMusic;
+
   public
     { 0x0046D298, the step inside a phase. }
     Step: Integer;
@@ -302,15 +314,13 @@ type
       read FOnPictureNamed write FOnPictureNamed;
     property OnSound: TEndingMusicCue read FOnSound write FOnSound;
     property OnConfirm: TEndingQuery read FOnConfirm write FOnConfirm;
-    property OnStartFadeIn: TEndingStopMusic
-      read FOnStartFadeIn write FOnStartFadeIn;
+
     property OnMusicPlaying: TEndingQuery
       read FOnMusicPlaying write FOnMusicPlaying;
     property OnFadeBusy: TEndingQuery read FOnFadeBusy write FOnFadeBusy;
-    property OnStartFade: TEndingStopMusic
-      read FOnStartFade write FOnStartFade;
+    property OnFade: TEndingFade read FOnFade write FOnFade;
     property OnMusic: TEndingMusic read FOnMusic write FOnMusic;
-    property OnStopMusic: TEndingStopMusic read FOnStopMusic write FOnStopMusic;
+    property OnStopMusic: TEndingMusicStop read FOnStopMusic write FOnStopMusic;
   end;
 
 implementation
@@ -453,7 +463,7 @@ begin
     Step := 0;
     Timer := 0;
     if Assigned(FOnStopMusic) then
-      FOnStopMusic;
+      FOnStopMusic(MUSIC_STOP_HARD);
     Exit;
   end;
 
@@ -465,7 +475,7 @@ begin
       if not (Assigned(FOnFadeBusy) and FOnFadeBusy()) then
       begin
         if Assigned(FOnStopMusic) then
-          FOnStopMusic;
+          FOnStopMusic(MUSIC_STOP_HARD);
         ScreenPhase := 2;
         Step := 0;
         Timer := 0;
@@ -494,7 +504,7 @@ begin
       if Step = 1 then
         if Assigned(FOnMusic) then FOnMusic(ENDING_MIDI_SLIDE_1, True);
       if Step = ENDING_SLIDE_STOP_AT then
-        if Assigned(FOnStopMusic) then FOnStopMusic;
+        if Assigned(FOnStopMusic) then FOnStopMusic(MUSIC_STOP_HARD);
       { Unlooped, so that the slide can wait for it to finish. }
       if Step = ENDING_SLIDE_WAIT_A then
         if Assigned(FOnMusic) then FOnMusic(ENDING_MIDI_SLIDE_4, False);
@@ -506,8 +516,8 @@ begin
         { Pinned on the last slide, which stays on screen through the fade. }
         Step := ENDING_SLIDES;
         Timer := ENDING_WAIT_FADE;
-        if Assigned(FOnStartFade) then
-          FOnStartFade;
+        if Assigned(FOnFade) then
+          FOnFade(FADE_STEP_SLIDES, True);
         Exit;
       end;
 
@@ -578,7 +588,8 @@ begin
       begin
         Step := 1;
         Timer := 0;
-        if Assigned(FOnStopMusic) then FOnStopMusic;
+        { A FADE, not a stop - the wait below is for it to finish falling. }
+        if Assigned(FOnStopMusic) then FOnStopMusic(MUSIC_STOP_FADE);
       end;
     end;
     if (Step = 1) and not (Assigned(FOnMusicPlaying) and FOnMusicPlaying()) then
@@ -599,7 +610,7 @@ begin
   begin
     if Step = 0 then
     begin
-      if Assigned(FOnStartFadeIn) then FOnStartFadeIn;
+      if Assigned(FOnFade) then FOnFade(FADE_STEP_RESULTS, False);
       if Assigned(FOnPictureNamed) then FOnPictureNamed(RESULTS_PICTURE);
       Step := 1;
       EndingApplyUnlocks(S, P);
@@ -623,13 +634,16 @@ begin
     and (Assigned(FOnConfirm) and FOnConfirm()) then
     begin
       Step := RESULTS_LEAVING;
-      if Assigned(FOnStartFade) then FOnStartFade;
+      if Assigned(FOnFade) then FOnFade(FADE_STEP_RESULTS, True);
     end;
 
     if (Step = RESULTS_LEAVING)
     and not (Assigned(FOnFadeBusy) and FOnFadeBusy()) then
     begin
-      if Assigned(FOnStopMusic) then FOnStopMusic;
+      { The music FADES here and the screen fades back IN, so the title
+        arrives out of a dissolve rather than a cut. }
+      if Assigned(FOnStopMusic) then FOnStopMusic(MUSIC_STOP_FADE);
+      if Assigned(FOnFade) then FOnFade(FADE_STEP_RESULTS, False);
       ScreenPhase := 0;
       AGameState := GS_TITLE_INIT;
     end;
