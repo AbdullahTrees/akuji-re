@@ -455,22 +455,11 @@ begin
     behind a dialogue box or a pause. }
   FSession.TickBackground;
 
-  { TWO DISPATCHES WITH THE ENTITY UPDATE BETWEEN THEM.
-
-    This used to be one DispatchState with the session tick inside the play
-    arm, and the trace in notes/trace_findings.md says that is not the shape.
-    Frame 1 of a real session runs Title_Init, then Entity_UpdateAll, then
-    Title_MainMenu - two different state arms in one frame, with the entity
-    update in the middle, because Title_Init changes the state before the
-    second dispatch reads it.
-
-    Which arm goes where is not a guess either; it is what the log shows:
-
-        before      10 Title_Init, 30 Stage_Begin,
-                    60 SpawnNearCamera, 140 SpawnNearCamera + script
-        between     Entity_UpdateAll, every state, every frame
-        after       20 Title_MainMenu, 40 Game_StartOrLoad,
-                    130 PauseMenu_Update, 140 MessageBox_Update, 60 HUD }
+  { TWO DISPATCHES WITH THE ENTITY UPDATE BETWEEN THEM, because Title_Init
+    changes the state before the second dispatch reads it - frame 1 of a
+    real session runs Title_Init, Entity_UpdateAll, then Title_MainMenu.
+    Which arm goes where is from the trace, not from reading: see
+    notes/trace_findings.md. }
   FSession.BeginFrame;
   DispatchPre;
   { 0x00464D30 counts the event delay down HERE - between the state-60/140
@@ -555,24 +544,14 @@ end;
   The axes are the two-key form the original's are: left and right both held
   cancel to zero rather than one winning, which is what a real d-pad does and
   what the controller's double-tap window assumes. }
-{ POLLING ONLY. Everything this used to do besides reading the device belongs
-  to the END of the frame, and doing it here is what broke the dash.
+{ POLLING ONLY. Everything else about the input belongs to the END of the
+  frame, in InputEndOfFrame.
 
-  Player_Update's ground arm fires the dash when
-
-      InputState[$10] = 0  and  AxisX <> 0  and  HoldTimer <> 0
-        and  AxisX = HeldX  and  PlayerState[4] = 1
-
-  and byte $10 is Moving. Setting Moving from this frame's axes BEFORE the
-  handlers run makes the first two conditions contradictory: Moving is true
-  exactly when AxisX is non-zero, so the dash could never fire, ever. It has to
-  hold the PREVIOUS frame's value while the handlers run, which is what makes
-  the test an EDGE - "a direction is pressed now and was not last frame".
-
-  InputEndOfFrame is what does all of it, and it existed, and was tested, and
-  the frame loop simply never called it - AppIdle's step 7. Title.pas even
-  describes the ordering it depends on. The HoldTimer countdown below was a
-  second copy of the same work at the wrong end of the frame. }
+  Moving has to hold the PREVIOUS frame's value while the handlers run,
+  because Player_Update's dash tests `Moving = 0 and AxisX <> 0` - set
+  Moving from this frame's axes here and those two are contradictory, so
+  the dash can never fire at all. The test is an EDGE: a direction is
+  pressed now and was not last frame. }
 procedure TFrm_main.PollInput;
 begin
   Joy.Update;
@@ -687,21 +666,12 @@ begin
 end;
 
 { 0x00466888. The debug overlay, and the only reader of the two counters
-  Entity_UpdateAll maintains. Entities.pas records them as "nothing inside
-  the update loop reads them back" - this is what reads them, from outside.
+  Entity_UpdateAll maintains. All of it is behind the DebugLog flag from
+  system.dat +0x1B, which is off in the shipped settings.
 
-  Three lines at x 0, y 0, 8 and 16:
-
-      FPS:  frames counted between two GetTickCount samples a second apart
-      OBJ:  0x0046D20C, live entity slots        (EntitiesLive)
-      S P:  0x0046D210, slots that also drew     (EntitiesDrawn)
-
-  The whole thing is behind the DebugLog flag from system.dat +0x1B, which
-  is off in the shipped settings - so none of it is normally visible.
-
-  The FPS counter is a once-a-second SAMPLE, not an average: the frame count
-  is latched and zeroed when a second has elapsed, so the number on screen is
-  the previous second's total. }
+  The FPS line is a once-a-second SAMPLE, not an average: the frame count is
+  latched and zeroed when a second has elapsed, so what is on screen is the
+  previous second's total. }
 procedure TFrm_main.DrawDebugOverlay;
 var
   Now: DWord;
@@ -1142,20 +1112,9 @@ procedure TFrm_main.DispatchPre;
 begin
   case GameStateValue of
     GS_TITLE_INIT:
-      { Title_Init @ 0x0046214C. Now traced end to end:
-
-          Load_Stage_Assets(Self, 0)              surface + sprite set 0
-          Font_Define(0, Surfaces[0], $20, $140, 8, 8, 9, 9, $5F)
-          KbgmPlayer1.Play(p_MidiNames[0], 0)     'midi\init'
-          p_GameState := $14                      -> GS_TITLE_MENU
-          for i := 0 to $38 do                    all 57 effect buffers
-            DDSD1[i].SetVolume(-(10 - Settings[$24]) * $1C2)
-
-        The asset load and the font definition already happen in DDDD1Init, so
-        what is added here is the music and the volume sweep. The Font_Define
-        arguments match GameFont.pas exactly - 32 columns, 9x9 cells, 8 pixel
-        advance, last character $5F - which is independent confirmation of
-        constants that were originally read out of the font sheet itself. }
+      { Title_Init @ 0x0046214C. The asset load and the font definition
+        already happen in DDDD1Init, so what this adds is the music and the
+        volume sweep over all 57 effect buffers. }
       TitleInit;
     GS_STAGE_BEGIN:
       begin
@@ -1312,28 +1271,11 @@ begin
 end;
 
 { FormKeyDown @ 0x004665C8. The original's first test is VK_ESCAPE. }
-{ ---------------------------------------------------------------------------
-  FormKeyDown @ 0x004665C8.
-
-  Now translated from the real function rather than guessed. The whole of the
-  original is:
-
-      if Key = VK_ESCAPE then
-      begin
-        if GameState = $82 then begin GameState := 999; Exit end;
-        SavedMenuIndex := MenuIndex;  MenuIndex := 0;
-        SavedGameState := GameState;  GameState := $82;
-      end;
-      if (Key = $52) and (Shift = $04) then GameState := 10;
-
-  Two corrections to what was here before:
-
-    - Escape while already paused QUITS. It does not resume. Resuming is the
-      pause menu's own PAUSE_CONTINUE entry, which is what calls LeavePause.
-    - Ctrl+R is a soft reset back to the title. Shift is compared for EQUALITY
-      with $04, not tested for membership, so Ctrl+Shift+R deliberately does
-      not fire - reproduced with `Shift = [ssCtrl]` rather than `ssCtrl in`.
-  --------------------------------------------------------------------------- }
+{ FormKeyDown @ 0x004665C8. Two things that read as bugs and are not:
+  Escape while ALREADY paused quits rather than resuming - resuming is the
+  pause menu's own PAUSE_CONTINUE entry - and Ctrl+R compares Shift for
+  EQUALITY with $04, so Ctrl+Shift+R deliberately does not fire, which is
+  why this is `Shift = [ssCtrl]` and not `ssCtrl in Shift`. }
 procedure TFrm_main.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
