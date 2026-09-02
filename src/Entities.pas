@@ -385,24 +385,9 @@ const
   GRAVITY           = 8;      { added to EF_VEL_Y each frame, in 1/32 pixel }
   TERMINAL_VELOCITY = $200;   { 512, i.e. 16 pixels per frame }
 
-  { --- Touching the player, from Entity_PlayerTouch @ 0x00457880 ------------
-
-    Called once per frame for every slot above SLOT_ACTOR_LAST. It builds the
-    PLAYER's hitbox - slot 0, read straight off the array base - and this
-    entity's, using the +0xA8/+0xAC inset pair that Entity_BoxesOverlap also
-    uses, and tests them for overlap.
-
-    On overlap it switches on EF_TOUCH_KIND, which Entity_Spawn fills from type
-    table column 3. That is a DIFFERENT field from EF_CLASS, which comes from
-    column 4 - the two sit next to each other at +0xC8 and +0xCC and are easy
-    to conflate:
-
-        EF_TOUCH_KIND  $32  +0xC8  type col 3  what touching the player does
-        EF_CLASS       $33  +0xCC  type col 4  how the entity dies
-
-    Touch kinds seen: 1 and 7 call 0x00458138 with 1 and 2; 2, 4 and 5 call
-    their own handlers; 6 sets EF_BLOCK_A := 2 but only while the player's
-    EF_VEL_Y is positive, i.e. while falling onto it. }
+  { EF_TOUCH_KIND and EF_CLASS are adjacent, come from adjacent type table
+    columns, and are easy to conflate: one says what touching the player
+    does, the other how the entity dies. }
   EF_TOUCH_KIND = $32;
 
   { +0x90 is HIT POINTS. Entity_TakeProjectileHits subtracts the projectile's
@@ -564,24 +549,12 @@ type
       surf rooms. Terrain_Configure writes it directly beside the threshold,
       which is what "adjacent in BSS" means literally. }
     KillTile: Integer;
-    { THE FADER'S +0x0D, which suppresses the soft landing sound. The guard
-      in Player_Update is:
-
-          if (fall / 3 < 0xb)
-              if (fader[+0x0D] == 0)  PlaySound(8)
-
-      so a landing that happens mid-fade is silent. A door transition fades -
-      the warp waits on the fader before it loads - and the player is placed
-      standing on the floor as it ends, with PF_LANDED at 0, so its first
-      update runs the whole just-landed sequence. Without this every room
-      change plays a landing sound the original never plays.
-
-      ASKED, NOT STORED. The original dereferences the fader object where it
-      uses it. Copying the answer into a field once a frame is the shape of
-      mistake that hid the game-over screen, where the caller sampled the
-      music state before the code that starts the music had run. A world with
-      no fader wired keeps answering the plain field, which is what the test
-      doubles set. }
+    { ASKED, NOT STORED. Player_Update reads the fader where it uses it, to
+      suppress the soft landing sound mid-fade. Copying the answer into a
+      field once a frame is the shape of mistake that hid the game-over
+      screen, where the caller sampled the music state before the code that
+      starts the music had run. A world with no fader wired keeps answering
+      the plain field, which is what the test doubles set. }
 
     { The layer the entities live on, and the stage's terrain id. Both are
       globals in the original - p_LayerInfo and the stage record's last int -
@@ -904,25 +877,13 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
 procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
                                Tiles: TTileSource; KillTile: Integer);
 
-{ 0x00457F98. The entity-versus-entity hit test: build both boxes and hand
-  them to Rect_Overlap.
+{ 0x00457F98. The entity-versus-entity hit test. It uses the
+  EF_HITBOX_INSET_* box, not the EF_BOX_OFS_* one tile collision uses;
+  getting those the wrong way round would be silent and wrong.
 
-  The box is the one EF_HITBOX_INSET_* describes - the +0xA8/+0xAC pair, not
-  the +0xA0/+0xA4 pair tile collision uses. Getting those two the wrong way
-  round would be silent and wrong.
-
-  TWO THINGS THE EARLIER WRITE-UP DID NOT HAVE.
-
-  The SECOND entity's extents are multiplied by ScaleX and ScaleY before the
-  box is built, so a caller can test against a deliberately enlarged or shrunk
-  version of it. The first entity is always used at its own size, which is the
-  same as passing 1.
-
-  And the pixel conversion here does NOT remove POSITION_BIAS. Everywhere else
-  an entity position becomes pixels by subtracting the bias first; this uses the
-  bare `if negative then +31, then shift` form, so both boxes carry the same
-  +2048 pixel offset and it cancels in the comparison. Reproduced rather than
-  tidied, because tidying it would be a real change: the bias only cancels
+  The pixel conversion here does NOT remove POSITION_BIAS, unlike everywhere
+  else, so both boxes carry the same +2048 offset and it cancels in the
+  comparison. Tidying that away would be a real change: it only cancels
   because BOTH sides carry it. }
 function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
 function EntitiesOverlap(const A, B: TEntity;
@@ -984,10 +945,6 @@ var
 implementation
 
 
-{ The original rounds the layer origin with `if x < 0 then x := x + 31` and no
-  bias subtraction, where an entity position gets the biased form. The bias
-  cancels in the subtraction that follows it, so this is not a discrepancy -
-  but it is why this is written out rather than reusing PixelOf. }
 function TSpriteSink.AllocSprite(AnimId: Integer): Integer;
 begin
   Result := SPRITE_NONE;
