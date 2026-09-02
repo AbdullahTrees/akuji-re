@@ -229,7 +229,15 @@ procedure TDDDD.ApplyFade;
 var
   L, W, H: Integer;
 begin
-  if (not FFadeBusy) and (FFadeLevel <= 0) then
+  { ONLY WHILE BUSY. Fader_Tick @ 0x0044DC70 draws the four bars INSIDE its
+    `busy` test, so an idle fader paints nothing whatever its level says.
+
+    Painting on the level instead held the screen black after any fade OUT,
+    because the level stops one step past FADE_FULL and stays there. Every
+    other fade out in the game is followed by a fade in, which takes the level
+    back down - the ending's phase 1 is the one place that is not, so it is
+    the only place the difference ever showed. }
+  if not FFadeBusy then
     Exit;
   { Mode 0 only, as 0x0044DC70's guard has it - and every caller passes 0. }
   if FFadeMode <> 0 then
