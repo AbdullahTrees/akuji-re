@@ -267,28 +267,9 @@ const
   EF_TILE_OFS_X  = $3F;   { +0xFC }
   EF_TILE_OFS_Y  = $40;   { +0x100 - the LAST int in the record }
 
-  { --- Entity-versus-entity collision, from Entity_SolidCollideX / ...Y
-        @ 0x00456B4C / 0x00456E0C -------------------------------------------
-
-    A SECOND box, not the tile one above. Both functions build
-
-        L := PixelX - EF_EXTENT_X div 2 + EF_HITBOX_INSET_X
-        R := L + EF_EXTENT_X - 2 * EF_HITBOX_INSET_X
-
-    so the inset shrinks the extent symmetrically on both sides. EF_EXTENT_* is
-    shared with the tile box; the OFFSETS are not - $28/$29 belong to the tile
-    path and $2A/$2B to this one. Two separate pairs, easily conflated.
-
-    EF_SOLID is what makes an entity block at all, and it is a KIND, not a
-    flag. Both functions take a "this is the player" argument, and when it is
-    set the X one skips kind 1 and the Y one skips kind 2:
-
-        0   not solid, skipped entirely
-        1   blocks the player in Y only - a floor you can walk through sideways
-        2   blocks the player in X only - a wall you can pass vertically
-        3+  blocks both
-
-    Anything that is not the player is blocked by every kind. }
+  { The entity-versus-entity box, from Entity_SolidCollideX / ...Y. NOT the
+    tile box: EF_EXTENT_* is shared, but the offsets are not - EF_BOX_OFS_*
+    belongs to the tile path and EF_HITBOX_INSET_* to this one. }
   EF_HITBOX_INSET_X = $2A;  { +0xA8 }
   EF_HITBOX_INSET_Y = $2B;  { +0xAC }
 
@@ -323,31 +304,11 @@ const
   SOLID_SCAN_FIRST = $21;
   SOLID_SCAN_LAST  = $FF;
 
-  { --- The death sequence, from Entity_UpdateDying @ 0x004615A8 -------------
-
-    That function is called from THIRTY distinct sites - more than any other in
-    the game layer - which is why these fields are worth naming even though
-    only part of the state machine is understood.
-
-    It is a guard, run at the top of an entity's update:
-
-        if GameState <> GS_PLAY then Exit(True);
-        if (e^.Raw[EF_HP] < 1) and (e^.Raw[EF_CLASS] in [1, 2, 6]) then
-        begin
-          if e^.Raw[EF_DYING] = 0 then          // latch, runs once
-          begin
-            e^.Raw[EF_DYING] := 1;
-            ... per-class setup, spawning an effect entity ...
-          end;
-          if e^.Raw[EF_DEATH_TIMER] = 0 then
-          begin
-            if e^.Raw[EF_CLASS] = 2 then Play(SND_BOM03);
-            Entity_Destroy(e, True);
-          end;
-          Result := True;                        // caller skips normal update
-        end; }
+  { Entity_UpdateDying @ 0x004615A8 is called from THIRTY sites, more than
+    anything else in the game layer, which is why these fields earn names even
+    though only part of the state machine is understood. }
   EF_DEATH_TIMER = $1D;   { +0x74, counts down; 0 destroys the entity }
-  EF_DYING       = $11;   { +0x44, one-shot latch for the setup above }
+  EF_DYING       = $11;   { +0x44, the one-shot latch }
   EF_CLASS       = $33;   { +0xCC }
 
   { EF_CLASS is the entity's broad kind, NOT its type index - EF_TYPE is that.
@@ -421,31 +382,6 @@ const
   EF_BLOCK_LEN = 10;
   EF_STATE     = $08;   { block A[0]: per-type state, not a parameter }
 
-  { --- Gravity, from EntityUpdate_Type36_FallingItem @ 0x0045A7BC -----------
-
-    Type 36 is what Entity_MaybeDropItem drops, and its handler is the whole
-    falling-and-landing pattern in one place:
-
-        if Raw[EF_STATE] = 0 then           // still in the air
-        begin
-          Inc(Raw[EF_VEL_Y], GRAVITY);
-          if Raw[EF_VEL_Y] > TERMINAL_VELOCITY then
-            Raw[EF_VEL_Y] := TERMINAL_VELOCITY;
-        end;
-        Tile := Entity_TileCollideY(e, 0, Raw[EF_VEL_Y], 0, False);
-        if (Tile >= SolidTileMin) and (Raw[EF_VEL_Y] > 0) then
-        begin
-          Raw[EF_VEL_Y] := Entity_TileEdgeDistY(e, Raw[EF_VEL_Y]);
-          Raw[EF_STATE] := 1;               // landed
-        end;
-        Inc(Raw[EF_POS_Y], Raw[EF_VEL_Y]);
-
-    That is worth having for its own sake, but it also settles two earlier
-    names. Entity_TileCollideY is used exactly as "what tile would I hit moving
-    this far", compared against the terrain's solid threshold; and
-    Entity_TileEdgeDistY is used exactly as "how far may I actually move", to
-    land flush on the tile boundary instead of overlapping it. Both were named
-    from their internals alone, before any caller had been read. }
   GRAVITY           = 8;      { added to EF_VEL_Y each frame, in 1/32 pixel }
   TERMINAL_VELOCITY = $200;   { 512, i.e. 16 pixels per frame }
 
