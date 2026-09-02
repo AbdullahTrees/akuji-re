@@ -449,13 +449,14 @@ def cases_handler_probe_live():
                       PLAYERSTATE_AT, '00' * PLAYERSTATE_SIZE,
                       INPUTSTATE_PTR, le([INPUTSTATE_AT]),
                       INPUTSTATE_AT, '00' * INPUTSTATE_SIZE))
-            # Types whose sprite table is shorter than the sweep's range, so
-            # an out-of-range state or variant makes the original run off the
-            # end of it. DIV-011: we clamp, it does not. Tagged so the case
-            # asserts the difference instead of reporting it.
+            # These four push an out-of-range state or variant, so the
+            # original runs off the end of its sprite table into the next one.
+            # They were tagged f.div=11 while we clamped to the table; the
+            # tables are now views into SPRITE_DATA, which IS that memory, so
+            # the overrun lands on the same bytes and the cases AGREE. What is
+            # left of DIV-011 is only an index that leaves the whole region,
+            # which no case here reaches.
             div = ''
-            if (typ, st) in ((2, 3), (7, 2), (14, 2), (38, 2)):
-                div = ' f.div=11'
             ent = entity_mem(**{
                 'i%d' % 0x00: 3,          # slot
                 'i%d' % 0x02: 1,          # alive

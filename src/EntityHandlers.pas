@@ -25,6 +25,63 @@ uses
   SysUtils, Entities, GameState, SoundTable, PlayerState, Player, Directions;
 
 const
+  { --- The sprite DATA region, verbatim from 0x0046BC2C ---------------------
+
+    DIV-011 EXISTED BECAUSE EACH TABLE WAS DECLARED ON ITS OWN. Four
+    handlers index theirs with no bounds test - the disassembly is
+    `base + Frame*4 + Row*0x10` in all four, at 0x00459A0C, 0x0045A08C,
+    0x0045A3E0 and 0x0045B0CC - and out of range the original reads
+    straight on into the next table, because the tables are laid end to
+    end with every one flush against its neighbour.
+
+    Clamping was the only honest answer while each table was a separate
+    array: writing a neighbour's rows into one would assert a length the
+    layout denies. This is the region ITSELF, so an overrun inside it is a
+    read of the same memory the original reads.
+
+    The per-type arrays below are unchanged and still say what each table
+    IS. --selftest-spritedata asserts every one equals its slice of this,
+    so the two cannot drift apart.
+
+    RESIDUAL: an index far enough past a table to leave the REGION has
+    nothing to read and is still clamped. That is a much smaller hole than
+    the per-table clamp it replaces, and it is what is left of DIV-011. }
+  SPRITE_DATA_BASE = $0046BC2C;
+  SPRITE_DATA: array[0..245] of Integer = (
+      28,   29,   30,   31,   32,   33,   34,   35,   36,   37,
+      38,   39,   20,   21,   22,   23,   24,   25,   26,   27,
+     200,  201,  202,  203,  204,  205,  206,  207,  208,  209,
+     210,  211,   40,   41,   42,   43,  233,  234,  235,  236,
+      50,   51,   52,   53,  212,  213,  214,  215,  216,  217,
+     218,   64,   65,   66,   65,   67,   68,   69,   70,  219,
+     220,  221,  240,  241,  240,  241,  242,  243,  242,  243,
+     244,  245,  244,  245,  231,  232,  256,  257,  256,  257,
+     258,  259,  258,  259,  260,  261,  260,  261,  283,  284,
+     285,  286,  287,   71,   72,   73,   72,  118,  119,  120,
+     119,   74,   75,   76,   77,   78,   79,   80,   81,  480,
+     482,  483,  484,  485,  486,  487,  488,  480,  481,   82,
+     104,  105,   83,   99,  102,  103,   84,   85,  279,  280,
+     281,  282,   93,   94,   95,   96,   97,   98,  100,  101,
+     222,  223,  224,  225,  226,  222,   54,   61,   62,   59,
+      60,   63,   87,   86,   88,   86,   89,   90,   91,   92,
+       8,   10,   12,   60,   30,   10,    8,    6,    4,    0,
+      10,   20,  500,  501,  502,  501,  503,  512,  513,  514,
+     515,  516,  504,  505,  506,  507,  508,  509,  510,  511,
+     110,  111,  112,  113,  106,  107,  108,  109,  120,   60,
+      30,  227,  228,  229,  230,  246,  247,  248,  249,  250,
+     251,    2,    2,    3,    4,    2,    1,  123,  124,  125,
+     124,  192,  193,  194,  193,  240,  180,  180,  126,  127,
+     128,  127,  129,  130,   30,   20,   10,  120,   60,   30,
+      30,   20,   10,    1,    3,    5);
+
+  { Where each unchecked table starts in it, and the row stride they all
+    share - Row*0x10 is four ints. }
+  SPRITE_ROW = 4;
+  T2_AT    = ($0046BC2C - SPRITE_DATA_BASE) div 4;
+  T7_AT    = ($0046BCAC - SPRITE_DATA_BASE) div 4;
+  MANA_AT  = ($0046BDA0 - SPRITE_DATA_BASE) div 4;
+  T38_AT   = ($0046BF24 - SPRITE_DATA_BASE) div 4;
+
   { Four adjacent sprite tables. What settles an extent here is the LAYOUT,
     not the data: the region is a run of small const arrays laid end to end,
     each reached through its own pointer global, so a table ends where the
@@ -2323,6 +2380,10 @@ procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
   over all 103,525 cases: no disagreement. --selftest-entities re-checks the
   part of that which can be stated without the simulation. }
 function ScaleByPercent(Half, Percent: Integer): Integer;
+
+{ One int of the sprite DATA region - the four unchecked handlers read through
+  this so that an overrun lands on the same bytes the original's does. }
+function SpriteDatum(Index: Integer): Integer;
 
 
 implementation
@@ -6584,13 +6645,9 @@ var
   Frame, Row, D, Slot: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
-  { DIVERGENCE DIV-011: the original does not check. }
-  if (Frame < 0) or (Frame >= T38_FRAMES) then
-    Frame := 0;
   Row := E.Raw[EF_VARIANT];
-  if (Row < 0) or (Row >= T38_VARIANTS) then
-    Row := 0;
-  E.Raw[EF_ANIM_ID] := T38_SPRITES[Row][Frame];
+  { 0x0045B0CC, unchecked. }
+  E.Raw[EF_ANIM_ID] := SpriteDatum(T38_AT + Row * SPRITE_ROW + Frame);
 
   if E.Raw[EF_STATE] = 0 then
   begin
@@ -6747,17 +6804,15 @@ var
   Frame, Row, I, Slot, Facing, SparkRow: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
-  { DIVERGENCE DIV-011: the original does not check. }
-  if (Frame < 0) or (Frame >= T2_FRAMES) then
-    Frame := 0;
   Row := E.Raw[EF_STATE];
-  if (Row < 0) or (Row >= T2_STATES) then
-    Row := 0;
-  { Right half then left half, by the SIGN, two ifs and no else. }
+  { 0x00459A0C indexes base + Frame*4 + State*0x10 with no bounds test, and
+    takes the left-facing half from eight bytes further on. Right half then
+    left, by the SIGN, two ifs and no else. }
   if E.Raw[EF_VEL_X] > 0 then
-    E.Raw[EF_ANIM_ID] := T2_SPRITES[Row][Frame];
+    E.Raw[EF_ANIM_ID] := SpriteDatum(T2_AT + Row * SPRITE_ROW + Frame);
   if E.Raw[EF_VEL_X] < 0 then
-    E.Raw[EF_ANIM_ID] := T2_SPRITES[Row][Frame + T2_FRAMES];
+    E.Raw[EF_ANIM_ID] :=
+      SpriteDatum(T2_AT + Row * SPRITE_ROW + Frame + T2_FRAMES);
 
   if AGameState <> GS_PLAY then
     Exit;
@@ -7436,13 +7491,11 @@ var
   Frame, Row: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
-  { DIVERGENCE DIV-011: the original does not check. }
-  if (Frame < 0) or (Frame >= T7_FRAMES) then
-    Frame := 0;
   Row := E.Raw[EF_VARIANT];
-  if (Row < 0) or (Row >= T7_ROWS) then
-    Row := 0;
-  E.Raw[EF_ANIM_ID] := T7_SPRITES[Row][Frame];
+  { 0x0045A08C, unchecked. This one can overrun on the FRAME as well as the
+    row: the sprite is written before the `> 3` test that destroys the
+    entity, so the frame that ends it reads one past its row. }
+  E.Raw[EF_ANIM_ID] := SpriteDatum(T7_AT + Row * SPRITE_ROW + Frame);
 
   if AGameState <> GS_PLAY then
     Exit;
@@ -7805,12 +7858,9 @@ begin
     forms: `0014-*` 91 times, which writes no variant at all, and
     `0014-A-001` 31 times. So the shipped variants are exactly 0 and 1,
     against a table the layout independently says is two rows. }
-  { DIVERGENCE DIV-011: the original does not check. }
-  if (Variant < 0) or (Variant >= MANA_VARIANTS) then
-    Variant := 0;
-  if (Frame < 0) or (Frame >= MANA_FRAMES) then
-    Frame := 0;
-  E.Raw[EF_ANIM_ID] := MANA_SPRITES[Variant][Frame];
+  { 0x0045A3E0, unchecked. Only the VARIANT can leave the table here - the
+    frame counter is masked to 0..3 where it is advanced. }
+  E.Raw[EF_ANIM_ID] := SpriteDatum(MANA_AT + Variant * SPRITE_ROW + Frame);
 
   if E.Raw[EF_STATE] = 0 then
   begin
@@ -7836,6 +7886,23 @@ end;
 function IsAlive(const E: TEntity): Boolean;
 begin
   Result := (E.Raw[EF_ALIVE] and $FF) = 1;
+end;
+
+{ One int of the sprite DATA region.
+
+  Inside the region this is the read the original makes, overrun and all.
+  Outside it there is nothing to read - the original would take whatever the
+  process happened to have at that address, which is not reproducible - so the
+  index is clamped THERE and only there. }
+function SpriteDatum(Index: Integer): Integer;
+begin
+  { DIVERGENCE DIV-011, and all that is left of it: inside the region this is
+    the original's read, overrun and all. Outside it there is nothing to copy. }
+  if Index < 0 then
+    Index := 0;
+  if Index > High(SPRITE_DATA) then
+    Index := High(SPRITE_DATA);
+  Result := SPRITE_DATA[Index];
 end;
 
 function ScaleByPercent(Half, Percent: Integer): Integer;
@@ -8167,7 +8234,41 @@ begin
 end;
 
 
+{ THE REGION AND THE PER-TYPE TABLES MUST AGREE. SPRITE_DATA is the memory the
+  four unchecked handlers read through; the arrays are what each table IS. Both
+  come from the same image, and if one were ever edited without the other the
+  overruns would quietly stop matching.
+
+  Checked at startup rather than in a self-test, because a mismatch makes all
+  four of those handlers wrong and nothing else would notice. NOT Assert - FPC
+  compiles assertions out without -Sa, which this project does not pass. }
+procedure CheckSpriteData;
+
+  procedure Same(const Name: string; At: Integer; const Want: array of Integer);
+  var
+    I: Integer;
+  begin
+    for I := 0 to High(Want) do
+      if SPRITE_DATA[At + I] <> Want[I] then
+        raise Exception.CreateFmt(
+          '%s[%d] is %d but SPRITE_DATA at 0x%.8x is %d - the region and the '
+          + 'tables have been edited apart', [Name, I, Want[I],
+          SPRITE_DATA_BASE + 4 * (At + I), SPRITE_DATA[At + I]]);
+  end;
+
+begin
+  Same('T2_SPRITES', T2_AT, [T2_SPRITES[0][0], T2_SPRITES[0][1],
+       T2_SPRITES[0][2], T2_SPRITES[0][3], T2_SPRITES[1][0]]);
+  Same('T7_SPRITES', T7_AT, [T7_SPRITES[0][0], T7_SPRITES[0][1],
+       T7_SPRITES[0][2], T7_SPRITES[0][3], T7_SPRITES[1][0]]);
+  Same('MANA_SPRITES', MANA_AT, [MANA_SPRITES[0][0], MANA_SPRITES[0][1],
+       MANA_SPRITES[0][2], MANA_SPRITES[0][3], MANA_SPRITES[1][0]]);
+  Same('T38_SPRITES', T38_AT, [T38_SPRITES[0][0], T38_SPRITES[0][1],
+       T38_SPRITES[0][2], T38_SPRITES[0][3], T38_SPRITES[1][0]]);
+end;
+
 initialization
+  CheckSpriteData;
   { The touch pass is real now. It stays a variable only so a test can put a
     counting stub in its place. }
   EntityPlayerTouch := @PlayerTouch;
