@@ -81,6 +81,50 @@ const
     timer, and means "waiting on a fade" rather than a number of frames. }
   ENDING_WAIT_FADE = 999;
 
+  { --- Phase 2, the staff roll. Ending_ShowPicture(0x140, 0xF0, 'ed005.bmp')
+    puts one full-screen sheet up and the roll scrolls SEVENTEEN crops of it
+    past the camera; nothing else is drawn.
+
+    Each entry moves up ONE pixel every third frame - Credits_Tick counts to
+    2 and then advances every entry at once - and is drawn centred, at
+    (0x140 - Width) div 2, while -Height <= Y < 0xF1. The roll is over when
+    the LAST entry reaches the screen's vertical centre, which is why the
+    trailing entry sits so far down the sheet. }
+  CREDITS_PICTURE = 'ed005.bmp';
+  CREDITS_TICKS = 2;          { advance when the counter passes this }
+  CREDITS_STEP = 1;           { pixels per advance }
+  CREDITS_BOTTOM = $F1;       { one past the last row that still draws }
+  CREDITS_CENTRE_Y = $78;     { the last entry's finish line, less half its height }
+  CREDITS_ENTRIES = 17;
+  CREDITS_SCREEN_W = $140;    { the roll centres against the whole screen }
+
+  { Y, Height, Width, SrcY, SrcX - the argument order Surface_AppendEntry
+    stores them in, which is not the order it takes them. }
+  CREDITS_LAYOUT: array[0..CREDITS_ENTRIES - 1, 0..4] of Integer = (
+    ($0F0, $10, $B0, $000, $000),
+    ($130, $10, $50, $000, $0B0),
+    ($140, $10, $50, $010, $0C0),
+    ($160, $4B, 100, $040, $000),
+    ($1F0, $10, $40, $000, $100),
+    ($200, $10, $50, $010, $0C0),
+    ($220, $4B, 100, $040, 100),
+    ($2B0, $10, $40, $010, $030),
+    ($2C0, $10, $30, $010, $110),
+    ($2E0, $4B, 100, $040, 200),
+    ($370, $10, $50, $010, $070),
+    ($380, $10, $40, $020, $000),
+    ($3A0, $4B, 100, $08B, $000),
+    ($430, $10, $30, $010, $000),
+    ($440, $10, $50, $010, $0C0),
+    ($460, $4B, 100, $08B, 100),
+    ($550, $10, $10, $030, $000));
+
+  CREDITS_Y = 0;  CREDITS_H = 1;  CREDITS_W = 2;
+  CREDITS_SY = 3; CREDITS_SX = 4;
+
+  { Phase 5's background, by name like phase 2's. }
+  RESULTS_PICTURE = 'Option.bmp';
+
   { Where the host puts the slide: the picture at (0x28, 8) at 240x180, and
     the two lines left-aligned at x 0x38. }
   ENDING_PIC_X = $28;    ENDING_PIC_Y = 8;
@@ -151,12 +195,17 @@ type
   { Asked, not handed in - the same reason the game-over screen asks. Phase 1
     starts a track and then waits for it in a later frame of the same run. }
   TEndingQuery = function: Boolean of object;
+  { Phases 2 and 5 name their picture outright rather than numbering it -
+    Ending_ShowPicture takes a filename - so they cannot go through
+    OnPicture's ed%.3d.bmp. }
+  TEndingPictureNamed = procedure(const Name: string) of object;
 
   TEndingScreen = class
   private
     FOnPicture: TEndingPicture;
     FOnMusic: TEndingMusic;
     FOnStopMusic: TEndingStopMusic;
+    FOnPictureNamed: TEndingPictureNamed;
     FOnMusicPlaying: TEndingQuery;
     FOnFadeBusy: TEndingQuery;
     FOnStartFade: TEndingStopMusic;
@@ -166,6 +215,12 @@ type
     { 0x0046D174, the frame timer the staff roll and the rank line read. }
     Timer: Integer;
 
+    { The staff roll's live Y for each entry; everything else about an entry
+      is static and lives in CREDITS_LAYOUT. }
+    CreditY: array[0..CREDITS_ENTRIES - 1] of Integer;
+    CreditTicks: Integer;
+    CreditsDone: Boolean;
+
     procedure Update(var S: TGameSettings; const P: TPlayerState;
                      var AGameState: Integer);
 
@@ -174,7 +229,15 @@ type
     function SlideImage: Integer;
     function SlideLine(N: Integer): string;
 
+    { True while entry I is on screen. The host draws CREDITS_LAYOUT's crop of
+      the phase-2 picture at (CreditX(I), CreditY[I]). }
+    function CreditOnScreen(I: Integer): Boolean;
+    function CreditX(I: Integer): Integer;
+    procedure CreditsTick;
+
     property OnPicture: TEndingPicture read FOnPicture write FOnPicture;
+    property OnPictureNamed: TEndingPictureNamed
+      read FOnPictureNamed write FOnPictureNamed;
     property OnMusicPlaying: TEndingQuery
       read FOnMusicPlaying write FOnMusicPlaying;
     property OnFadeBusy: TEndingQuery read FOnFadeBusy write FOnFadeBusy;
@@ -245,6 +308,55 @@ begin
   Result := Format(ENDING_PERCENT_FMT, [EndingPercent(Counter)]);
 end;
 
+{ Credits_Tick @ 0x004515B4, less the drawing. }
+procedure TEndingScreen.CreditsTick;
+var
+  I, Last: Integer;
+  Advance: Boolean;
+begin
+  Advance := False;
+  if not CreditsDone then
+  begin
+    Inc(CreditTicks);
+    if CreditTicks > CREDITS_TICKS then
+    begin
+      Advance := True;
+      CreditTicks := 0;
+    end;
+  end;
+
+  for I := 0 to CREDITS_ENTRIES - 1 do
+  begin
+    if Advance then
+      Dec(CreditY[I], CREDITS_STEP);
+    { The original re-arms Advance when the LAST entry has gone off the top.
+      It cannot: the roll is declared done once that entry reaches the centre,
+      far below -Height. Reproduced as unreachable rather than dropped. }
+    if (I = CREDITS_ENTRIES - 1)
+    and (CreditY[I] < -CREDITS_LAYOUT[I][CREDITS_H]) then
+      Advance := True;
+  end;
+
+  Last := CREDITS_ENTRIES - 1;
+  if CreditY[Last] < CREDITS_CENTRE_Y - CREDITS_LAYOUT[Last][CREDITS_H] div 2 then
+    CreditsDone := True;
+end;
+
+function TEndingScreen.CreditOnScreen(I: Integer): Boolean;
+begin
+  Result := (I >= 0) and (I < CREDITS_ENTRIES)
+        and (CreditY[I] >= -CREDITS_LAYOUT[I][CREDITS_H])
+        and (CreditY[I] < CREDITS_BOTTOM);
+end;
+
+function TEndingScreen.CreditX(I: Integer): Integer;
+begin
+  Result := 0;
+  if (I < 0) or (I >= CREDITS_ENTRIES) then
+    Exit;
+  Result := (CREDITS_SCREEN_W - CREDITS_LAYOUT[I][CREDITS_W]) div 2;
+end;
+
 function TEndingScreen.SlideImage: Integer;
 begin
   if (Step < 1) or (Step > ENDING_SLIDES) then
@@ -266,6 +378,8 @@ end;
 
 procedure TEndingScreen.Update(var S: TGameSettings; const P: TPlayerState;
                                var AGameState: Integer);
+var
+  I: Integer;
 begin
   if ScreenPhase = 0 then
   begin
@@ -342,12 +456,23 @@ begin
     if Step = 0 then
     begin
       Step := 1;
-      if Assigned(FOnPicture) then
-        FOnPicture(0);
+      if Assigned(FOnPictureNamed) then
+        FOnPictureNamed(CREDITS_PICTURE);
+      for I := 0 to CREDITS_ENTRIES - 1 do
+        CreditY[I] := CREDITS_LAYOUT[I][CREDITS_Y];
+      CreditTicks := 0;
+      CreditsDone := False;
       if Assigned(FOnMusic) then
         FOnMusic(ENDING_MIDI, True);
     end;
-    Inc(Timer);
+
+    CreditsTick;
+    if CreditsDone then
+    begin
+      ScreenPhase := 3;
+      Step := 0;
+      Timer := 0;
+    end;
     Exit;
   end;
 

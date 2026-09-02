@@ -172,6 +172,8 @@ type
     procedure StopMusicTrack;
     procedure OpeningFade(FadeIn: Boolean);
     procedure EndingPicture(Index: Integer);
+    procedure EndingPictureNamed(const Name: string);
+    procedure DrawEndingCredits;
     function EndingMusicPlaying: Boolean;
     function EndingFadeBusy: Boolean;
     procedure EndingStartFade;
@@ -368,6 +370,7 @@ begin
   FEnding.OnPicture := EndingPicture;
   FEnding.OnMusic := EndingMusic;
   FEnding.OnStopMusic := EndingStopMusic;
+  FEnding.OnPictureNamed := EndingPictureNamed;
   FEnding.OnMusicPlaying := EndingMusicPlaying;
   FEnding.OnFadeBusy := EndingFadeBusy;
   FEnding.OnStartFade := EndingStartFade;
@@ -873,6 +876,37 @@ begin
     FEndingBmp := FArchive.LoadBitmapByName(Format(ENDING_PICTURE_FMT, [Index]));
 end;
 
+{ Ending_ShowPicture @ 0x00464484. Phases 2 and 5 name their picture instead
+  of numbering it, and it is full screen rather than the slide's panel. }
+procedure TFrm_main.EndingPictureNamed(const Name: string);
+begin
+  FreeAndNil(FEndingBmp);
+  if FArchive <> nil then
+    FEndingBmp := FArchive.LoadBitmapByName(Name);
+end;
+
+{ Phase 2, the staff roll: seventeen crops of one sheet, scrolling. Ending.pas
+  holds where each one has got to. }
+procedure TFrm_main.DrawEndingCredits;
+var
+  I: Integer;
+begin
+  DDDD1.Canvas.Brush.Color := clBlack;
+  DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
+  if FEndingBmp = nil then
+    Exit;
+  for I := 0 to CREDITS_ENTRIES - 1 do
+    if FEnding.CreditOnScreen(I) then
+      DDDD1.Canvas.CopyRect(
+        Rect(FEnding.CreditX(I), FEnding.CreditY[I],
+             FEnding.CreditX(I) + CREDITS_LAYOUT[I][CREDITS_W],
+             FEnding.CreditY[I] + CREDITS_LAYOUT[I][CREDITS_H]),
+        FEndingBmp.Canvas,
+        Rect(CREDITS_LAYOUT[I][CREDITS_SX], CREDITS_LAYOUT[I][CREDITS_SY],
+             CREDITS_LAYOUT[I][CREDITS_SX] + CREDITS_LAYOUT[I][CREDITS_W],
+             CREDITS_LAYOUT[I][CREDITS_SY] + CREDITS_LAYOUT[I][CREDITS_H]));
+end;
+
 function TFrm_main.EndingMusicPlaying: Boolean;
 begin
   Result := KbgmPlayer1.IsPlaying;
@@ -1287,7 +1321,9 @@ begin
           phases are the staff roll and the results, which the host does not
           draw yet - but the game scene is gone by then either way. }
         if ScreenPhase = 1 then
-          DrawEndingSlide;
+          DrawEndingSlide
+        else if ScreenPhase = 2 then
+          DrawEndingCredits;
       end;
     GS_QUIT:
       begin
