@@ -487,18 +487,13 @@ begin
     FSession.Sprites.ShiftY(-FShakeOffset);
   end;
   DispatchPost;
-  { The fade advances once a frame, which is what makes FadeBusy fall to False
-    after thirty of them and lets the interpreter's wait finish.
+  { The fade advances once a frame, which is what lets FadeBusy fall to False
+    after thirty of them and the interpreter's wait finish.
 
-    NOT WHILE PAUSED, and that is the original's own guard, immediately after
-    its PauseMenu_Update call:
-
-        if (*(int *)p_GameState == 0x82) PauseMenu_Update();
-        if (*(int *)p_GameState != 0x82) FUN_0044DC70(fader);
-
-    so a room transition caught mid-fade holds where it is until you unpause,
-    instead of running to completion behind the menu. This ticked
-    unconditionally. }
+    NOT WHILE PAUSED - the original guards this with the same state test it
+    just used for PauseMenu_Update, so a room transition caught mid-fade
+    holds where it is until you unpause instead of running to completion
+    behind the menu. }
   if GameStateValue <> GS_PAUSE then
     DDDD1.TickFade;
 
@@ -1198,19 +1193,10 @@ begin
       HUD_Draw, which is the one thing they do share. }
     GS_PLAY_ALT:
       begin
-        { GameOver_Update @ 0x00461A44 waits on the FADER between its phases:
-
-              phase 0            StartFade, then nothing until it finishes
-              phase 1, +0x0D==0  reset, reload the title assets, midi 2,
-                                 StartFade the other way
-              phase 2            draw slot 3, leave on the music ending or a
-                                 confirm
-
-          The comment that used to sit here said no fader was modelled, so
-          this passed a hard-coded False - and it was still saying it after
-          the fader was implemented. With FadeBusy permanently False phase 0
-          fell straight into phase 1 in the same frame and BOTH dissolves were
-          invisible. +0x0D is TDDDD.FadeBusy. }
+        { GameOver_Update @ 0x00461A44 waits on the FADER between its
+          phases, so FadeBusy has to be the live one. Hard-code it False and
+          phase 0 falls straight into phase 1 in the same frame, and BOTH
+          dissolves are invisible. }
         if FGameOver.Update(DDDD1.FadeBusy,
                             ConfirmPressed(FSession.Input), GameStateValue) then
           DrawGameOver;
@@ -1224,16 +1210,13 @@ begin
         if FDialogue.Active then
         begin
           { The three-line box is dismissed by the player; the full-screen
-            panel is dismissed by its own fanfare finishing, which is what
-            Overlay_Update asks the music player. One call, two sources of
-            "done", because the original has one function with two modes.
+            panel is dismissed by its own fanfare finishing. One call, two
+            sources of done, because the original is one function with two
+            modes.
 
-            The `else FSession.Frame` that used to sit here is gone: the
-            session no longer stops while the box is up. MessageBox_Update and
-            Entity_UpdateAll were logged in the same frames, so entities do
-            keep updating through a conversation - what stops during one is
-            Entity_PlayerTouch, which the log finds in state 60 and nowhere
-            else. That gating belongs to the handlers, not to us. }
+            The session does NOT stop while the box is up - entities keep
+            updating through a conversation. What stops is
+            Entity_PlayerTouch, and that gating belongs to the handlers. }
           if FDialogue.Mode = omPanel then
             FDialogue.Update(not KbgmPlayer1.IsPlaying, FSession.Input,
                              GameStateValue)
