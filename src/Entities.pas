@@ -8,10 +8,11 @@
       kind 0 -> slot 0 only        kind 1 -> slots 1..0x20
       kind 2 -> slots 0x21..0x120  289 in all
 
-  Slot 0 being the player is an inference from kind 0 owning exactly one slot;
-  nothing read so far names it. A slot is free when the byte at +0x08 is zero,
-  and Spawn returns -1 when the range is full - a full pool DROPS the spawn
-  silently, which is worth remembering when something fails to appear.
+  Slot 0 is the player - kind 0 owns exactly one slot, and Entity_PlayerTouch
+  and Player_TakeDamage both read the pool base as the player. A slot is free
+  when the byte at +0x08 is zero, and Spawn returns -1 when the range is full
+  - a full pool DROPS the spawn silently, which is worth remembering when
+  something fails to appear.
 
   POSITIONS ARE BIASED, not fixed point: Spawn adds $10000 and its callers
   subtract it again, so the bias cancels and the logical coordinate is plain
@@ -364,21 +365,11 @@ const
 
   { The two 10-int blocks Entity_Spawn zeroes, $08..$11 and $12..$1B:
 
-      Block A   the placement's PARAMETERS - but from A[1] up. A[0] is a
-                general per-type state slot, used as one by at least three
-                handlers.
+      Block A   the placement's PARAMETERS, from A[1] up. A[0] is a general
+                per-type state slot, used as one by at least three handlers.
       Block B   the handler's RUNTIME COUNTERS.
 
-    EntityUpdate_Type32_Emitter is the clearest example of the pairing:
-
-      A[1] frames between spawns   B[0] countdown to next spawn
-      A[2] how many in all         B[1] how many so far
-      A[3] scatter radius          B[2] countdown to next sound
-      A[4] frames between sounds
-
-    The radius is in PIXELS: Random(r * 16) - r * 8, so plus or minus r * 8 -
-    quarter tiles, not tiles. The exhaustion test is `A[2] < B[1]` AFTER the
-    increment, so an emitter configured for N spawns N + 1 times. }
+    EntityHandlers' type 32 block shows the pairing slot by slot. }
   EF_BLOCK_LEN = 10;
   EF_STATE     = $08;   { block A[0]: per-type state, not a parameter }
 
@@ -454,22 +445,16 @@ type
   PEntity = ^TEntity;
 
   { Everything an entity handler needs that it does not own: the tilemap, the
-    pool, the sound device. A test supplies a flat world; the game will supply
-    the real one.
+    pool, the sound device. A test supplies a flat world; the game supplies
+    the real one. The surface is deliberately the ORIGINAL's shape rather
+    than a tidier one.
 
-    This started as the player controller's private interface and was lifted
-    here the moment a second thing needed it. The surface is deliberately the
-    ORIGINAL's shape rather than a tidier one.
-
-    TileAt returns the tile index an entity would hit moving by Delta on that
-    axis, exactly as Entity_TileCollideX/Y do - the caller compares it against
-    SolidThreshold rather than being told yes or no, because the original does.
-    EdgeDist returns how far it may actually move.
-
-    SolidCollide* answer "did we hit a blocking entity"; how far to push out
-    comes back through PushX/PushY, and OnTopOfSolid says the hit was a
-    landing. That is the original's shape - three globals rather than out
-    parameters - and it is kept because the callers read them in that order. }
+    TileAt returns the tile an entity would hit and leaves the caller to
+    compare it against SolidThreshold, because the original does. EdgeDist
+    returns how far it may actually move. SolidCollide* answer only whether
+    something was hit - how far to push out comes back through PushX/PushY
+    and OnTopOfSolid, three globals rather than out parameters, kept because
+    the callers read them in that order. }
   { Declared ahead of TEntityWorld because Entity_Destroy reaches other
     entities by slot, and the pool is defined further down. }
   TEntityPool = class;
