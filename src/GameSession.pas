@@ -456,32 +456,10 @@ begin
   if Assigned(FOnResetHost) then
     FOnResetHost;
 
-  { Still not reproduced, and now the whole of the list:
-
-    0x0046D29C, which GameState_Reset is the ONLY function in the binary to
-    touch - nothing reads it, ever - so a counterpart would be a variable that
-    exists to be cleared and never examined. Left unmodelled deliberately.
-
-    The mode<>2 clear above walks THREE layers in the original and zeroes each
-    tile component's scroll at +0x6034/+0x6038 as well as the layer record.
-    This engine models ONE layer, and no shipped stage row uses layers 1 or 2 -
-    every one of the 66 has -1 in csv 3 and 4 - so the other two are never
-    populated and clearing them is unobservable.
-
-    The two objects freed through 0x0046D1F0 and 0x0046CEA4. The first is the
-    power-up panel surface, which this build loads once at startup instead of
-    per-use (see PowerUp_Show). The second was unaccounted for until 2026-08-31
-    and is the ENDING SCREEN'S SCRATCH SURFACE: DDDD1Init zeroes it,
-    Ending_Update frees and rebuilds it - a run of FUN_00451560 blits composes
-    the results screen into it - and FormDestroy frees it too. Ending.pas
-    models the results and the unlocks and allocates no surface of its own, so
-    as with the panel there is nothing here to free either.
-
-    NO EXTRAS remain. SavedMenuIndex := 0 used to sit beside MenuIndex here and
-    was removed on 2026-08-31: 0x0046D2C0 is SavedMenuIndex and GameState_Reset
-    never writes it. Harmless either way - EnterPause overwrites it from
-    MenuIndex before anything reads it back - but the standard is that nothing
-    exists here which the original does not do. }
+  { Four things the original clears here have no counterpart, each because it
+    is unobservable rather than forgotten - a global nothing ever reads, two
+    layers no shipped stage populates, and two surfaces this build does not
+    allocate. notes/game_state_reset.md has the case for each. }
 end;
 
 procedure TGameSession.SetFrames(AFrames: TSpriteSet);
