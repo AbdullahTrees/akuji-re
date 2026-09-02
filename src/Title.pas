@@ -35,7 +35,17 @@ const
     ' OPTION ',      // -> TSM_OPTIONS
     '  EXIT  ');     // -> GS_QUIT
 
-  CREDIT_TEXT = 'CREATED BY E.HASHIMOTO';   { 0x00462DC4, drawn at (0, 0xD8) }
+  { The cursor is a BRACKET PAIR around the row, not a single mark: eight
+    spaces wide, so starting eight pixels left of MENU_X puts the '<' before
+    the row's first glyph and the '>' after its last. }
+  MENU_CURSOR = '<        >';               { 0x00462DE4 }
+
+  { Game_DrawText's fourth argument is the CENTRED flag, and this is the one
+    line on the screen that passes 1 - the menu rows centre themselves inside
+    their eight characters instead. }
+  CREDIT_TEXT = 'CREATED BY E.HASHIMOTO';   { 0x00462DC4, centred at y 0xD8 }
+  CREDIT_Y = $D8;
+  TITLE_SCREEN_W = $140;
 
   { Options rows. Labels x=0x28, values x=0xE8,
     rows at y = 0x38 + row*0x10; cursor y = (index*2 + 7) * 8 }
@@ -43,7 +53,8 @@ const
   OPT_VALUE_X  = $E8;
   OPT_CURSOR_X = $E0;
   OPT_ROW_EXIT = 9;
-  OPT_TITLE    = '- OPTION -';
+  OPT_TITLE    = '- OPTION -';   { 0x00462DF8, centred at y 0x20 }
+  OPT_TITLE_Y  = $20;
   OPT_CURSOR   = '<       >';    { brackets the value column }
 
   { Row labels, verbatim from 0x00462E0C onward. }
@@ -682,15 +693,17 @@ begin
           C.Draw(0, 0, BgMenu);
         for I := Low(MENU_ITEMS) to High(MENU_ITEMS) do
           F.TextOut(C, MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I], 2);
-        F.TextOut(C, MENU_CURSOR_X, (MenuIndex * 2 + $11) * 8, '>', 1);
-        F.TextOut(C, 0, $D8, CREDIT_TEXT, 0);
+        F.TextOut(C, MENU_CURSOR_X, (MenuIndex * 2 + $11) * 8, MENU_CURSOR, 1);
+        F.TextOutCentered(C, CREDIT_Y, CREDIT_TEXT, TITLE_SCREEN_W, 0);
       end;
 
     TSM_OPTIONS:
       begin
         if BgOptions <> nil then
           C.Draw(0, 0, BgOptions);
-        F.TextOut(C, 0, $20, OPT_TITLE, 2);
+        { Centred, like the credit line - Game_DrawText's fourth argument is
+          1 here. }
+        F.TextOutCentered(C, OPT_TITLE_Y, OPT_TITLE, TITLE_SCREEN_W, 2);
         for I := Low(OPT_LABELS) to High(OPT_LABELS) do
           { EXIT is drawn on the right at (0xE8, 200) in the original, not in
             the label column with the rest. }
