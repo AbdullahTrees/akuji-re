@@ -23,7 +23,7 @@
 # the wrong suite having been run.
 
 the title menu reads its cursor AFTER GameState_Reset zeroes it
-src/Title.pas
+src/screens/Title.pas
 ---
         Chosen := MenuIndex;
         if Assigned(FOnResetState) then
@@ -34,21 +34,21 @@ src/Title.pas
         Chosen := MenuIndex;
 ===
 the message box reveals a character every frame instead of every third
-src/Dialogue.pas
+src/screens/Dialogue.pas
 ---
   MB_REVEAL_TICKS   = 2;
 --->
   MB_REVEAL_TICKS   = 0;
 ===
 the message box reveals ONE byte at a time rather than two
-src/Dialogue.pas
+src/screens/Dialogue.pas
 ---
     Ch := Copy(FPageText, I * 2 - 1, 2);
 --->
     Ch := Copy(FPageText, I, 1);
 ===
 the yes/no prompt reads the vertical axis again
-src/Dialogue.pas
+src/screens/Dialogue.pas
 ---
         if (Inp.AxisX <> 0) and not Inp.Moving then
         begin
@@ -61,7 +61,7 @@ src/Dialogue.pas
           Inc(FChoice, Inp.AxisY);
 ===
 the page finishes typing but never leaves the typing mode
-src/Dialogue.pas
+src/screens/Dialogue.pas
 ---
           if FReveal >= RevealUnits then
             EndOfPage;
@@ -70,7 +70,7 @@ src/Dialogue.pas
             EndOfPage;
 ===
 the event delay is stored but never counted down
-src/EventRunner.pas
+src/events/EventRunner.pas
 ---
   Dec(Arg);
   if (Arg <> 0) or (Events = nil) then
@@ -78,7 +78,7 @@ src/EventRunner.pas
   if (Arg <> 0) or (Events = nil) then
 ===
 the puzzle checkers re-fire one frame early
-src/EventRunner.pas
+src/events/EventRunner.pas
 ---
   if (Arg <> 0) or (Events = nil) then
     Exit;
@@ -87,21 +87,21 @@ src/EventRunner.pas
     Exit;
 ===
 the sprite buckets are drawn deepest-first again
-src/SpritePool.pas
+src/render/SpritePool.pas
 ---
   for Depth := SPRITE_DEPTH_FIRST to SPRITE_DEPTH_MAIN_LAST do
 --->
   for Depth := SPRITE_DEPTH_MAIN_LAST downto SPRITE_DEPTH_FIRST do
 ===
 depth bucket 0 is drawn, which the original never does
-src/SpritePool.pas
+src/render/SpritePool.pas
 ---
   SPRITE_DEPTH_FIRST     = 1;   { bucket 0 is never drawn }
 --->
   SPRITE_DEPTH_FIRST     = 0;   { bucket 0 is never drawn }
 ===
 within a depth bucket the pool is walked forwards
-src/SpritePool.pas
+src/render/SpritePool.pas
 ---
     for I := SPRITE_POOL_SIZE - 1 downto 0 do
       if FSlots[I].Used and FSlots[I].Visible
@@ -114,14 +114,14 @@ src/SpritePool.pas
       begin
 ===
 Stage_Begin stops clearing the scratch progress flags
-src/GameSession.pas
+src/gameplay/GameSession.pas
 ---
   ResetState(1);                        { 3    GameState_Reset(form, 1) }
 --->
   { 3 removed }
 ===
 Stage_Begin stops starting the room fade
-src/GameSession.pas
+src/gameplay/GameSession.pas
 ---
   if Assigned(FOnStartFade) then
     FOnStartFade;                       { 1-2  fader step 4, StartFade in }
@@ -129,21 +129,21 @@ src/GameSession.pas
   { 1-2 removed }
 ===
 the scratch wipe starts one flag too high
-src/GameSession.pas
+src/gameplay/GameSession.pas
 ---
   for I := PROGRESS_SCRATCH_FIRST to PROGRESS_LENGTH - 1 do
 --->
   for I := PROGRESS_SCRATCH_FIRST + 1 to PROGRESS_LENGTH - 1 do
 ===
 the scratch wipe runs below 4000 into real progress
-src/GameSession.pas
+src/gameplay/GameSession.pas
 ---
   for I := PROGRESS_SCRATCH_FIRST to PROGRESS_LENGTH - 1 do
 --->
   for I := PROGRESS_SCRATCH_FIRST - 1 to PROGRESS_LENGTH - 1 do
 ===
 the pause confirm returns instead of falling through
-src/Title.pas
+src/screens/Title.pas
 ---
     Result := False;
     { NO EXIT HERE. Every arm of the original's confirm ends in
@@ -153,7 +153,7 @@ src/Title.pas
     { NO EXIT HERE. Every arm of the original's confirm ends in
 ===
 Game_StartOrLoad stops clearing ScreenPhase
-src/PlayerState.pas
+src/gameplay/PlayerState.pas
 ---
   ScreenPhase := 0;
   AGameState := GS_STAGE_BEGIN;
@@ -161,7 +161,7 @@ src/PlayerState.pas
   AGameState := GS_STAGE_BEGIN;
 ===
 the gallery image is loaded and never drawn
-src/Title.pas
+src/screens/Title.pas
 ---
   if TitleSubMode = TSM_OMAKE then
   begin
@@ -174,35 +174,35 @@ src/Title.pas
     Exit;
 ===
 the game level draws a number instead of its name
-src/Title.pas
+src/screens/Title.pas
 ---
   LEVEL_NAMES: array[0..2] of string = ('EASY', 'NORMAL', 'HARD');
 --->
   LEVEL_NAMES: array[0..2] of string = ('0', '1', '2');
 ===
 HARD loses its distinct colour
-src/Title.pas
+src/screens/Title.pas
 ---
   LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 1);
 --->
   LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 0);
 ===
 a key name is wrong
-src/Title.pas
+src/screens/Title.pas
 ---
     ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '6');
 --->
     ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '7');
 ===
 a gallery slot name is wrong
-src/Title.pas
+src/screens/Title.pas
 ---
     ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO7');
 --->
     ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO8');
 ===
 the disable path kills instead of destroying
-src/EventRunner.pas
+src/events/EventRunner.pas
 ---
         if World <> nil then
           World.DestroyEntity(Pool.Entity(Rec.EntitySlot)^, False)
@@ -212,7 +212,7 @@ src/EventRunner.pas
         Pool.Kill(Rec.EntitySlot);
 ===
 sub-op 3 guards on ScreenPhase again, which the page turn clears
-src/EventRunner.pas
+src/events/EventRunner.pas
 ---
       if not Host.MessageBusy then
         Host.ShowLine(StepArg(Step, Op, 0));
@@ -224,14 +224,14 @@ src/EventRunner.pas
       end;
 ===
 water does not kill: the kill tile is computed and discarded
-src/GameSession.pas
+src/gameplay/GameSession.pas
 ---
   FWorld.KillTile := Kill;
 --->
   { discarded }
 ===
 the kill-tile check is not called after a vertical move
-src/Camera.pas
+src/gameplay/Camera.pas
 ---
   if (E <> nil) and (World <> nil) then
     EntityCheckKillTiles(E^, L, World.Tiles, World.KillTile);

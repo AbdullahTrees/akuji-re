@@ -200,7 +200,7 @@ reproduced, not fixed.
 
 There is no follow-the-player code. Every movement step asks whether the entity
 is outside a dead zone and heading further out, and if so applies the move to
-the layer instead. Translated in `src/Camera.pas`.
+the layer instead. Translated in `src/gameplay/Camera.pas`.
 
 | Address | Name | Grade | Notes |
 |---|---|---|---|

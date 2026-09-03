@@ -45,6 +45,8 @@ import os
 import re
 import sys
 
+from source_tree import source_files
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # pattern, what it is, what Delphi 6 wants instead
@@ -88,11 +90,7 @@ SKIP_DIRS = {'lib', 'backup'}
 
 
 def sources():
-    for pat in ('src/*.pas', 'src/*.lpr', 'src/*.inc'):
-        for f in sorted(glob.glob(os.path.join(REPO, pat))):
-            if os.path.basename(os.path.dirname(f)) in SKIP_DIRS:
-                continue
-            yield f
+    yield from source_files(REPO)
 
 
 def strip_comments(text):

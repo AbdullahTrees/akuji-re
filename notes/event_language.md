@@ -1,6 +1,6 @@
 # The event mini-language: how it was decoded
 
-Moved out of src/EventCommands.pas on 2026-09-01. The unit now carries
+Moved out of src/events/EventCommands.pas on 2026-09-01. The unit now carries
 the findings; this is the working-out behind them, kept verbatim.
 
 

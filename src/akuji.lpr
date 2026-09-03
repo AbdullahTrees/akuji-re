@@ -1,26 +1,4 @@
-{ Akuji the Demon - Free Pascal / Lazarus source port.
-
-  This file is a faithful reconstruction of the original Delphi .dpr program
-  block, recovered from `entry` at 0x0046716c in akuji.exe:
-
-      Delphi_RTL_Init(&LAB_00466ee4);
-      TApplication_Initialize();
-      TApplication_SetTitle(Application, "Akuji the Demon");
-      TApplication_CreateForm(Application, PTR_PTR_00464b54, MainForm);
-      TApplication_Run(Application);
-      Delphi_Halt0();
-
-  The unit name GmMain was recovered from the class RTTI (TTypeData.UnitName
-  for TFrm_main). See CLAUDE.md section 5.
-
-  Two notes on the entry point. Its address is 0x0046716C, taken from the PE
-  header's AddressOfEntryPoint rather than from a guess - an earlier version of
-  this comment said 0x004671AC, which is only the CreateForm CALL inside it.
-
-  And the title literal at 0x004671CC is odd: its Delphi length field reads 12,
-  but the bytes that follow are 'Akuji the Demon' + NUL, which is 15. The form
-  resource's Caption is unambiguously 'Akuji the Demon', so that is what is
-  used here; the discrepancy is recorded rather than resolved. }
+{ Akuji the Demon application entry point and executable self-test harness. }
 
 program akuji;
 
@@ -30,7 +8,7 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces,   // LCL widgetset - must come first
   Forms, Graphics,
-  GmMain in 'GmMain.pas' {Frm_main},
+  GmMain in 'screens\GmMain.pas' {Frm_main},
   QdaArchive, SoundTable, WaveFile, AudioMixer, AudioOut, MidiFile,
   KbgmPlayer, Directions, Entities, EventScripts, EventCommands, PlayerState, GameState,
   Stages, Camera, TileMaps, Player, EntityHandlers, EventRunner, GameSession,
@@ -40,33 +18,13 @@ uses
 
 { $R *.res  -- re-enable once Lazarus generates akuji.res (icon/manifest) }
 
-{ ---------------------------------------------------------------------------
-  Self-tests.
-
-  These exist because "it compiles and a window appears" proves almost nothing
-  about a reconstruction. Each mode below re-reads the game's own shipped data
-  and dumps what our reader made of it, so an independent implementation (the
-  scripts in tools/) can diff the two. Agreement between two readers written
-  from the same evidence is the strongest check available without the original
-  source - see the verification note in CLAUDE.md.
-
-  Output goes to selftest.log beside the executable: this is a GUI-subsystem
-  binary with no console attached, so WriteLn goes nowhere.
-  --------------------------------------------------------------------------- }
+{ Self-tests validate data readers, gameplay invariants, and reference behavior.
+  The GUI executable writes results to selftest.log beside the executable. }
 
 { --selftest <qda> [outdir] : archive reader. }
-{ WHERE THE ORIGINAL BINARY IS, and why this is not just a filename.
-
-  The game directory holds the ORIGINAL akuji.exe, which every differential
-  check reads: the entity jump table, the const tables, the emulator's input.
-  It is also the obvious place to drop OUR build to play it - and if that
-  happens under the name akuji.exe, every one of those checks silently starts
-  comparing the reconstruction against ITSELF and passes.
-
-  So: prefer akuji_source.exe, fall back to akuji.exe, and in either case
-  REFUSE anything that is not the original. The original is 502784 bytes and
-  carries ' was recovered! ' at 0x004568BC - our build is tens of megabytes and
-  has neither. }
+{ Locate the 502784-byte reference executable. Size and a known data string are
+  checked so differential tests cannot accidentally compare the build with
+  itself. }
 function OriginalExe(const GameDir: string): string;
 const
   ORIGINAL_BYTES = 502784;
@@ -299,16 +257,9 @@ begin
     Log.Add('OK');
 end;
 
-{ --playtest <gamedir> [seconds] : make actual noise.
-
-  The other self-tests prove the decoders agree with an independent reader, but
-  they never open a device, so they cannot tell you whether anything is audible.
-  This one opens both devices, plays a handful of effects with gaps, then plays
-  a real music track, and records exactly what each step reported. If it is
-  silent, selftest.log says which stage failed rather than leaving you guessing.
-
-  Note that midi/init.mid is a GM Reset and two Roland GS writes with no notes
-  in it at all, so playing track 0 is correctly silent. main01 is used here. }
+{ --playtest <gamedir> [seconds] opens both audio devices, plays representative
+  sound effects, then plays main01. Track 0 is intentionally excluded because
+  midi/init.mid contains setup messages but no notes. }
 function PlayTest(Log: TStrings): Integer;
 const
   { A spread of formats: 8-bit and 16-bit, 11025 and 22050. }
@@ -998,10 +949,8 @@ begin
     Inc(Result);
   end;
 
-  { These three are what make csv 1 and csv 2 a decode rather than a guess.
-    Each is an ALL-or-nothing pattern over the shipped data: 154 of 154, and
-    9 of 9. A wrong field scatter, or the two conditions swapped, breaks them
-    immediately. }
+  { These relationships hold across every shipped record and catch swapped or
+    incorrectly split CSV fields. }
   if SelfBlock <> Flags then
   begin
     Log.Add(Format('FAILED: %d of %d opcode-5 events set a flag other than their'
@@ -1038,15 +987,8 @@ begin
     Log.Add('OK');
 end;
 
-{ --selftest-settings <gamedir> <scratchdir> : the 56-byte settings record.
-
-  This one matters more than it looks. FormDestroy WRITES data\system.dat back
-  on exit, so a wrong field mapping would not merely misread the file - it
-  would corrupt the player's settings the first time the game is closed. A
-  round trip is the only cheap way to know the layout is right.
-
-  Loads the real file, saves into a scratch directory, and compares the two
-  byte for byte. Nothing is written to the game directory. }
+{ --selftest-settings <gamedir> <scratchdir> round-trips the 56-byte settings
+  record and compares it byte for byte. The game directory is read-only. }
 function SelfTestSettings(Log: TStrings): Integer;
 var
   GameDir, Scratch, SrcName, DstName: string;
@@ -1129,18 +1071,8 @@ begin
     Log.Add('FAILED - do NOT let FormDestroy write settings until this passes');
 end;
 
-{ ---------------------------------------------------------------------------
-  --selftest-script : the event mini-language.
-
-  EventCommands.pas recovered its grammar from the shipped data rather than
-  from the interpreter, so the only thing holding it up is that the structure
-  checks out with no exceptions. This re-checks that from the Pascal side, and
-  it is a genuine second opinion: tools/analyse_events.py reaches the same
-  numbers from an independent splitter written straight from the file text.
-
-  A grammar that were mis-split would not produce fixed arities, so any failure
-  here means the reading is wrong, not that the data is odd.
-  --------------------------------------------------------------------------- }
+{ --selftest-script validates the event grammar over every shipped record.
+  tools/analyse_events.py provides an independent parser for the same data. }
 
 function SelfTestScript(Log: TStrings): Integer;
 var
@@ -1391,11 +1323,8 @@ begin
       + ' got %d / %d / %d', [Spawns, Dialogue, Lists]));
     Inc(Result);
   end
-  { The signed-field split is the one fragile part of the grammar: '-' is both
-    the separator and the minus sign, and an earlier version of ParseFields
-    dropped the sign, turning -4 into 4. Nothing above would have noticed - the
-    arity and range checks all still passed. The shipped data holds exactly 22
-    negative arguments, so pinning that count is what makes the bug visible. }
+  { '-' is both a field separator and a minus sign. Pin the shipped count so a
+    parser cannot silently turn negative arguments into positive ones. }
   else if Negatives <> 22 then
   begin
     Log.Add(Format('FAILED: expected 22 negative arguments, got %d'
@@ -1551,19 +1480,8 @@ begin
     Inc(Bad);
   end;
 
-  { And the TRANSPOSED reading must not reproduce them, or the comparison
-    above would be true of both and could not tell them apart. It reproduces
-    exactly one of the thirty, and that one cannot be helped: tile 77 sits on
-    the sheet's DIAGONAL, where div and mod are equal, so both readings put it
-    at (224, 224). Asserting "the transposed reading matches nothing" would be
-    false; asserting "it matches only where the tile is diagonal" is the
-    actual invariant, and no accident can satisfy it.
-
-    This ran the OTHER WAY ROUND and passed, which is why the reconstruction
-    drew a transposed map for so long. The two hypotheses differ only by also
-    swapping which pushed argument is which, so this table alone could never
-    decide between them - it fits both. Rendering map 001 with each reading
-    and looking at it could, and did. }
+  { The transposed reading may agree only for diagonal sheet coordinates,
+    where div and mod necessarily produce the same value. }
   N := 0;
   Obvious := 0;
   for Terr := 1 to TERRAIN_MAX do
@@ -2217,21 +2135,9 @@ begin
     Want(P.Progress[1185] = 0,
          'settings +0x1D reached Progress[1185], which belongs to +0x1C');
 
-    { --- a continue, against a save this test BUILDS --------------------
-
-      This used to read the game's own data\save.dat and assert against
-      whatever was in it - the difficulty in particular, because the two
-      branches below only differ when the save disagrees with the settings.
-
-      That is not a fixture, it is whatever the last person to play left
-      behind. It broke exactly that way: the shipped save was difficulty 2,
-      someone played to a save point, and the file became a difficulty-0
-      run - at which point the test could no longer tell its two branches
-      apart. It said so and failed rather than passing vacuously, which is
-      the only reason this was noticed at all.
-
-      So it builds its own now, and the real save.dat is read for one
-      informational line and nothing else. }
+    { --- continue using a deterministic temporary save ------------------
+      The game-owned save is reported for information only; assertions use a
+      fixture built by this test. }
     if LoadSave(P, SaveName) then
       Log.Add(Format('data\save.dat is stage %d, music %d, difficulty %d '
         + '(read for information only)',
@@ -2493,18 +2399,7 @@ begin
   end;
 end;
 
-{ The outlined drawer's font name, pinned against akuji.exe.
-
-  Worth a check of its own because it was asked as a direct question - "Arial
-  should be used" - and the binary answers it. Game_DrawTextOutlined
-  @ 0x00451004 sets Font.Name from a literal at 0x00451028, and that literal is
-  'MS Sans Serif', the Delphi TFont default. Windows maps it to Microsoft Sans
-  Serif, which is metrically close enough to Arial to be mistaken for it on
-  screen - which is exactly how the question arose.
-
-  So this asserts both halves: the name the original asks for IS present, and
-  'Arial' is NOT anywhere in the image. Delphi stores TFont.Name as a
-  ShortString, a length byte then the text, which is what is searched for. }
+{ Verify the outlined-text font against the ShortString stored in akuji.exe. }
 function TestOutlinedFontName(Log: TStrings; const GameDir: string): Integer;
 var
   F: TFileStream;
@@ -2582,23 +2477,15 @@ begin
   if I <> 0 then Exit;
 end;
 
-{ The opening cutscene's timing, against the frame counts the REAL GAME
-  produced. tools/make_trace.py captured a 20,304 frame session; the slide
-  counter changed at these frames:
+{ The opening cutscene's timing, pinned to a captured game session:
 
       slide 1..7   480 frames each     8 seconds
       slide 8      120 frames          2 seconds
       slide 9      480 frames          8 seconds
       slide 10     765 frames          waits on the music, not the timer
 
-  This drives TOpeningScreen with the same inputs and requires the same counts.
-  It is the one test here whose expected values come from the original running
-  rather than from the original being read.
-
-  It exists because the cutscene was NOT RUNNING AT ALL. Opening.pas was correct
-  the whole time and nothing called it: GmMain passed GameStartOrLoad a bare
-  TStartHost, whose Opening returns False unconditionally, so the gate that is
-  supposed to hold the whole of starting a game never closed. }
+  TOpeningScreen must reproduce these counts under the same input and music
+  conditions. }
 function TestOpeningTiming(Log: TStrings): Integer;
 var
   Op: TOpeningScreen;
@@ -2674,36 +2561,16 @@ begin
   end;
 end;
 
-{ PixelOf and OriginPixel across NEGATIVE inputs, which is where they were
-  broken and where nothing tested them.
-
-  Both were a literal transcription of Delphi's codegen for `div 32` on a
-  signed value - `if v < 0 then v := v + 31; v := v sar 5` - written with `shr`
-  where the original has an arithmetic shift. On the face of it that is the
-  same defect --emudiff found in type 49's bob, and I recorded it as one.
-
-  IT WAS NOT. Both were giving correct answers, because POSITION_ROUND is an
-  untyped constant and `Integer - 65505` no longer fits in an Integer, so FPC
-  widens the expression to Int64; the shift happens in 64 bits and truncates
-  back, which for every value in range matches an arithmetic shift. Type 49
-  differed only in that its operand was a plain Integer variable, with nothing
-  to trigger the widening.
-
-  So this test does not guard a fix. It guards an ACCIDENT: the behaviour is
-  correct for a reason not visible at the call site, and a typed constant or a
-  hoisted temporary would silently remove it. The model below is the original's
-  own idiom computed independently, checked across the sign boundary, and it
-  holds for the `shr` form and the `div` form alike - which is precisely the
-  point, since it is the third form, the one someone refactors into later, that
-  it exists to catch. }
+{ Check PixelOf and OriginPixel across the sign boundary. POSITION_ROUND is
+  untyped, so FPC widens the subtraction before shifting; changing its type or
+  hoisting the expression could alter negative-coordinate rounding. }
 function TestPixelConversion(Log: TStrings): Integer;
 var
   Offset, Want, GotPx, GotOrigin: Integer;
   Bad: Integer;
 
-  { What the original computes: add the correction when negative, then an
-    ARITHMETIC shift - which together are truncation toward zero. Written out
-    rather than as `div` so the test does not simply restate the code. }
+  { Add the negative correction before the arithmetic shift to model integer
+    division truncated toward zero without restating the implementation. }
   function OriginalIdiom(V: Integer): Integer;
   begin
     if V < 0 then
@@ -2902,16 +2769,9 @@ begin
     Inc(Result);
   end;
 
-  { --- 4. the sprite tables, read back out of akuji.exe --------------------
-    Writing the addresses out and checking they tile end to end proves nothing:
-    the compiler folds constant arithmetic, and an earlier version of this
-    check emitted "unreachable code" warnings for every branch because it had
-    already decided the answer. The claim is about the BINARY, so the binary is
-    what has to be read.
-
-    One contiguous run of 20 dwords at 0x0046BB9C covers all six tables. If any
-    address, stride, or the right-then-left order were wrong, the values would
-    not line up. }
+  { --- 4. sprite tables read directly from akuji.exe -----------------------
+    Reading the contiguous 20-dword region independently checks table values,
+    addresses, stride, and facing order. }
   Bad := 0;
   Exe := TMemoryStream.Create;
   try
@@ -2989,12 +2849,7 @@ begin
   Inc(Result, Bad);
 
 
-  { --- every sound constant matches its recovered file name -----------------
-    The numbers come from the call sites in Player_Update and
-    Entity_UpdateDying; the names come from a static AnsiString array at
-    0x00468D50 whose length was read off the unit finalisation. Two entirely
-    separate recoveries, so requiring each constant to land on a plausibly-named
-    file is a real cross-check rather than a restatement. }
+  { --- sound constants agree with the executable's file-name table -------- }
   Bad := 0;
   for I := 0 to 12 do
   begin
@@ -3024,16 +2879,9 @@ begin
     [Bad]));
   Inc(Result, Bad);
 
-  { --- 5. the shipped save ------------------------------------------------
-    FROM tests/fixtures, NOT from the game directory. The game writes over
-    <game>/data/save.dat every time you save at a statue, so pinning anything
-    to that file means a playtest session silently invalidates the test - which
-    is exactly what happened on 2026-08-30, and the shipped original was lost
-    because the game directory is gitignored and nothing tracked it.
-
-    Absent, this SKIPS rather than fails: the reading is not wrong, the
-    evidence is missing, and a red gate that cannot be made green by any change
-    to the source would just be noise. tests/fixtures/README.md says how to
+  { --- 5. immutable shipped-save fixture ----------------------------------
+    Never use <game>/data/save.dat because normal play overwrites it. A missing
+    fixture skips this evidence check; tests/fixtures/README.md explains how to
     restore it. }
   SavePath := ExtractFilePath(ParamStr(0)) + '..' + PathDelim + 'tests'
               + PathDelim + 'fixtures' + PathDelim + 'save.dat';
@@ -3109,27 +2957,8 @@ begin
     Log.Add('FAILED');
 end;
 
-{ ---------------------------------------------------------------------------
-  --selftest-trace : run the player controller over a scripted input sequence
-  and check the result against numbers derived from the constants.
-
-  This is the first check of BEHAVIOUR rather than of data, and it is worth
-  being clear about what it can and cannot show. It cannot show that the
-  reconstruction matches akuji.exe - only a differential run against the
-  original can do that, and it does not exist yet. What it does is:
-
-    * fix the controller against silent drift, by pinning a trace
-    * check the movement numbers against arithmetic done independently of the
-      code: walking is AxisX shl 5 = 32 sub-pixels = exactly 1 pixel a frame,
-      the dash is shl 6 so exactly 2, a jump leaves at -JumpStrength and gains
-      PLAYER_GRAVITY a frame so its apex is JumpStrength div 4 frames up
-    * and be the SHAPE the differential test needs: same start state, same
-      input script, a trace to diff
-
-  The world is flat and empty: floor at pixel 200, a wall at pixel 300, no
-  solids, no sound. Deterministic - RandomBelow is a counter, not Random - so
-  the trace is reproducible.
-  --------------------------------------------------------------------------- }
+{ --selftest-trace runs the player controller through deterministic movement,
+  ability, collision, state, and audio scenarios in a flat test world. }
 
 type
   TFlatWorld = class(TPlayerWorld)
@@ -3137,9 +2966,7 @@ type
     FloorY, WallX, Nonce: Integer;
     Sounds: string;
     Spawns: Integer;
-    { Counted, not swallowed. This was an empty override, so the missing
-      StopMusic on the on-screen death was invisible to every test that ran
-      through this world. }
+    { Count music stops so death transitions remain observable. }
     MusicStops: Integer;
     function TileAtX(const E: TEntity; Delta: Integer; Scrolling: Boolean;
                      DeltaY: Integer = 0): Integer; override;
@@ -3193,9 +3020,7 @@ begin
   if Result > Delta then Result := Delta;
 end;
 
-{ NOTE: TFlatWorld no longer overrides SolidCollideX/Y. Those are implemented
-  on TEntityWorld now, and with no Pool attached the real code finds no solids
-  and returns False - which is exactly what the override used to fake. }
+{ With no pool attached, the inherited solid-collision methods find no solids. }
 function TFlatWorld.Spawn(Kind, TypeId, X, Y: Integer): Integer;
 begin
   Inc(Spawns);
@@ -3255,14 +3080,8 @@ var
     StepIn(GS_PLAY, AxisX, AxisY, Jump, Attack);
   end;
 
-  { Reset SETTLES for three frames before handing back, and that is not
-    padding. An entity placed on the ground has PF_LANDED = 0, so its first
-    update runs the whole just-landed sequence: soft landing sound, state 3,
-    velocity zeroed. That is the original's behaviour and it is correct - but
-    it means frame 1 is never a normal frame, and a jump pressed on frame 1 has
-    its edge eaten by a state the controller will not jump out of. Measuring
-    from frame 1 is how the first version of this test produced four wrong
-    failures. }
+  { Settle for three frames so the initial landing transition completes before
+    a scenario supplies input. }
   procedure Reset;
   var
     K: Integer;
@@ -3315,16 +3134,9 @@ begin
     P.Lives := 3;
     P.Weapon := 0;
 
-    { A SINGLE-SCREEN room: 10 x 7 tiles. Both max-scroll values then come out
-      at or below zero, so ShouldScroll* can never fire and the entity really
-      moves. That matters more than it sounds - the first version of this test
-      used a 1000-tile map, and the player hung in mid-air at pixel 155 with
-      its velocity climbing, because everything past the dead zone was being
-      applied to the LAYER. The floor here is defined in entity-pixel space,
-      which does not move when the layer does, so it was unreachable.
-
-      A test world is either single-screen, or it has to model tiles in world
-      space. This one is single-screen; 5a below widens it deliberately. }
+    { A 10-by-7 room disables camera scrolling, keeping the flat world's floor
+      and walls in the same coordinate space as the player. Scenario 5a widens
+      the map when it specifically tests scrolling. }
     FillChar(L, SizeOf(L), 0);
     L.TileW := 32; L.TileH := 32;
     L.MapTilesX := 10; L.MapTilesY := 7;
@@ -3418,15 +3230,11 @@ begin
     Log.Add(Format('jump:             apex %d px up, vy hit 0 at frame %d,'
       + ' landed frame %d', [199 - Apex, StopFrame, Landed]));
     Log.Add(Format('  sounds:         %s', [W.Sounds]));
-    { The apex is asserted on the VELOCITY, not on the pixel position. Velocity
-      is in 1/32 pixel, so the last few frames of a rise move less than a whole
-      pixel and the pixel minimum is reached several frames before vy crosses
-      zero - which is exactly what the pixel version of this check reported. }
+    { Assert the apex using velocity: sub-pixel movement lets the displayed
+      position reach its minimum before velocity crosses zero. }
     { JumpStrength div PLAYER_GRAVITY frames of gravity, PLUS the launch frame.
       The jump impulse is applied in the GROUNDED branch, and gravity only in
-      the airborne one, so the frame that leaves the ground gets the impulse
-      and no gravity. Hence 26 + 1. Getting this wrong is how the check first
-      read, and the +1 is a fact about the original's ordering, not a fudge. }
+      the airborne one, so the launch frame receives no gravity. Hence 26 + 1. }
     if StopFrame <> P.JumpStrength div PLAYER_GRAVITY + 1 then
     begin
       Log.Add(Format('FAILED: vy reached 0 at frame %d, but -%d rising at +%d'
@@ -3446,11 +3254,10 @@ begin
       Inc(Result);
     end;
 
-    { --- 5a. the dead zone stops the PLAYER, not the world -----------------
+    { --- 5a. the dead zone stops the player, not the world -----------------
       On a big map, walking right past pixel 177 scrolls the layer instead of
       moving the entity, so the player's own position stops there. That is the
-      camera doing its job, and it is worth pinning because it looks like a bug
-      the first time you see it. }
+      expected camera behavior. }
     L.MapTilesX := 1000;
     L.OriginX := POSITION_BIAS;
     Reset;
@@ -3488,11 +3295,10 @@ begin
         [EntityPixelX(E), W.WallX - 1]));
       Inc(Result);
     end;
-    { --- 6. the glide, and the bug it carries -------------------------------
+    { --- 6. glide entry and compatibility behavior --------------------------
       Entering needs Up, no horizontal input, having jumped, and the ability.
-      Once in, the ORIGINAL's vertical clamp writes the horizontal velocity -
-      see Player.pas. This checks the state is reached, not that the bug is
-      pleasant. }
+      Once active, the vertical clamp writes horizontal velocity for executable
+      compatibility; see Player.pas. }
     Reset;
     P.Head[ABILITY_GLIDE] := 1;
     Step(0, 0, True, False);                    { jump }
@@ -3522,11 +3328,7 @@ begin
     end;
 
     { --- 7. the GS_PLAY guard -------------------------------------------
-      Player_Update returns straight after the clock unless GameState is 60.
-      This check exists because the guard was MISSING from the first version of
-      Player.pas - the audit against a fresh decompile found it, and without a
-      test it could go missing again. The clock must still run; nothing else
-      may. }
+      Outside active play, the clock advances but player behavior does not. }
     Reset;
     StartX := EntityPixelX(E);
     F := P.ElapsedSec * 60 + P.Field11C0;
@@ -3555,9 +3357,7 @@ begin
           PlaySound(0x0C)
           state := 9
 
-      The music stop sits between the souls and the sound, and it was the one
-      statement missing - the death played its sound while the stage track ran
-      on underneath it and into the game-over screen. }
+      The music stop must occur once when the last life is lost. }
     P.Lives := 0;
     PlaceOnFloor;
     E.Raw[PF_STATE] := PS_SPECIAL3;      { knockback }
@@ -3644,35 +3444,10 @@ begin
     Log.Add('FAILED');
 end;
 
-{ ---------------------------------------------------------------------------
-  --selftest-layouts : the binary layouts, locked.
-
-  A record whose offsets must match the original's memory rots silently and
-  expensively. TPlayerState once sat a byte short for several commits and every
-  integer in save.dat read a byte early.
-
-  WHY THIS IS A TEST AND NOT AN Assert. The guard that should have caught that
-  was an Assert in an initialization section, and FPC COMPILES ASSERTIONS OUT
-  unless -Sa is passed, which this project does not pass - so it never ran once.
-  TPlayerState's guard was rewritten as a plain raise for that reason, but
-  TEntity, TEntityType and TGameSettings kept theirs, and on 2026-08-31 a
-  deliberately falsified Assert(SizeOf(TEntity) = 999) was confirmed not to
-  fire. Everything here is an ordinary comparison.
-
-  WHAT A CONFIRMED LAYOUT MEANS - two independent things:
-
-    the SIZE is pinned from OUTSIDE the record: the stride in
-    base + index * 0x104, the byte count of a file read, a table entry size.
-    Never by adding up our own fields, which proves only that we can add;
-
-    every FIELD offset is witnessed by at least one reference in the
-    disassembly, which is what the +0xNNN annotations on the declarations are.
-
-  A size check ALONE is not enough. Two fields can swap inside a record and
-  leave SizeOf untouched, and that is exactly the shape of failure that
-  misreads a save file. tools/layout_lock.py checks that every annotated field
-  has a line here, so adding a field without a check fails the gate.
-  --------------------------------------------------------------------------- }
+{ --selftest-layouts checks binary record sizes and field offsets with ordinary
+  comparisons because assertions may be disabled. Sizes come from external
+  strides or I/O lengths; tools/layout_lock.py requires every annotated field
+  to have a corresponding offset check. }
 function SelfTestLayouts(Log: TStrings): Integer;
 var
   Bad: Integer;
@@ -4552,16 +4327,9 @@ begin
       Inc(Result);
     end;
 
-    { Scrolling is a ROUNDING decision, not a semantic one. It only decides
-      which of the two pixel conversions carries the 1/32 remainder, so the sum
-      can differ by one PIXEL - and that changes the tile only where the pixel
-      it moves across is a tile boundary.
-
-      A first version of this check compared the returned tile over a row of
-      identical solid tiles and found no difference anywhere in 1024 cases,
-      which proved nothing at all: the answer was the same tile VALUE either
-      way. It compares the probed COLUMN now, and sweeps the entity across two
-      whole tiles so a boundary is actually crossed. }
+    { Scrolling decides which pixel conversion carries the 1/32 remainder.
+      Compare probed columns across tile boundaries, where that one-pixel
+      rounding difference is observable. }
     FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
     for TX := 0 to 19 do
       Grid.Cells[TX][5] := 63;
@@ -4584,12 +4352,8 @@ begin
           Log.Add(Format('  at centre %d: not scrolling probes %s, scrolling '
             + 'probes %s', [TX, ProbeA, ProbeB]));
       end;
-      { Counting differences cannot see an INVERTED flag - swapping the two
-        answers leaves the count identical, and a mutation that did exactly
-        that survived a run of this test. So pin which answer is which at a
-        position worked out by hand: the entity carries a 20/32 pixel
-        fraction and the layer none, so moving the ENTITY crosses into tile 6
-        while moving the LAYER leaves it in tile 5. }
+      { Pin the direction of the distinction: with a 20/32 entity remainder,
+        moving the entity reaches tile 6 while moving the layer stays in 5. }
       if TX = 182 then
       begin
         if ProbeA <> '6,5' then
@@ -4622,12 +4386,8 @@ begin
       Inc(Result);
     end;
 
-    { The right edge's -1 is only visible when the edge lands on the LAST
-      pixel of a tile. A 20-wide entity centred at 182 has its right edge at
-      191, the last pixel of tile 5; drop the -1 and it becomes 192, the first
-      of tile 6. The earlier edge case used centre 183, where both readings
-      land in tile 6 and the -1 is invisible - and a mutation that removed it
-      survived because of that. }
+    { Centre 182 places the inclusive right edge on pixel 191, exposing the
+      required -1 before the tile conversion. }
     FillChar(Grid.Cells, SizeOf(Grid.Cells), 0);
     Grid.Cells[6][5] := 64;
     PlaceAt(182, 5 * 32 + 16, 20, 2);
@@ -4741,57 +4501,19 @@ begin
   end;
 end;
 
-{ --- 5. the four adjacent sprite tables, and their EXTENTS ---------------
+{ --- 5. handler table contents and extents -------------------------------
 
-  This exists because of a real defect. Type 14's table was recorded as sixteen
-  rows of four and it is TWO, and the old check could not see it: it read
-  MANA_VARIANTS * MANA_FRAMES ints out of akuji.exe and compared them, so the
-  length it verified was the very constant under test. Shrinking sixteen to two
-  makes it read eight values instead of sixty-four, and it passes either way.
-
-  Reading N values and finding they match proves the VALUES. To pin N you need
-  a fact from outside the table, and here the layout supplies one: the region is
-  a run of small const arrays laid end to end, each reached through its own
-  pointer global, so a table ends exactly where the next one begins. This
-  collects every pointer into the region straight out of the binary and requires
-  the successor of each table's base to be base + length.
-
-  That would have caught the sixteen immediately - the next pointer after
-  0x0046BDA0 is 0x0046BDC0, thirty-two bytes on.
-
-  SWEEPING THE REST
-
-  The four tables above were checked this way and the other eighty were not,
-  which left the same class of defect free to sit in any of them. Pin() below
-  applies the identical test to EVERY table any handler records an address
-  for, and separates two things the old wording ran together:
-
-    * the EXTENT - how many ints the binary lays down at that address, pinned
-      from outside by where the next table begins
-    * the READ COUNT - how many of them a handler can reach
-
-  They are usually the same and sometimes not, and a table where they differ
-  is exactly where a length gets recorded wrong. Requiring both, and requiring
-  the recorded values to be a PREFIX of what the binary holds, means a table
-  can be short on purpose but not by accident.
-
-  Running it for the first time found two: type 26's table is four ints and
-  was recorded as two, and type 37's is six and was recorded as five. Type 26
-  is reachable - its handler indexes by EF_VARIANT with no bound - so that one
-  was a real under-record; type 37's sixth int is unreachable behind a mod 5,
-  so five stays the read count and six is now stated as the extent. }
+  Each pointer target establishes a table's start, and the next target
+  establishes its storage extent. Pin() verifies that extent separately from
+  the number of entries reachable by the handler, then checks that the declared
+  values are a prefix of the executable's table. }
 function TestSpriteTables(Log: TStringList; const GameDir: string): Integer;
 const
-  { Where the pointer globals live, and the span of table bodies they address.
-    Both are deliberately generous; a stray dword that happened to look like a
-    pointer could only ever make a table look SHORTER, never longer, so this
-    cannot pass something it should fail. }
+  { Pointer globals and table bodies occupy these executable regions. }
   { The CODE section, for the write-only scan below. }
   CODE_LO = $00401000;  CODE_HI = $00468000;
   PTRS_LO = $0046C400;  PTRS_HI = $0046D400;
-  { Wide enough to take in the sound table at 0x00468E34 as well as the run of
-    sprite tables. Widening only ADDS starts below every existing base, so it
-    cannot change an extent that was already pinned. }
+  { Include the sound table as well as the handler-table run. }
   { The run of table bodies does not stop at 0x0046C400 - bodies and pointer
     globals interleave above it, and type 57's hatch table is at 0x0046C460.
     Widening the body window only ADDS starts above every base already pinned,
@@ -4819,9 +4541,7 @@ var
         Result := Starts[N];
   end;
 
-  { Extent, front, and values in one go. Ints is what the binary lays down;
-    Want/WantCount is what we recorded, which may be shorter when a handler
-    cannot reach the rest - but must never be longer, and must be a prefix. }
+  { Ints is the stored extent. WantCount is the reachable prefix. }
   procedure Pin(const Name: string; Base: Cardinal; Ints: Integer;
                 Want: PInteger; WantCount: Integer);
   var
@@ -5766,12 +5486,8 @@ begin
       Inc(Result);
     end;
 
-    { A zero delta does nothing on X ...
-
-      The solid is at 119 so the boxes ALREADY OVERLAP without moving. At 120
-      they merely touch and the sweep would answer False whether the guard
-      existed or not - which is exactly how a first version of this case let a
-      mutation that deleted the guard survive. }
+    { A zero X delta does nothing. Position 119 starts with overlapping boxes;
+      position 120 would only make them touch and would not exercise the guard. }
     Reset(3);
     Place(Solid, 119, 100, 3);
     if W.SolidCollideX(Pool.Entity(Subject)^, 0, False) then
@@ -5785,14 +5501,11 @@ begin
       Inc(Result);
     end;
 
-    { ... but the Y sweep has no such guard, which is how resting on a
+    { The Y sweep has no such guard, which is how resting on a
       platform keeps reporting one.
 
-      The solid sits at 119, not 120, so the boxes genuinely OVERLAP with no
-      movement at all. At 120 they exactly touch, and RectOverlap compares
-      with a strict <, so touching is not overlapping - a first version of
-      this case put them at 120 and failed for that reason rather than for
-      the one it was testing. }
+      Position 119 ensures the boxes overlap before movement; at 120 they only
+      touch, and RectOverlap correctly reports no overlap. }
     Reset(3);
     Place(Solid, 100, 119, 3);
     if not W.SolidCollideY(Pool.Entity(Subject)^, 0, False) then
@@ -5924,17 +5637,8 @@ begin
 end;
 
 { --- Entity_Destroy @ 0x00461400 -----------------------------------------
-
-  Four debts settled in four directions, and two of them are what makes this
-  worth testing rather than assuming: a dying projectile hands a shot back to
-  its owner, and a class-5 parent takes its children with it.
-
-  The shot-count check is the interesting one. It reads the owner's slot from
-  the projectile's int 1 and decrements the owner's int $15 - which is exactly
-  the pair the Player.pas audit arrived at from the other side, when it moved
-  PF_OWNER from $04 to $01. Two functions written weeks apart agreeing on an
-  undocumented field pair is the strongest evidence available short of running
-  the original. }
+  Verify projectile ownership bookkeeping, child destruction, sprite release,
+  and event-state cleanup. }
 function TestDestroy(Log: TStringList): Integer;
 var
   W: TCountingWorld;
@@ -6048,15 +5752,8 @@ begin
 end;
 
 { --- Entity_SpawnDebris @ 0x00461874 -------------------------------------
-
-  This one cannot be checked against the original by emulation: it calls
-  PlaySound, which reaches into the DirectSound component, and the emulator
-  models the instruction set rather than the process. So it is checked against
-  its own arithmetic instead, which is weaker and worth saying plainly.
-
-  What IS pinned exactly is the RNG underneath it - Delphi's Random is
-  differential-tested against 0x00402AC4 - so the scatter is reproducible even
-  though the burst as a whole is not emulable. }
+  DirectSound prevents whole-routine emulation, so this checks the arithmetic
+  while the underlying Delphi RNG remains differential-tested. }
 function TestSpawnDebris(Log: TStringList): Integer;
 var
   W: TCountingWorld;
@@ -6515,17 +6212,9 @@ begin
     end;
     L.DeltaX := 0; L.DeltaY := 0;
 
-    { --- every arm in the jump table has a Pascal case --------------------
-      The comment in EntityHandlers.pas used to say "the other N arms are
-      untranslated" and was maintained by hand. Now that the count is zero
-      the claim is worth checking rather than writing down: drive ONE entity
-      of every armed type through EntityUpdateAll and require the
-      fall-through counter to stay at zero. Table[] came out of akuji.exe's
-      own jump table above, so the list of types being demanded is the
-      binary's, not ours.
-
-      The three types with no arm are demanded to fall through, which also
-      proves the counter is wired up and the check is not vacuous. }
+    { --- every executable jump-table arm has a Pascal case ----------------
+      Drive one entity of every type through EntityUpdateAll. The three types
+      without executable arms must take the explicit fall-through path. }
     Bad := 0;
     for I := 0 to ENTITY_TYPE_COUNT - 1 do
     begin
@@ -6709,14 +6398,9 @@ begin
       Inc(Result);
     end;
 
-    { (g) a touch that changes the game state abandons the rest of the frame.
-
-      The touch log alone cannot show this, and a first version of this check
-      that relied on it passed against a build with the abandon removed. The
-      reason is that the loop ALSO skips the touch pass for any slot whose
-      iteration starts outside GS_PLAY, so the touches stop either way. What
-      only the abandon stops is the work that happens BEFORE that guard - the
-      timer tick - so that is what this looks at. }
+    { (g) A touch that changes game state abandons the frame. Later timers must
+      remain unchanged; the touch log alone cannot distinguish this from the
+      ordinary non-play-state guard. }
     Pool.Clear;
     for I := $21 to $25 do
     begin
@@ -6845,39 +6529,23 @@ begin
 end;
 
 
-{ ---------------------------------------------------------------------------
-  --selftest-runner <gamedir> : the event interpreter, running.
+{ --selftest-runner executes event programs through a recording TEventHost so
+  stepping, waits, branches, presentation calls, and saves remain observable.
 
-  EventRunner.pas is the four functions that make a script HAPPEN. Nothing else
-  in this project exercised them: --selftest-script proves the grammar parses,
-  which is a different claim entirely. A parser agreeing with itself says
-  nothing about whether the machine that consumes it steps, waits and branches
-  the way the original's does.
-
-  What makes this checkable without a renderer is that the twelve logic
-  sub-opcodes are implemented outright and the six presentation ones go through
-  TEventHost. Put a recording host underneath and the control flow becomes
-  fully observable: which lines were shown, in what order, whether the save
-  actually happened.
-
-  ## The save point is the whole system in one record
+  The standard save-point program is:
 
   All 43 stages that have one carry a byte-identical Devil Statue:
 
       1,0000,0000,tx,ty,0027-*,0000-03-0000/0003-13/0003-03-0001
 
-  Three steps. Show line 0; if flag 3 is set, save; if flag 3 is set, show
-  line 1. And line 0 of every one of those stages' tk files is
+  It shows line 0, conditionally saves, then conditionally shows line 1. Each
+  matching tk file begins with:
 
       Will you save the game? \w
 
-  where \w is the yes/no prompt. So Progress[3] IS the answer, and the two
-  guarded steps are the yes branch. That is what "Progress[1..4] are scratch"
-  means in practice, and the data says something much sharper than the note
-  did: of the 86 alternatives in the whole shipped set that guard on a scratch
-  flag, all 86 guard on flag 3 specifically, and every one has a \w prompt
-  earlier in its own program. 86 of 86, no exceptions. Flags 1, 2 and 4 are
-  written only by sub-op 6, which no shipped event uses.
+  where \w is the yes/no prompt. All 86 shipped alternatives that guard a
+  scratch flag use Progress[3], the Yes result, after an earlier \w prompt.
+  Flags 1, 2, and 4 are only written by unused sub-op 6.
 
   The converse holds 43 times out of 44. The exception is stage 4's
 
@@ -7531,22 +7199,9 @@ begin
     S.Free;
   end;
 
-  { Nine opcode-4 records in the whole game, of which EIGHT carry a flag list.
-
-    EventScripts.pas said all nine were the same construction - flag list, set
-    a flag, wait, sound 32, disable with sub-op 7 - and "nine of nine, no
-    exceptions". This test is what found that wrong. Stage 58's is
-
-        4,0000,1158,0001,0001,0020-*,1157-04-1158/1158-09-0032
-
-    no list, no wait, and no sub-op 7. It sets 1158 when 1157 is already set,
-    then plays the same sound 32. What retires it is the other mechanism: 1158
-    is its own csv 2, so the next spawn sweep disables the record. The claim
-    that survives is the one that always mattered - all nine set their own
-    forbidding flag - and there turn out to be two ways of leaving.
-
-    Pinning both counts is what stops a change that made ParseProgram return
-    nothing from passing here vacuously. }
+  { The game contains nine opcode-4 records; eight carry flag lists. Stage 58
+    instead retires through its own blocking flag. Pin both counts so an empty
+    parser result cannot pass vacuously. }
   if (Checkers <> 9) or (Lists <> 8) then
   begin
     Log.Add(Format('  FAILED: %d opcode-4 checkers carrying %d flag lists,'
@@ -7590,19 +7245,9 @@ begin
         { 4 steps at most, the longest wait is 11 frames, and every other op
           finishes in one. 64 is comfortable room and still catches a hang. }
         Frames := DriveToEnd(R, H, S, P, GS, 64);
-        { Sub-op 80 is EXPECTED never to finish. It is the only opcode that
-          does not hand the script on: EventScript_Execute's arm at
-          0x00455E5A..0x00455FC6 contains no AdvanceStep, and the op ends by
-          walking its own three phases and leaving the game in GS_ENDING. The
-          step index never moves, so "the program completed" is not a thing
-          that can happen and DriveToEnd is right to run out of frames.
-
-          This check used to pass only because our arm had a spurious
-          AdvanceStep in it, which is exactly the bug that stopped the ending
-          from ever starting. Excluding the op here is the correct
-          expectation, not a workaround: TTraceHost records the SoulGet call
-          and models neither the phases nor the state change, so there is
-          nothing for it to reach. }
+        { Sub-op 80 deliberately never advances: it runs three phases and
+          transfers control to GS_ENDING. TTraceHost records SoulGet but does
+          not model that state machine, so a frame-limit result is expected. }
         if (Frames < 0) and (Pos('-80', S[J].ParamB) = 0) then
         begin
           Log.Add(Format('  stage %d event %d did not finish: %s  (stuck on %s)',
@@ -7740,11 +7385,8 @@ begin
     Want(Pool.Field(Slot, EF_EVENT_ID) = Idx,
          'the entity does not remember its event');
 
-    { A second sweep must not place a second copy. This is what +0x05 is for,
-      and it is the difference the notes had recorded as one idea. Count the
-      whole pool, not this record's slot: the sweep places every record in the
-      window, so what says nothing was duplicated is that the total did not
-      move and this record still holds the slot it had. }
+    { A second sweep must not duplicate any in-window entity. Check both the
+      total live count and this record's retained slot. }
     Live := Pool.LiveCount;
     R.SpawnNearCamera(S, Pool, L, Tx, Ty, P, GS);
     Want(Pool.LiveCount = Live,
@@ -8024,33 +7666,13 @@ begin
     Log.Add('FAILED');
 end;
 
-{ ---------------------------------------------------------------------------
-  --selftest-session <gamedir> : the pieces, connected.
-
-  Every other self-test checks one function against a fixture built for it.
-  None of them can catch two correct functions being wired together wrongly,
-  and until now nothing was wired at all - GmMain.pas did not reference
-  Entities, Player, Camera or EventRunner, so the entire translated game had
-  no caller.
-
-  This runs FRAMES. A real stage table, a real map, the real event table, and
-  the actual dispatcher; the only things stubbed are sound and sprites, and
-  both are legitimately absent rather than faked.
-
-  What it can show is that the parts fit: that a stage begins, that the player
-  exists and is affected by gravity and terrain, that events place entities as
-  the camera moves, and that a frame does not throw. What it cannot show is
-  that any of it matches akuji.exe - that still needs the differential
-  harness, and a frame is far past what the emulator can reach.
-  --------------------------------------------------------------------------- }
+{ --selftest-session runs integrated frames using shipped stage, map, and event
+  data. Sound and sprite backends are omitted; gameplay dispatch is real. }
 
 { The message box's page splitting, against the shipped text.
 
-  Reading a sign locked the game: sub-op 3 waits and only the box advances the
-  script, so with no box the script never moved. This checks the part of the
-  box that is decidable without a screen - how a tk line becomes pages - and
-  it checks it against every line the game ships rather than against invented
-  strings. }
+  Sub-op 3 waits for the dialogue box to advance the script. This test checks
+  page splitting against every shipped text line without requiring a screen. }
 function TestDialogue(Log: TStrings; const GameDir: string): Integer;
 var
   S: TEventScript;
@@ -8070,9 +7692,7 @@ begin
   Log.Add('');
   Log.Add('--- the message box ---');
 
-  { --- the yes/no answer is TWO flags, from 0x00456038 ---------------- }
-  { It used to write Progress[3] alone, so every script guarding on "No" saw
-    nothing. Both directions are checked, with literal expectations. }
+  { --- yes/no answers are represented by two mutually exclusive flags --- }
   begin
     FillChar(P2, SizeOf(P2), 0);
     P2.Progress[MB_ANSWER_YES] := 9;   { junk, to prove both are WRITTEN }
@@ -8255,12 +7875,7 @@ function TGameOverProbe.IsPlaying: Boolean;
 begin Result := Playing; end;
 
 { Input_ConfirmPressed @ 0x00466E4C and GameOver_Update @ 0x00461A44.
-
-  The confirm half exists because the reconstruction had it wrong in two
-  ways at once - a level instead of an edge, and only one of the two
-  buttons - and neither would have shown up in a test that only ever pressed
-  and released cleanly. The expectations here are literals, not derived from
-  the function under test. }
+  Confirm is a rising edge on either action button. }
 function TestConfirmAndGameOver(Log: TStrings): Integer;
 var
   Inp: TInputState;
@@ -8327,9 +7942,7 @@ begin
     Want(TitleSubMode = 0, 'the title sub-mode was not cleared');
     Want(GS = GS_PLAY_ALT, 'the state left 100 too early');
 
-    { Held while the tune plays - and this is the regression: the screen
-      arrived with the music stopped, so this is the frame that used to end
-      it on the spot. }
+    { Held input does not end the screen while its tune is playing. }
     Drawn := G.Update(False, False, GS);
     Want(Drawn and (GS = GS_PLAY_ALT),
          'the screen ended while the music ran - a death that stopped the '
@@ -8736,17 +8349,8 @@ begin
   Result := Bad;
 end;
 
-{ The options screen's four string tables, read back out of akuji.exe.
-
-  Every one of these rows used to draw a NUMBER where the original draws a
-  word - GAME LEVEL as 0/1/2, the three BUTTON ASSIGN rows as the raw key
-  index, GALLERY as the slot number - and a constant list transcribed by hand
-  is exactly the kind of thing that rots. So the lists are diffed against the
-  image rather than trusted.
-
-  The tables are reached through POINTER CELLS in DATA, and the strings they
-  point at live in CODE, so the two biases differ - 0x00401A00 and 0x00400C00.
-  Getting that wrong is what made the first read of these come back empty. }
+{ Compare the options screen's level, key, and gallery labels with akuji.exe.
+  Pointer cells use the DATA bias; the string bodies use the CODE bias. }
 function TestOptionTables(Log: TStrings; const GameDir: string): Integer;
 var
   Bad, I: Integer;
@@ -8845,8 +8449,7 @@ end;
   The buckets are drawn in ASCENDING depth - low first, so low ends up BEHIND -
   and the type table makes the consequence concrete: the player is depth 4
   while signs, save statues and mana stones are 1, doors and orbs 2, monsters
-  3. Drawing them the other way round puts the scenery on top of Akuji, which
-  is what was reported.
+  3. Reversing this order would draw scenery on top of Akuji.
 
   Bucket 0 is never drawn at all; the original's loop starts at 1, and
   Entity_Destroy zeroes EF_DEPTH, so 0 means destroyed or inert. Within one
@@ -8979,17 +8582,9 @@ begin
   Result := Bad;
 end;
 
-{ The event delay: Event_Begin's second argument is a COUNTDOWN.
-
-  0x00464D30 decrements 0x0046D028 once a frame and, when it reaches zero,
-  calls Event_Begin(i, 0) for every opcode-4 record. Events_SpawnNearCamera
-  starts each puzzle checker with Event_Begin(i, 4), so an unsolved checker
-  re-tests itself four frames later. The runner was STORING that argument and
-  never counting it - the field's own comment said what it was for.
-
-  Stage 14 is used because it carries one of the nine opcode-4 records in the
-  shipped data; stage 1 has none, and a test that silently exercises nothing is
-  the failure this suite keeps finding in itself. }
+{ Event_Begin's second argument is a frame countdown. Opcode-4 puzzle checks
+  begin at four and re-run when it reaches zero. Stage 14 provides a shipped
+  opcode-4 record for this test. }
 function TestEventDelay(Log: TStrings; const GameDir: string): Integer;
 var
   Bad, I, Fours: Integer;
@@ -9068,21 +8663,9 @@ begin
   Result := Bad;
 end;
 
-{ The typewriter and the two icons, from MessageBox_Update @ 0x00456038.
-
-  Driven from the SHIPPED script rather than from a hand-made string, so the
-  test needs no way to inject text that the original has no counterpart for.
-
-  Three facts, each invisible to the others:
-
-    * the reveal is in TWO-BYTE units, one per THIRD frame, because the
-      original scans Copy(text, i * 2 - 1, 2) and gates on a counter > 2
-    * any input fast-forwards it - AxisY, or either confirm button HELD
-    * when the page runs out, the marker that ended it picks the next mode,
-      and only then do the Yes/No line and its hand appear
-
-  The page used to be split into three finished lines the moment it was taken,
-  so there was nothing left to reveal and no mode to be in. }
+{ Exercise MessageBox_Update @ 0x00456038 with shipped dialogue. Text appears
+  in two-byte units every third frame, input fast-forwards it, and the page's
+  terminal marker selects the following mode and optional prompt. }
 function TestTypewriter(Log: TStrings; const GameDir: string): Integer;
 var
   Bad, I, K, Seen, Plain: Integer;
@@ -9129,11 +8712,7 @@ begin
   Sc := TEventScript.Create;
   D := TDialogueBox.Create;
   try
-    { STAGE 2, not 1, and the difference is the whole point of the found
-      flags below: tk001 contains no \w at all - the save prompt starts at
-      stage 2 - so a test that loaded stage 1 ran its prompt assertions ZERO
-      times and passed. The mutation harness caught that by surviving "the
-      yes/no prompt reads the vertical axis again". }
+    { Stage 2 contains both ordinary dialogue and the first \w prompt. }
     Sc.Load(GameDir, 2);
     if Sc.LineCount = 0 then
     begin
@@ -9436,11 +9015,8 @@ begin
   Result := Bad;
 end;
 
-{ The reset callback is what makes this test real. GameState_Reset zeroes the
-  shared MenuIndex, so a confirm that reads the index AFTER the reset always
-  sees NEW GAME. The first version of this test left OnResetState unassigned
-  and passed against the broken code - a double that omits the very state the
-  code under test reads cannot see the defect. }
+{ TResetSpy mirrors GameState_Reset's MenuIndex side effect so the title test
+  verifies that the selected command is captured before the reset. }
 type
   TResetSpy = class
     Fired: Boolean;
@@ -9462,14 +9038,9 @@ begin
   MenuIndex := 0;
 end;
 
-{ CONTINUE must LOAD, and the reported bug is that it starts a new game.
-
-  Game_StartOrLoad @ 0x00462F40 is one function for both, separated only by
-  p_TitleSubMode, so the whole path has to be driven end to end: the title
-  screen's own confirm sets the sub-mode, and only then does the loader read
-  data\save.dat over the defaults it has just written. Testing the loader
-  alone would pass while the menu handed it the wrong mode, which is exactly
-  the shape of this bug. }
+{ CONTINUE must load rather than start a new game. Game_StartOrLoad
+  @ 0x00462F40 selects the path through p_TitleSubMode, so this test drives the
+  title confirmation and loader together. }
 function TestContinueLoadsSave(Log: TStrings; const ScratchDir: string): Integer;
 var
   Bad, GS: Integer;
@@ -10216,66 +9787,21 @@ begin
     Log.Add('FAILED');
 end;
 
-{ ---------------------------------------------------------------------------
-  --emudiff <emu-output> : diff the reconstruction against the ORIGINAL.
+{ --emudiff <emu-output> compares deterministic Pascal results with cases run
+  against akuji.exe by ghidra_scripts/EmuDiff.java and tools/emudiff.py.
 
-  This is the verification tier the project did not have. Everything else here
-  checks the reconstruction against EVIDENCE - two readers agreeing, structure
-  that validates itself, mutations that must be caught. None of it can say the
-  Pascal computes what akuji.exe computes. Only running both can.
+  Ordinary cases compare EAX. Handler cases may additionally provide get=<hex>
+  for the mutated entity bytes. f.div=<n> marks an intentional divergence from
+  notes/divergences.md and therefore requires the two results to differ.
 
-  The record said that needed a 32-bit toolchain. That was wrong, and the error
-  is worth keeping: what needs one is a logging PROXY DLL, because a 32-bit
-  process can only load 32-bit DLLs. Executing 32-bit code needs no 32-bit
-  compiler - Ghidra ships a p-code emulator and analyzeHeadless runs scripts
-  without a GUI, so the original's own bytes can be run with chosen inputs.
-
-  ghidra_scripts/EmuDiff.java produces a file of
-
-      <name> <hexaddr> <eax> <edx> <ecx> [stack args]  -> <result>
-
-  where the result is what the ORIGINAL returned. This reads that back,
-  recomputes each case with the reconstruction, and requires them to agree.
-  tools/emudiff.py drives both halves.
-
-  TWO CHANNELS, not one. A leaf function's answer is EAX and an integer
-  comparison is the whole test. An entity HANDLER returns nothing meaningful:
-  its answer is the entity it mutated. So a case may also carry `get=<hex>`
-  after the arrow - the bytes the emulator read back out of the original's
-  entity - and this compares those against the same region of ours, naming the
-  int index that differs rather than dumping 260 bytes at the reader.
-
-  AND A CASE MAY BE EXPECTED TO DIFFER. `f.div=<n>` marks a case that exercises
-  a declared entry in notes/divergences.md - somewhere we knowingly do not
-  reproduce the original. Those cases invert: agreement is the failure, because
-  it means the ledger describes a divergence that is no longer there.
-
-  That inversion is the point. A category D entry in the ledger is a claim about
-  what the original does and what we do instead, and prose cannot be wrong
-  loudly. This makes the claim executable: the original's actual behaviour is
-  printed beside ours on every run, and the entry cannot quietly outlive the
-  code it describes.
-
-  WHAT IT CANNOT REACH. The emulator models the instruction set, not the
-  process: no Windows, no imports, no VCL. A function that calls the RTL or
-  touches a handle faults, and that is an honest boundary rather than a bug.
-
-  It reaches further than this note used to claim. "Leaf routines and
-  arithmetic" was a guess that went unchecked for a long time and wrote off the
-  entity layer on the strength of it. All 78 entity handlers run to completion
-  in the emulator, including 312 cases on a LIVE entity in four states - see
-  tools/emudiff.py's handler_probe and handler_live. Being reachable is not the
-  same as being compared: most handlers take a TEntityWorld, our abstraction
-  over globals the original reads directly, and each needs mapping first.
-  --------------------------------------------------------------------------- }
+  The emulator has no Windows, import, or VCL environment. Routines that depend
+  on those services remain outside this comparison. }
 
 { Where tools/emudiff.py places the entity a handler is run on. Scratch, well
   clear of the image, and both halves have to agree on it. }
 const
   EMU_ENTITY_AT = $60000000;
-  { How many disagreements to print before summarising. High
-    enough to see a whole sweep's worth: truncating at 15 hid
-    two thirds of the first entity-layer run. }
+  { Show enough disagreements to cover a complete handler sweep. }
   EMUDIFF_REPORT_CAP = 80;
 
 { Delphi returns in EAX; the emulator reports it as an unsigned 32-bit value. }
@@ -10776,13 +10302,9 @@ begin
     Log.Add('FAILED');
 end;
 
-{ --- A PROBE, not a test ----------------------------------------------------
-  Walks the exact sequence GmMain uses to bring a stage up, and prints what
-  each step produced. It exists because the game rendered a hand-made map as
-  black and dropped the player through it, while the ORIGINAL binary rendered
-  the same file correctly - so the fault is in this reconstruction and the
-  question is which lookup differs. Reading the code proved every step right
-  in isolation, which is exactly when a probe earns its place. }
+{ --- Map-loading probe -----------------------------------------------------
+  Run GmMain's stage-loading sequence and report the selected map, tileset,
+  terrain, surface, and draw results. }
 function SelfTestMapProbe(Log: TStringList): Integer;
 var
   GameDir: string;
@@ -10994,25 +10516,9 @@ begin
   end;
 end;
 
-{ entry @ 0x0046716C - the .dpr program block, which Delphi compiles into a
-  function of its own. Four statements:
-
-      Application.Initialize
-      Application.Title := 'Akuji the Demon'
-      Application.CreateForm(TFrm_main, Frm_main)
-      Application.Run
-
-  and everything the game does hangs off the last one, because
-  TApplication.Run's idle handler is TFrm_main_AppIdle.
-
-  The self-test dispatch above the four is OURS. DIVERGENCE DIV-007: it is
-  not in the original
-  and it is deliberately before Application.Initialize so a test run never
-  creates a window.
-
-  This is the one routine in the language with no declaration to hang an
-  address on, which is why it sat in the backlog looking unwritten;
-  tools/implemented.py now recognises a program block specifically. }
+{ entry @ 0x0046716C. DIVERGENCE DIV-007: self-test modes exit before the
+  application initializes; normal startup creates the main form and enters its
+  idle-driven game loop. }
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or

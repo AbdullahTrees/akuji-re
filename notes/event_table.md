@@ -1,6 +1,6 @@
 # The event table: opcode census and derivation
 
-Moved out of src/EventScripts.pas on 2026-09-01.
+Moved out of src/events/EventScripts.pas on 2026-09-01.
 
 
 Translated from Load_Event_Scripts @ 0x00465B50, which despite the name loads

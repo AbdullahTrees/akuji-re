@@ -44,7 +44,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-001 - frame pacing sleeps instead of spinning
 - category: C
-- sites: src/GmMain.pas
+- sites: src/screens/GmMain.pas
 - original: 0x00464D30 TFrm_main_AppIdle
 - The original sets `Done := False` unconditionally and spin-waits on
   `timeGetTime` until more than 15 ms has passed, pegging a core at 100%.
@@ -56,7 +56,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-002 - menus are driven from the keyboard in FormKeyDown
 - category: B
-- sites: src/GmMain.pas
+- sites: src/screens/GmMain.pas
 - original: no equivalent. The original reads movement and buttons from the Joy
   component inside the frame loop, through one of three DirectInput paths
   selected by Settings+0x34.
@@ -69,7 +69,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-003 - Entity spawn refuses an unknown Kind
 - category: D
-- sites: src/Entities.pas
+- sites: src/gameplay/Entities.pas
 - original: 0x0045A1B0 TEntityPool spawn
 - For Kind outside 0..2 the original never initialises its two range registers
   and scans the slot array from whatever happened to be in them. We return
@@ -82,7 +82,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-004 - OpeningPictureFor bounds-checks the slide
 - category: D
-- sites: src/Opening.pas
+- sites: src/screens/Opening.pas
 - original: 0x00463154 Opening_Update
 - The original indexes the picture table at 0x00468F14 with `slide - 1` and does
   not check the range. We return -1 outside 1..10.
@@ -108,7 +108,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-006 - the entity dispatcher has an else arm
 - category: C
-- sites: src/EntityHandlers.pas
+- sites: src/gameplay/EntityHandlers.pas
 - original: 0x0045B0E4, a jump table, which by construction has no default.
 - We add `else Inc(EntitiesUnhandled)`. It is test scaffolding: it is what lets
   --selftest assert that every type id the table claims to handle reaches an
@@ -127,7 +127,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-008 - the DirectDraw component is a stub
 - category: B
-- sites: none - the whole of src/DDDDComponent.pas stands in for it.
+- sites: none - the whole of src/components/DDDDComponent.pas stands in for it.
 - original: the TDDDD class, 0x00449xxx.
 - The unit exists with the right shape and does nothing. Drawing, surfaces and
   the sprite engine are absent, which is why AppIdle steps 6 and 7 are unwritten.
@@ -136,7 +136,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-009 - the options screen cannot rebind keys
 - category: B
-- sites: src/Title.pas
+- sites: src/screens/Title.pas
 - original: 0x00462330 Title_MainMenu, the `MenuIndex - 2U < 3` block.
 - Rows 2, 3 and 4 are the three key bindings. The original polls the input
   device for any of 16 raw buttons - FUN_004546C4(Joy, i) for i in 0..15 - and
@@ -157,7 +157,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-010 - type 25 clamps EF_VARIANT instead of running off its table
 - category: D
-- sites: src/EntityHandlers.pas
+- sites: src/gameplay/EntityHandlers.pas
 - original: 0x0045A4F0 EntityUpdate_Type25, table at 0x0046BE08
 - The original indexes a three-entry sprite table by EF_VARIANT and does not
   check it. Out of range it reads whatever DATA follows, which is the next
@@ -180,7 +180,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-011 - an index that leaves the sprite DATA REGION is clamped
 - category: D
-- sites: src/EntityHandlers.pas, `SpriteDatum`
+- sites: src/gameplay/EntityHandlers.pas, `SpriteDatum`
 - original: types 2 (0x00459A0C), 7 (0x0045A08C), 14 (0x0045A3E0), 38 (0x0045B0CC)
 - REDUCED, not retired. This used to say the four handlers clamp their index to
   their own table. They no longer do: the sprite tables are laid end to end and
@@ -203,7 +203,7 @@ rather than a line, but it must then say what stands in for it.
 
 ## DIV-012 - the spawn window reads the layer origin, not the tile component's scroll
 - category: B
-- sites: src/GameSession.pas
+- sites: src/gameplay/GameSession.pas
 - original: 0x00454790 Events_SpawnNearCamera, first two statements.
 - The original computes the camera tile from the TILE COMPONENT's own scroll
   and the LAYER's tile size, mixing two objects:
@@ -237,8 +237,8 @@ rather than a line, but it must then say what stands in for it.
 ## DIV-013 - the music engine is reimplemented, not the DLL
 
 - category: B
-- sites: none - src/KbgmPlayer.pas (679 lines), src/MidiFile.pas (409) and
-  src/MidiOut.pas stand in for the whole of it.
+- sites: none - src/components/KbgmPlayer.pas (679 lines), src/media/MidiFile.pas (409) and
+  src/media/MidiOut.pas stand in for the whole of it.
 - original: Kbgm32.dll, a third-party MIDI engine shipped beside the game. The
   original wrapped it and the import table still names all thirteen exports:
   KBGMOpen, KBGMClose, KBGMInit, KBGMLoadFile, KBGMFree, KBGMPlay, KBGMStop,
@@ -270,7 +270,7 @@ rather than a line, but it must then say what stands in for it.
 ## DIV-014 - the sound component is reimplemented, not the DirectSound one
 
 - category: B
-- sites: none - src/DDSDComponent.pas stands in for it, over SoundTable,
+- sites: none - src/components/DDSDComponent.pas stands in for it, over SoundTable,
   WaveFile, AudioMixer and AudioOut.
 - original: the third-party TDDSD DirectSound component, whose published
   interface GmMain.lfm documents. Only DebugOption and ChannelCount are
@@ -291,7 +291,7 @@ rather than a line, but it must then say what stands in for it.
 ## DIV-015 - input reads LCL virtual keys, not DirectInput scancodes
 
 - category: B
-- sites: none - src/DDIDComponent.pas stands in for it. DIV-002 covers the
+- sites: none - src/components/DDIDComponent.pas stands in for it. DIV-002 covers the
   separate matter of the menus being driven from FormKeyDown.
 - original: the TDDIDEX component, named "Joy" on the form, wrapping
   DirectInput and reading raw DIK scancodes. The table was recovered from

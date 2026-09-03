@@ -9,29 +9,30 @@
       <Version Value="11"/>
       <PathDelim Value="\"/>
       <SearchPaths>
+        <OtherUnitFiles Value="components;media"/>
         <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
     <Description Value="Design-time registration for the Akuji component classes (TDDDD, TDDIDEX, TDDSD, TKbgmPlayer). Install this so the Lazarus form designer can open GmMain.lfm."/>
     <Files Count="5">
       <Item1>
-        <Filename Value="DDDDComponent.pas"/>
+        <Filename Value="components\DDDDComponent.pas"/>
         <UnitName Value="DDDDComponent"/>
       </Item1>
       <Item2>
-        <Filename Value="DDIDComponent.pas"/>
+        <Filename Value="components\DDIDComponent.pas"/>
         <UnitName Value="DDIDComponent"/>
       </Item2>
       <Item3>
-        <Filename Value="DDSDComponent.pas"/>
+        <Filename Value="components\DDSDComponent.pas"/>
         <UnitName Value="DDSDComponent"/>
       </Item3>
       <Item4>
-        <Filename Value="KbgmPlayer.pas"/>
+        <Filename Value="components\KbgmPlayer.pas"/>
         <UnitName Value="KbgmPlayer"/>
       </Item4>
       <Item5>
-        <Filename Value="AkujiReg.pas"/>
+        <Filename Value="components\AkujiReg.pas"/>
         <HasRegisterProc Value="True"/>
         <UnitName Value="AkujiReg"/>
       </Item5>

@@ -31,6 +31,8 @@ import os
 import re
 import sys
 
+from source_tree import source_files, unit_path
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CSV = os.path.join(HERE, 'entity_names.csv')
@@ -71,9 +73,7 @@ def main():
     names = load_names()
     print('%d named types' % len(names))
 
-    targets = [os.path.join(ROOT, 'src', f)
-               for f in sorted(os.listdir(os.path.join(ROOT, 'src')))
-               if f.endswith('.pas') or f.endswith('.lpr')]
+    targets = source_files(ROOT, ('.pas', '.lpr'))
     targets.append(os.path.join(ROOT, 'notes', 'audited.md'))
 
     for path in targets:
@@ -93,7 +93,7 @@ def main():
     print()
     print('Ghidra side - apply with rename_function_by_address, then SAVE the')
     print('project in the GUI or the edits are lost:')
-    handlers = os.path.join(ROOT, 'src', 'EntityHandlers.pas')
+    handlers = unit_path(ROOT, 'EntityHandlers.pas')
     src = io.open(handlers, encoding='utf-8', errors='surrogateescape',
                   newline='').read()
     m = re.search(r'HANDLER_ADDR[^=]*=\s*\((.*?)\);', src, re.S)

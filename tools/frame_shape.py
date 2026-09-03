@@ -36,8 +36,10 @@ import os
 import re
 import sys
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GM = os.path.join(REPO, 'src', 'GmMain.pas')
+GM = unit_path(REPO, 'GmMain.pas')
 
 # Which dispatch each state's arm belongs to, from the trace.
 EXPECT_PRE = {'GS_TITLE_INIT', 'GS_STAGE_BEGIN', 'GS_PLAY', 'GS_STATE_140'}
@@ -239,7 +241,7 @@ def main():
     # after each was found - and it is what would have caught all seven of
     # them at once. A virtual with a do-nothing default is invisible until
     # someone plays the game.
-    runner = open(os.path.join(REPO, 'src', 'EventRunner.pas'),
+    runner = open(unit_path(REPO, 'EventRunner.pas'),
                   encoding='utf-8').read()
     k = runner.index('TEventHost = class')
     hostdecl = runner[k:runner.index('end;', k)]
@@ -250,7 +252,7 @@ def main():
     # satisfied the check for TEventHost.PlaySound. The real override was
     # missing and every scripted sound was silent: the gallery books play
     # theirs through sub-op 9, and collected without a sound.
-    dlg = open(os.path.join(REPO, 'src', 'Dialogue.pas'), encoding='utf-8').read()
+    dlg = open(unit_path(REPO, 'Dialogue.pas'), encoding='utf-8').read()
     d = dlg.index('TDialogueBox = class(TEventHost)')
     hosts = dlg[d:dlg.index(chr(10) + '  end;', d)]
     for m in sorted(set(re.findall(r'(?:procedure|function)\s+(\w+)', hostdecl))):
@@ -289,7 +291,7 @@ def main():
             bad.append('%s is not wired - without the fanfare the power-up '
                        'panel has nothing to dismiss it' % cb)
 
-    dlg = open(os.path.join(REPO, 'src', 'Dialogue.pas'), encoding='utf-8').read()
+    dlg = open(unit_path(REPO, 'Dialogue.pas'), encoding='utf-8').read()
     seg = dlg[dlg.index('procedure TDialogueBox.SubMode'):]
     seg = seg[:seg.index(chr(10) + 'end;')]
     # Each is guarded by Assigned(X) and then CALLED, so the bare name appears

@@ -26,6 +26,8 @@ import os
 import re
 import sys
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # record declaration -> the unit it lives in
@@ -38,7 +40,7 @@ RECORDS = [
 
 def annotated(rec, decl, unit):
     """(field, offset) for every field carrying a witnessed +0xNNN."""
-    text = open(os.path.join(REPO, 'src', unit), encoding='utf-8').read()
+    text = open(unit_path(REPO, unit), encoding='utf-8').read()
     i = text.index(decl)
     j = text.index('end;', i)
     out = {}

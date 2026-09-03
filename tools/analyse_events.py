@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reference reader for the event mini-language in ev*.dat.
 
-This deliberately duplicates src/EventCommands.pas. It is a *second opinion* on
+This deliberately duplicates src/events/EventCommands.pas. It is a *second opinion* on
 it, the same technique used for QdaArchive/extract_qda.py and WaveFile/
 decode_wav_ref.py: both splitters were written from the file text, and the point
 is that they agree on every count.
@@ -40,7 +40,7 @@ import glob
 from collections import Counter, defaultdict
 
 # Argument count per sub-opcode; None = unknown, -1 = self-describing length.
-# Must match SUBOP_ARITY in src/EventCommands.pas.
+# Must match SUBOP_ARITY in src/events/EventCommands.pas.
 ARITY = {0: 5, 2: 0, 3: 1, 4: 1, 5: 1, 7: 0, 8: 0, 9: 1, 10: 0,
          12: 3, 13: 0, 15: -1, 16: 1, 17: 1, 80: 0, 99: 0}
 
@@ -48,7 +48,7 @@ ENTITY_TYPE_COUNT = 81
 PROGRESS_LENGTH = 4501   # the progress block, from save.dat
 
 # ParamA's kind letter is an arity marker. Must match KIND_LETTERS/KIND_ARITY
-# in src/EventCommands.pas.
+# in src/events/EventCommands.pas.
 KIND_ARITY = {'*': 0, 'A': 1, '/': 2, 'J': 2, 'R': 2, 'M': 3}
 
 

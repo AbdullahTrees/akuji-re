@@ -26,114 +26,114 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="GmMain.pas"/>
+        <Filename Value="screens/GmMain.pas"/>
         <IsPartOfProject Value="True"/>
         <ComponentName Value="Frm_main"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
       </Unit>
       <Unit>
-        <Filename Value="DDDDComponent.pas"/>
+        <Filename Value="components/DDDDComponent.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="DDIDComponent.pas"/>
+        <Filename Value="components/DDIDComponent.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="DDSDComponent.pas"/>
+        <Filename Value="components/DDSDComponent.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="KbgmPlayer.pas"/>
+        <Filename Value="components/KbgmPlayer.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="GameState.pas"/>
+        <Filename Value="gameplay/GameState.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="QdaArchive.pas"/>
+        <Filename Value="media/QdaArchive.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Title.pas"/>
+        <Filename Value="screens/Title.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="GameFont.pas"/>
+        <Filename Value="render/GameFont.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Surfaces.pas"/>
+        <Filename Value="render/Surfaces.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Sprites.pas"/>
+        <Filename Value="render/Sprites.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="EntityHandlers.pas"/>
+        <Filename Value="gameplay/EntityHandlers.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Player.pas"/>
+        <Filename Value="gameplay/Player.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Camera.pas"/>
+        <Filename Value="gameplay/Camera.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Stages.pas"/>
+        <Filename Value="gameplay/Stages.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="TileMaps.pas"/>
+        <Filename Value="render/TileMaps.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="PlayerState.pas"/>
+        <Filename Value="gameplay/PlayerState.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="SoundTable.pas"/>
+        <Filename Value="media/SoundTable.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="WaveFile.pas"/>
+        <Filename Value="media/WaveFile.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="AudioMixer.pas"/>
+        <Filename Value="media/AudioMixer.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="AudioOut.pas"/>
+        <Filename Value="media/AudioOut.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="MidiFile.pas"/>
+        <Filename Value="media/MidiFile.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="MidiOut.pas"/>
+        <Filename Value="media/MidiOut.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Entities.pas"/>
+        <Filename Value="gameplay/Entities.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="Directions.pas"/>
+        <Filename Value="gameplay/Directions.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="EventScripts.pas"/>
+        <Filename Value="events/EventScripts.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="EventCommands.pas"/>
+        <Filename Value="events/EventCommands.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
@@ -145,7 +145,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="."/>
+      <OtherUnitFiles Value=".;components;events;gameplay;media;render;screens"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>

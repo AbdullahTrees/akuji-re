@@ -240,7 +240,7 @@ Self-validating: directory size plus the sum of all entry sizes equals the file
 length exactly. Contents are plain uncompressed 24-bit BMPs at assorted sizes
 (320x240, 320x320, 240x180, 288x54, ...), so `TBitmap` loads them directly.
 
-**Implemented as `src/QdaArchive.pas`**, verified byte-identical against the
+**Implemented as `src/media/QdaArchive.pas`**, verified byte-identical against the
 reference extractor `tools/extract_qda.py` across all 44 entries
 (`akuji.exe --selftest <qda> <outdir>`, writes `selftest.log`).
 
@@ -291,7 +291,7 @@ entity type table and the 64-step direction table (`Entities.pas`,
 ### The event mini-language — solved
 
 `ParamA` and `ParamB` in `ev*.dat` are not values, they are little programs.
-**`src/EventCommands.pas` carries the full decode**; this is the shape.
+**`src/events/EventCommands.pas` carries the full decode**; this is the shape.
 
     ParamA   <4-digit type>-<letter>[-arg...]   type 14..80; the letter is an
                                                 arity marker: * 0, A 1,
@@ -330,7 +330,7 @@ inferred from the data alone before the interpreter was found.
 ### `stage.dat` — solved
 
 66 rows × 16 fields into a 19-int record (stride `0x4C`); csv 8..15 land at
-`rec[11..18]`. Full detail in `src/Stages.pas`.
+`rec[11..18]`. Full detail in `src/gameplay/Stages.pas`.
 
 | csv | meaning |
 |---|---|
@@ -352,7 +352,7 @@ exactly 65 map files for rows 1..65.
 
 ## 8a. The entity system
 
-`src/Entities.pas` carries the detail; this is the map.
+`src/gameplay/Entities.pas` carries the detail; this is the map.
 
 ### The pool
 
@@ -466,7 +466,7 @@ glide, air dash, knockback, and two death states (both ending at GameState 100).
 The dash is a **double tap** inside a 30-frame window — `tk001.dat` says so in as
 many words. Every sound it plays matches its name. Weapons come from a
 16-byte-record table at `0x468E84` (via the pointer `0x46CD44`) indexed by
-`PlayerState +0x11CC`. Full detail in `src/PlayerState.pas`.
+`PlayerState +0x11CC`. Full detail in `src/gameplay/PlayerState.pas`.
 
 Four moves are gated on **ability bytes** in the save's first ten bytes —
 `Head[4..7]` are dash, wall kick, air dash and glide. `Game_StartOrLoad` writes
@@ -479,13 +479,13 @@ Every movement step asks whether the entity is outside a dead zone in the middle
 of the screen and heading further out; if so the move is applied to the LAYER and
 the entity is put back. So the player's stored position simply stops changing
 while the world scrolls, and anything assuming "position changed" means "the
-player moved" is wrong. `src/Camera.pas`, checked against all 65 maps.
+player moved" is wrong. `src/gameplay/Camera.pas`, checked against all 65 maps.
 
 ## 8b. Events: placement, conditions, and difficulty
 
 `EventScript_Execute` runs the scripts; `Events_SpawnNearCamera` `0x454790`
 decides what exists at all, and it turned four unknown CSV columns into a
-complete system. Detail in `src/EventScripts.pas`; the shape is:
+complete system. Detail in `src/events/EventScripts.pas`; the shape is:
 
 | csv | meaning |
 |---|---|

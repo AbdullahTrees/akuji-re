@@ -34,7 +34,7 @@ WHAT IT DOES
                                        arithmetic differ, and where
     python tools/x87_sim.py ending     the counters at which the ending
                                        screen's percentage comes out a point
-                                       low, which src/Ending.pas names
+                                       low, which src/screens/Ending.pas names
 
 GENERALISING IT
 
@@ -252,7 +252,7 @@ def cmd_compare():
 # at 64-bit significands can land a ulp below an exact integer, and Trunc then
 # takes a whole point off. Round would not have.
 #
-# This prints the counters where that happens. src/Ending.pas carries the
+# This prints the counters where that happens. src/screens/Ending.pas carries the
 # answer as a literal; this is the independent reader that says the literal is
 # right.
 #

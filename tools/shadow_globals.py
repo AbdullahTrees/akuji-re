@@ -45,6 +45,8 @@ import os
 import re
 import sys
 
+from source_tree import source_files, source_name
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # An address may be followed by a FIELD OFFSET, and then it names a different
@@ -81,18 +83,17 @@ ALLOWED = {
 
 def main():
     claims = {}
-    for pat in ('src/*.pas', 'src/*.lpr', 'src/*.inc'):
-        for path in sorted(glob.glob(os.path.join(REPO, pat))):
-            name = os.path.basename(path)
-            for n, line in enumerate(
-                    open(path, encoding='utf-8', errors='replace'), 1):
-                m = DECL.match(line)
-                if not m:
-                    continue
-                for a in ADDR.findall(line):
-                    key = re.sub(r'\s+', '', a).lower()
-                    claims.setdefault(key, []).append(
-                        (name, n, m.group(1), line.strip()[:66]))
+    for path in source_files(REPO):
+        name = source_name(REPO, path)
+        for n, line in enumerate(
+                open(path, encoding='utf-8', errors='replace'), 1):
+            m = DECL.match(line)
+            if not m:
+                continue
+            for a in ADDR.findall(line):
+                key = re.sub(r'\s+', '', a).lower()
+                claims.setdefault(key, []).append(
+                    (name, n, m.group(1), line.strip()[:66]))
 
     shared = {}
     for a, v in claims.items():

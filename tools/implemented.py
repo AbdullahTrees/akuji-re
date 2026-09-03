@@ -69,6 +69,8 @@ import os
 import re
 import sys
 
+from source_tree import source_files, source_name
+
 GAME_LO = 0x454790
 GAME_HI = 0x467200
 
@@ -108,10 +110,9 @@ def scan(src_dir):
     impl = {}
     mentioned = {}
     near = {}
-    for name in sorted(os.listdir(src_dir)):
-        if not name.lower().endswith(('.pas', '.lpr')):
-            continue
-        path = os.path.join(src_dir, name)
+    repo = os.path.dirname(src_dir)
+    for path in source_files(repo, ('.pas', '.lpr')):
+        name = source_name(repo, path)
         lines = open(path, encoding='utf-8', errors='replace').read().split('\n')
 
         for i, ln in enumerate(lines):

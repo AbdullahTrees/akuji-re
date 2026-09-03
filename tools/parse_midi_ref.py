@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Reference parser for the game's MIDI playlist.
 
-Second opinion on src/MidiFile.pas, the same way decode_wav_ref.py is a second
-opinion on src/WaveFile.pas. Both were written from the SMF spec; if they agree
+Second opinion on src/media/MidiFile.pas, the same way decode_wav_ref.py is a second
+opinion on src/media/WaveFile.pas. Both were written from the SMF spec; if they agree
 on the merged event stream of all 15 tracks, the Pascal reader's chunk walk,
 running-status handling, tempo map and k-way track merge are all corroborated.
 
@@ -29,7 +29,7 @@ PLAYLIST = [
     "end05",
 ]
 
-# Must match TMidiEventKind in src/MidiFile.pas.
+# Must match TMidiEventKind in src/media/MidiFile.pas.
 MEK_SHORT, MEK_SYSEX, MEK_TEMPO, MEK_EOT = 0, 1, 2, 3
 
 DEFAULT_TEMPO_US = 500000   # 120 bpm, the SMF default

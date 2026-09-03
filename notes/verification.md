@@ -268,7 +268,7 @@ proves untrustworthy.
 
 ## 14a. Behaviour, and how far it is checked
 
-`src/Player.pas` translates `Player_Update` and its three delegated states. It
+`src/gameplay/Player.pas` translates `Player_Update` and its three delegated states. It
 reaches the tilemap, the entity pool, the sound device and the camera through
 **`TPlayerWorld`**, an abstract class - which keeps the unit honest (what is
 decoded is here; what is not is behind a method that says so) and makes the

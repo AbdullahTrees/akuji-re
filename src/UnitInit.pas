@@ -1,15 +1,5 @@
-{ The game's unit initialization and finalization stubs.
-
-  Eight addresses that looked like unread handlers are compiler-emitted unit
-  init stubs, each one a single increment. Delphi's unit table sits just before
-  `entry`, ending at its terminator, and each entry is a (finalization,
-  initialization) pair 0x30 bytes apart.
-
-  THE COUNTERS ARE WRITE-ONLY. Nothing reads them, so the stubs have no
-  observable behaviour; they are reproduced so the address list is complete
-  and nobody spends time on them again.
-
-  Derivation: notes/unit_init.md }
+{ Compatibility stubs for the unit initialization table. The counters are
+  write-only and have no gameplay effect. }
 
 unit UnitInit;
 
@@ -51,8 +41,7 @@ procedure UnitInitialize(Index: Integer);
 { 0x00456B44 and the fourteen others at initialization + 0x30. }
 procedure UnitFinalize(Index: Integer);
 
-{ What the original does at startup and shutdown: walk the table forwards to
-  initialize and backwards to finalize. Delphi's own loop, not the game's. }
+{ Initialize in table order and finalize in reverse order. }
 procedure UnitInitializeAll;
 procedure UnitFinalizeAll;
 
@@ -62,8 +51,6 @@ procedure UnitInitialize(Index: Integer);
 begin
   if (Index < 0) or (Index >= UNIT_INIT_COUNT) then
     Exit;
-  { The exception frame the compiler wraps this in has nothing to catch: a
-    plain Inc cannot raise. Reproduced as a bare Inc. }
   Inc(UnitInitCount[Index]);
 end;
 
@@ -71,7 +58,6 @@ procedure UnitFinalize(Index: Integer);
 begin
   if (Index < 0) or (Index >= UNIT_INIT_COUNT) then
     Exit;
-  { And the finalization half really has no frame at all - seven bytes. }
   Dec(UnitInitCount[Index]);
 end;
 

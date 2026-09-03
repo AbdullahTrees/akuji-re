@@ -1,6 +1,6 @@
 # The stage table: census and derivation
 
-Moved out of src/Stages.pas on 2026-09-01. Includes the 66-row column census,
+Moved out of src/gameplay/Stages.pas on 2026-09-01. Includes the 66-row column census,
 the animated-tile track derivation, and the note on why a table fitting two
 hypotheses corroborates neither.
 

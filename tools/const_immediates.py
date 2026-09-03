@@ -43,9 +43,11 @@ import re
 import struct
 import sys
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAMEDIR = os.path.join(REPO, 'English Translated Version 1.1 (D)')
-SRC = os.path.join(REPO, 'src', 'EntityHandlers.pas')
+SRC = unit_path(REPO, 'EntityHandlers.pas')
 
 CODE_VA_BIAS = 0x400C00          # CODE: VA 0x401000 at raw 0x400
 CONST_RE = re.compile(r'^\s*T(\d+)_([A-Z0-9_]+)\s*=\s*(-?\$[0-9A-Fa-f]+|-?\d+)\s*;',

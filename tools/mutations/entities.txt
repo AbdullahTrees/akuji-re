@@ -1,12 +1,12 @@
 the dispatcher's handler address for type 40
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
 $0045B3EC
 --->
 $0045B3F0
 ===
 ScaleByPercent falls back to round-half-up at a tie
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   if R > 50 then
     Exit(Sign * Integer(Q + 1));
@@ -19,28 +19,28 @@ src/EntityHandlers.pas
     Exit(Sign * Integer(Q));
 ===
 the touch boundary moves by one slot
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
     if (Slot >= SLOT_MINOR_FIRST) and IsAlive(E^) then
 --->
     if (Slot > SLOT_MINOR_FIRST) and IsAlive(E^) then
 ===
 the sprite is not centred on the entity
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
                  - HalfExtent(E^.Raw[EF_EXTENT_X]);
 --->
                  - 0 * HalfExtent(E^.Raw[EF_EXTENT_X]);
 ===
 the damage flicker's parity is inverted
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
       if E^.Raw[EF_DEATH_TIMER] mod 2 = 0 then
 --->
       if E^.Raw[EF_DEATH_TIMER] mod 2 <> 0 then
 ===
 timers keep ticking during the pause menu
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
     if (AGameState <> GS_PAUSE) and (AGameState <> GS_STATE_140) then
     begin
@@ -51,14 +51,14 @@ src/EntityHandlers.pas
       if E^.Raw[EF_TIMER] <> 0 then
 ===
 the loop walks the whole pool instead of 256 slots
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   for Slot := 0 to ENTITY_UPDATE_COUNT - 1 do
 --->
   for Slot := 0 to ENTITY_COUNT - 1 do
 ===
 the mid-loop abandon is removed
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
     if (AGameState <> GS_PLAY) and (AGameState <> GS_STATE_140) then
       Exit;
@@ -67,35 +67,35 @@ src/EntityHandlers.pas
       Exit;
 ===
 screen-space entities follow the scroll too
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
     if E^.Raw[EF_SCREEN_SPACE] = 0 then
 --->
     if E^.Raw[EF_SCREEN_SPACE] >= 0 then
 ===
 a depth of -1 is not special-cased
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
       if Depth = DEPTH_BY_SCREEN_Y then
 --->
       if Depth = -2 then
 ===
 culling ignores EF_CULL_OFFSCREEN
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
 and (E^.Raw[EF_CULL_OFFSCREEN] = 1)
 --->
 and (E^.Raw[EF_CULL_OFFSCREEN] >= 0)
 ===
 the tile bias is 64 tiles instead of 128
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   TILE_BIAS_TILES = $80;   { 128 }
 --->
   TILE_BIAS_TILES = $40;   { 128 }
 ===
 the right edge loses its -1
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     Edge := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
             + E.Raw[EF_TILE_OFS_X] - 1;
@@ -104,14 +104,14 @@ src/Entities.pas
             + E.Raw[EF_TILE_OFS_X];
 ===
 the cross-axis span is summed before rounding
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   Cross := OriginPixel(L.OriginY) + OriginPixel(E.Raw[EF_POS_Y] + DeltaY);
 --->
   Cross := OriginPixel(L.OriginY + E.Raw[EF_POS_Y] + DeltaY);
 ===
 the sweep stops after the first row
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   while Row <= LastRow do
   begin
@@ -122,14 +122,14 @@ src/Entities.pas
     Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
 ===
 a zero delta is no longer exempt
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   if (DeltaX = 0) or (L.TileW = 0) or (L.TileH = 0) then
 --->
   if (L.TileW = 0) or (L.TileH = 0) then
 ===
 the scrolling flag moves the wrong term
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   if Scrolling then
   begin
@@ -144,7 +144,7 @@ src/Entities.pas
   end
 ===
 the Y sweep divides its own axis by TileW
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   Row := (OriginPixel(L.OriginY + MoveLayer)
           + OriginPixel(E.Raw[EF_POS_Y] + MoveEnt) + Edge) div L.TileH
@@ -155,7 +155,7 @@ src/Entities.pas
          - TILE_BIAS_TILES;
 ===
 the solid test becomes strictly greater
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
     if Tile >= SolidThreshold then
@@ -164,14 +164,14 @@ src/Entities.pas
     if Tile > SolidThreshold then
 ===
 X and Y are swapped in the Y sweep's lookup
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     Tile := Tiles.TileAt(Col - TILE_BIAS_TILES, Row);
 --->
     Tile := Tiles.TileAt(Row, Col - TILE_BIAS_TILES);
 ===
 off-map tile lookups are clamped instead of wrapped
-src/TileMaps.pas
+src/render/TileMaps.pas
 ---
   Idx := X + Y * FMapW;
   if (Idx < 0) or (Idx >= FMapW * FMapH) then
@@ -182,42 +182,42 @@ src/TileMaps.pas
   Idx := X + Y * FMapW;
 ===
 type 14's table address is off by one table
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   ITEM_SPRITE_TABLE_ADDR = $0046BDA0;
 --->
   ITEM_SPRITE_TABLE_ADDR = $0046BDC0;
 ===
 type 24's beat table starts one int late
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   ITEM24_BEAT_ADDR    = $0046BE00;
 --->
   ITEM24_BEAT_ADDR    = $0046BE04;
 ===
 type 25 gets the wrong sprite for variant 2
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
 --->
   ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 106);
 ===
 type 24's bob phase never advances
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
 --->
   E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 0) mod DIR_COUNT;
 ===
 type 24 bobs on the X axis instead
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   Inc(E.Raw[EF_POS_Y], DirVelY(WrapDir(E.Raw[EF_FACING])));
 --->
   Inc(E.Raw[EF_POS_X], DirVelY(WrapDir(E.Raw[EF_FACING])));
 ===
 type 24 bobs while the game is paused
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   if AGameState <> GS_PLAY then
     Exit;
@@ -230,42 +230,42 @@ src/EntityHandlers.pas
   { The bob. EF_FACING is a phase here, not a heading: one step of 64 per frame
 ===
 the heartbeat fires twice as often
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   ITEM24_BEAT_TICKS   = $3C;   { 60; the sound fires when the count EXCEEDS it }
 --->
   ITEM24_BEAT_TICKS   = $1E;   { 60; the sound fires when the count EXCEEDS it }
 ===
 variant 8's frames stop alternating
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
     E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod ITEM24_BEAT_FRAMES;
 --->
     E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 0) mod ITEM24_BEAT_FRAMES;
 ===
 type 25 is dispatched to the wrong handler
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
       25: EntityUpdate_Type25(E^);
 --->
       25: EntityUpdate_Type14(E^, AGameState);
 ===
 the save point's table is off by one int
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   SAVE_POINT_ADDR   = $0046BE24;
 --->
   SAVE_POINT_ADDR   = $0046BE28;
 ===
 the save point animates one frame faster
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   SAVE_POINT_TICKS  = 8;   { advance when the count EXCEEDS it, so every 9 }
 --->
   SAVE_POINT_TICKS  = 7;   { advance when the count EXCEEDS it, so every 9 }
 ===
 the save point animates while the game is paused
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
   E.Raw[EF_ANIM_ID] := SAVE_POINT_SPRITES[Frame];
 
@@ -278,35 +278,35 @@ src/EntityHandlers.pas
     Exit;
 ===
 the save point is dispatched to the wrong handler
-src/EntityHandlers.pas
+src/gameplay/EntityHandlers.pas
 ---
       27: EntityUpdate_Type27(E^, AGameState);
 --->
       27: EntityUpdate_Type14(E^, AGameState);
 ===
 the debris fan uses the wrong lift
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     SetSpawnField(Slot, EF_VEL_Y, (I + 4) * -DEBRIS_LIFT);
 --->
     SetSpawnField(Slot, EF_VEL_Y, (I + 3) * -DEBRIS_LIFT);
 ===
 debris carries the kind without the +1
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     SetSpawnField(Slot, EF_STATE, Kind + 1);
 --->
     SetSpawnField(Slot, EF_STATE, Kind);
 ===
 the layer delta is not taken back out at spawn
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
                   E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
 --->
                   E.Raw[EF_POS_X] - POSITION_BIAS,
 ===
 a shatter randomises its frames instead of numbering them
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     else if Kind = DEBRIS_SHATTER then
       SetSpawnField(Slot, EF_FLAG1C, I);
@@ -315,7 +315,7 @@ src/Entities.pas
       SetSpawnField(Slot, EF_FLAG1C, 0);
 ===
 every terrain splashes, not just water
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     if TerrainId = TERRAIN_WATER_A then
       PlaySound(SND_WATER01)
@@ -325,7 +325,7 @@ src/Entities.pas
     PlaySound(SND_WATER01);
 ===
 the X sweep loses its zero-delta guard
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   if ((E.Raw[EF_ALIVE] and $FF) = 0) or (Delta = 0) then
     Exit;
@@ -338,7 +338,7 @@ src/Entities.pas
   { The box is built from the entity as it WOULD be after the move on this
 ===
 the Y sweep gains a zero-delta guard it should not have
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   if (E.Raw[EF_ALIVE] and $FF) = 0 then
     Exit;
@@ -353,28 +353,28 @@ src/Entities.pas
   Inc(Moved.Raw[EF_POS_Y], Delta);
 ===
 softness is not crossed over between the axes
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_Y, SkipSoft,
 --->
   Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_X, SkipSoft,
 ===
 riding drops the layer scroll
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     PushX := ((OriginPixel(O^.Raw[EF_POS_X] + Layer.DeltaX)
 --->
     PushX := ((OriginPixel(O^.Raw[EF_POS_X])
 ===
 the on-top tolerance is inclusive
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     if Gap < SOLID_TOP_TOLERANCE then
 --->
     if Gap <= SOLID_TOP_TOLERANCE then
 ===
 the air dash no longer phases through
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     if (E.Raw[EF_STATE] = SOLID_STATE_AIRDASH)
        and (O^.Raw[EF_VULN_KIND] = SOLID_PHASE_VULN) then
@@ -385,7 +385,7 @@ src/Entities.pas
       Continue;
 ===
 an entity can block itself
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
     if Slot = Mine then
       Continue;
@@ -394,7 +394,7 @@ src/Entities.pas
       Continue;
 ===
 the horizontal push points the wrong way
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   if Mine.L < Other.L then
     PushX := -Abs(Mine.R - Other.L) shl POSITION_SHIFT

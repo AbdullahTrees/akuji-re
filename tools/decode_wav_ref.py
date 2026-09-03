@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Reference decoder for the game's sound effects.
 
-This deliberately duplicates src/WaveFile.pas. It is not a helper for the
+This deliberately duplicates src/media/WaveFile.pas. It is not a helper for the
 Pascal, it is a *second opinion* on it: both were written from the RIFF spec
 and the observed file layout, and the point is that two independent readers
 agree byte for byte on all 57 effects. That is the same technique used to
-validate the QDA archive reader against src/QdaArchive.pas.
+validate the QDA archive reader against src/media/QdaArchive.pas.
 
 Usage:
     # 1. have the game write what its own reader produced
@@ -26,7 +26,7 @@ MIX_RATE = 22050
 # The 57 names, in the order the executable stores them, from the static
 # array[0..56] of AnsiString at VA 0x00468D50. Kept here rather than parsed out
 # of the exe so this script stays a genuinely independent check of the table in
-# src/SoundTable.pas.
+# src/media/SoundTable.pas.
 SOUND_NAMES = [
     "pi.wav", "ok.wav", "ng.wav", "jump.wav", "yuka01.wav", "shot01.wav",
     "power01.wav", "shot02.wav", "yuka02.wav", "pon01.wav", "pon02.wav",

@@ -1,15 +1,6 @@
-{ The millisecond clock. Its own unit because the frame limiter and the MIDI
-  thread both need one and sit on opposite sides of the layering.
-
-  timeGetTime, NOT GetTickCount64. It is what the binary calls, and
-  GetTickCount64 is Vista and later so a Delphi 6 build could not have linked
-  it - but mainly it is the wrong clock. GetTickCount64 never steps finer than
-  the ~15.6 ms system tick, which made the 16 ms limiter wait two ticks (40 fps
-  against the original's 62) and quantised every MIDI event.
-
-  BeginMsClock IS NOT OPTIONAL. One setting governs both timeGetTime's
-  resolution and Sleep's granularity: without timeBeginPeriod(1) a Sleep(1)
-  takes ~15.6 ms and the frame rate caps near 42 however good the clock is. }
+{ Shared millisecond clock for frame limiting and MIDI sequencing. On Windows,
+  BeginMsClock and EndMsClock must bracket use so both timeGetTime and Sleep
+  operate at one-millisecond timer resolution. }
 
 unit MsClock;
 
@@ -24,8 +15,7 @@ uses
 {$ENDIF}
   ;
 
-{ Milliseconds, 32-bit and wrapping every 49 days exactly as the original's
-  does. Callers subtract in DWord so the wrap cancels. }
+{ A 32-bit millisecond count. DWord subtraction handles wraparound. }
 function MsNow: DWord;
 
 { Windows reference-counts the timer period process-wide, so these must be

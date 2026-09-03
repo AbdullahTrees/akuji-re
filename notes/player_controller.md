@@ -1,6 +1,6 @@
 # The player controller: Player_Update @ 0x004585A8
 
-Moved out of src/PlayerState.pas on 2026-09-01; the unit keeps the state map
+Moved out of src/gameplay/PlayerState.pas on 2026-09-01; the unit keeps the state map
 and the ability table, this keeps the working-out.
 
 { ===========================================================================

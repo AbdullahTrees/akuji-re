@@ -116,7 +116,7 @@ ref analyse_events  "$GAME"
 
 # The x87 models. `check` is the one behind ScaleByPercent; `ending` prints the
 # two counters at which the ending screen's percentage comes out a point low,
-# and src/Ending.pas carries those two as a literal - so this is the second
+# and src/screens/Ending.pas carries those two as a literal - so this is the second
 # reader that says the literal is right.
 ref x87_sim check
 

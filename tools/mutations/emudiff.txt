@@ -7,14 +7,14 @@
 #     CHECK_CMD='python tools/emudiff.py' tools/mutate.sh tools/mutations/emudiff.txt
 #
 the RNG multiplier is wrong
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   RANDOM_MULT = $08088405;
 --->
   RANDOM_MULT = $08088404;
 ===
 the RNG scales with the low bits instead of the high
-src/Entities.pas
+src/gameplay/Entities.pas
 ---
   Result := Integer(Cardinal((UInt64(Cardinal(N)) * UInt64(RandomSeed)) shr 32));
 --->

@@ -34,6 +34,8 @@ import os
 import re
 import sys
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(REPO, 'notes', 'audited.md')
 LOCK = os.path.join(REPO, 'notes', 'audited.lock')
@@ -105,8 +107,9 @@ def normalise(body):
 
 
 def routine_body(unit, name):
-    path = os.path.join(REPO, 'src', unit)
-    if not os.path.exists(path):
+    try:
+        path = unit_path(REPO, unit)
+    except ValueError:
         return None
     text = open(path, encoding='utf-8', errors='replace').read()
     head = re.compile(r'^(?:procedure|function)\s+' + re.escape(name)
@@ -122,8 +125,9 @@ def routine_body(unit, name):
 def record_body(unit, name):
     """A record declaration, from `TName = record` to its matching end. Depth
     counted on the words, because a variant part nests another `record`."""
-    path = os.path.join(REPO, 'src', unit)
-    if not os.path.exists(path):
+    try:
+        path = unit_path(REPO, unit)
+    except ValueError:
         return None
     text = open(path, encoding='utf-8', errors='replace').read()
     m = re.search(r'(?<![A-Za-z0-9_])' + re.escape(name)

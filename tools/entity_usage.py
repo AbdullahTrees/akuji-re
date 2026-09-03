@@ -42,7 +42,7 @@ import re
 import sys
 
 # csv 0 opcode, 1 required flag, 2 forbidding flag, 3 tileX, 4 tileY,
-# 5 ParamA, 6 ParamB - see src/EventScripts.pas for the whole record.
+# 5 ParamA, 6 ParamB - see src/events/EventScripts.pas for the whole record.
 OPCODES = {
     0: 'touch',
     1: 'touch+button',

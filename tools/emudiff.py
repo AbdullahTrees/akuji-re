@@ -83,6 +83,8 @@ import subprocess
 import sys
 import tempfile
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GHIDRA = r'C:\Users\Abdullah\Documents\ghidra_12.0.4_PUBLIC\support\analyzeHeadless.bat'
 
@@ -358,7 +360,7 @@ def cases_handler_pure():
 
 def handler_addrs():
     """HANDLER_ADDR out of EntityHandlers.pas: the jump table, by type."""
-    src = open(os.path.join(REPO, 'src', 'EntityHandlers.pas'),
+    src = open(unit_path(REPO, 'EntityHandlers.pas'),
                encoding='utf-8').read()
     i = src.index('HANDLER_ADDR: array')
     body = src[src.index('(', i) + 1:src.index(');', i)]

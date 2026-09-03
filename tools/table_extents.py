@@ -58,6 +58,8 @@ import os
 import re
 import sys
 
+from source_tree import unit_path
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCES = ['EntityHandlers.pas', 'Entities.pas', 'Player.pas', 'Stages.pas',
            'Directions.pas', 'EventCommands.pas', 'Title.pas', 'Ending.pas',
@@ -101,8 +103,9 @@ def main():
     addrs = {}       # NAME_ADDR -> va
     arrays = {}
     for fn in SOURCES:
-        p = os.path.join(REPO, 'src', fn)
-        if not os.path.exists(p):
+        try:
+            p = unit_path(REPO, fn)
+        except ValueError:
             continue
         text = open(p, encoding='utf-8').read()
         for m in ADDR_RE.finditer(text):

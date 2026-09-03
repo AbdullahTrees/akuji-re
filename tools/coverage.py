@@ -27,6 +27,8 @@ import os
 import re
 import sys
 
+from source_tree import source_files, source_name
+
 GAME_LO = 0x454790   # see the header of notes/game_functions.txt
 GAME_HI = 0x467200
 
@@ -56,10 +58,10 @@ def load_game_functions(path):
 def scan_sources(src_dir):
     """address -> set of files that mention it."""
     found = {}
-    for name in sorted(os.listdir(src_dir)):
-        if not name.lower().endswith((".pas", ".lpr")):
-            continue
-        text = open(os.path.join(src_dir, name), encoding="utf-8",
+    repo = os.path.dirname(src_dir)
+    for path in source_files(repo, ('.pas', '.lpr')):
+        name = source_name(repo, path)
+        text = open(path, encoding="utf-8",
                     errors="replace").read()
         for m in ADDR_RE.finditer(text):
             addr = int(m.group(1), 16)
