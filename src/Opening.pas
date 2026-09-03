@@ -128,7 +128,7 @@ type
     FOnMusic: TOpeningMusic;
     FOnStopMusic: TOpeningStopMusic;
     FOnFade: TOpeningFade;
-    procedure EnterSlide(N: Integer);
+    procedure EnterSlide(SlideNumber: Integer);
   public
     { 0x0046D298 and 0x0046D174, shared with the ending screen. }
     Slide: Integer;
@@ -171,25 +171,25 @@ begin
   Timer := 0;
 end;
 
-procedure TOpeningScreen.EnterSlide(N: Integer);
+procedure TOpeningScreen.EnterSlide(SlideNumber: Integer);
 var
-  Id: Integer;
+  PictureId: Integer;
 begin
-  Timer := OPENING_SECONDS[N - 1] * FRAMES_PER_SECOND;
+  Timer := OPENING_SECONDS[SlideNumber - 1] * FRAMES_PER_SECOND;
 
-  if N = OPENING_MUSIC_IN_SLIDE then
+  if SlideNumber = OPENING_MUSIC_IN_SLIDE then
     if Assigned(FOnMusic) then
       FOnMusic(OPENING_MIDI_IN, True);
-  if N = OPENING_MUSIC_OFF_SLIDE then
+  if SlideNumber = OPENING_MUSIC_OFF_SLIDE then
     if Assigned(FOnStopMusic) then
       FOnStopMusic;
-  if N = OPENING_MUSIC_OUT_SLIDE then
+  if SlideNumber = OPENING_MUSIC_OUT_SLIDE then
     if Assigned(FOnMusic) then
       FOnMusic(OPENING_MIDI_OUT, False);
 
-  Id := OpeningPictureFor(N);
-  if (Id <> -1) and Assigned(FOnPicture) then
-    FOnPicture(Id);
+  PictureId := OpeningPictureFor(SlideNumber);
+  if (PictureId <> -1) and Assigned(FOnPicture) then
+    FOnPicture(PictureId);
 end;
 
 function TOpeningScreen.Update(Confirm, MusicPlaying,
@@ -239,7 +239,7 @@ end;
 
 procedure TOpeningScreen.Draw(C: TCanvas; F: TGameFont; Picture: TBitmap);
 var
-  T: Integer;
+  TextIndex: Integer;
 begin
   if (Slide < 1) or (Slide > OPENING_SLIDES) then
     Exit;
@@ -247,7 +247,7 @@ begin
   if (OpeningPictureFor(Slide) <> -1) and (Picture <> nil) then
     C.Draw(OPENING_PIC_X, OPENING_PIC_Y, Picture);
 
-  T := OPENING_TEXT_INDEX[Slide - 1];
+  TextIndex := OPENING_TEXT_INDEX[Slide - 1];
   { Game_DrawTextOutlined @ 0x00451004, exactly as Opening_Update calls it at
     0x00463572 and 0x004635B4 - x 0x38, y 200 and 0xD8, outline then fill,
     size 10, on the component's canvas.
@@ -255,10 +255,12 @@ begin
     This used to go through the 9x9 bitmap font, which is why the text came out
     in capitals: that sheet holds $20..$5F and has NO LOWERCASE. The original
     never uses it here. }
-  Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE1_Y, OPENING_LINES[T],
+  Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE1_Y,
+                        OPENING_LINES[TextIndex],
                         OPENING_OUTLINE, OPENING_FILL, OUTLINED_FONT_SIZE, C);
-  if T + 1 <= High(OPENING_LINES) then
-    Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE2_Y, OPENING_LINES[T + 1],
+  if TextIndex + 1 <= High(OPENING_LINES) then
+    Game_DrawTextOutlined(OPENING_TEXT_X, OPENING_LINE2_Y,
+                          OPENING_LINES[TextIndex + 1],
                           OPENING_OUTLINE, OPENING_FILL, OUTLINED_FONT_SIZE, C);
 end;
 

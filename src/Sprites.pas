@@ -81,9 +81,9 @@ function TSpriteSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer;
 var
   Lines, Fields: TStringList;
   FileName: string;
-  L, I, Next: Integer;
-  SurfIdx, FrameW, FrameH, Cols, Rows, OriginX, OriginY: Integer;
-  SrcX, SrcY: Integer;
+  LineIndex, FrameIndex, NextFrame: Integer;
+  SurfaceIndex, FrameWidth, FrameHeight, ColumnCount, RowCount: Integer;
+  OriginX, OriginY, SourceX, SourceY: Integer;
 begin
   SetLength(FFrames, 0);
   FileName := IncludeTrailingPathDelimiter(ADataDir) + 'data' + PathDelim +
@@ -95,33 +95,35 @@ begin
   Fields := TStringList.Create;
   try
     Lines.LoadFromFile(FileName);
-    Next := 0;
-    for L := 0 to Lines.Count - 1 do
+    NextFrame := 0;
+    for LineIndex := 0 to Lines.Count - 1 do
     begin
-      if Trim(Lines[L]) = '' then
+      if Trim(Lines[LineIndex]) = '' then
         Continue;
-      Fields.CommaText := Lines[L];
+      Fields.CommaText := Lines[LineIndex];
       if Fields.Count < 7 then
         Continue;
 
-      SurfIdx := StrToIntDef(Trim(Fields[0]), 0);
-      FrameW  := StrToIntDef(Trim(Fields[1]), 0);
-      FrameH  := StrToIntDef(Trim(Fields[2]), 0);
-      Cols    := StrToIntDef(Trim(Fields[3]), 0);
-      Rows    := StrToIntDef(Trim(Fields[4]), 0);
-      OriginX := StrToIntDef(Trim(Fields[5]), 0);
-      OriginY := StrToIntDef(Trim(Fields[6]), 0);
-      if (Cols <= 0) or (Rows <= 0) then
+      SurfaceIndex := StrToIntDef(Trim(Fields[0]), 0);
+      FrameWidth   := StrToIntDef(Trim(Fields[1]), 0);
+      FrameHeight  := StrToIntDef(Trim(Fields[2]), 0);
+      ColumnCount  := StrToIntDef(Trim(Fields[3]), 0);
+      RowCount     := StrToIntDef(Trim(Fields[4]), 0);
+      OriginX      := StrToIntDef(Trim(Fields[5]), 0);
+      OriginY      := StrToIntDef(Trim(Fields[6]), 0);
+      if (ColumnCount <= 0) or (RowCount <= 0) then
         Continue;
 
-      SetLength(FFrames, Next + Cols * Rows);
-      for I := 0 to Cols * Rows - 1 do
+      SetLength(FFrames, NextFrame + ColumnCount * RowCount);
+      for FrameIndex := 0 to ColumnCount * RowCount - 1 do
       begin
-        SrcX := (I mod Cols) * FrameW + OriginX;
-        SrcY := (I div Cols) * FrameH + OriginY;
-        FFrames[Next].Surface := SurfIdx;
-        FFrames[Next].Src := Rect(SrcX, SrcY, SrcX + FrameW, SrcY + FrameH);
-        Inc(Next);
+        SourceX := (FrameIndex mod ColumnCount) * FrameWidth + OriginX;
+        SourceY := (FrameIndex div ColumnCount) * FrameHeight + OriginY;
+        FFrames[NextFrame].Surface := SurfaceIndex;
+        FFrames[NextFrame].Src := Rect(SourceX, SourceY,
+                                       SourceX + FrameWidth,
+                                       SourceY + FrameHeight);
+        Inc(NextFrame);
       end;
     end;
   finally
@@ -134,18 +136,19 @@ end;
 procedure TSpriteSet.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
   Index, X, Y: Integer);
 var
-  F: TSpriteFrame;
-  Bmp: TBitmap;
+  Frame: TSpriteFrame;
+  Surface: TBitmap;
 begin
-  F := GetFrame(Index);
-  if F.Surface < 0 then Exit;
+  Frame := GetFrame(Index);
+  if Frame.Surface < 0 then Exit;
   if ASurfaces = nil then Exit;
-  Bmp := ASurfaces[F.Surface];
-  if Bmp = nil then Exit;
+  Surface := ASurfaces[Frame.Surface];
+  if Surface = nil then Exit;
 
   Dest.CopyRect(
-    Rect(X, Y, X + (F.Src.Right - F.Src.Left), Y + (F.Src.Bottom - F.Src.Top)),
-    Bmp.Canvas, F.Src);
+    Rect(X, Y, X + (Frame.Src.Right - Frame.Src.Left),
+         Y + (Frame.Src.Bottom - Frame.Src.Top)),
+    Surface.Canvas, Frame.Src);
 end;
 
 end.

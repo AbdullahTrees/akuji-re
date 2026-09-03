@@ -68,7 +68,7 @@ type
   private
     FSlots: array[0..SPRITE_POOL_SIZE - 1] of TSpriteSlot;
     FFrames: TSpriteSet;
-    function FrameRect(AnimId: Integer; out R: TRect): Boolean;
+    function FrameRect(AnimId: Integer; out FrameBounds: TRect): Boolean;
   public
     constructor Create;
     procedure Clear;
@@ -112,43 +112,43 @@ end;
 
 procedure TSpritePool.Clear;
 var
-  I: Integer;
+  Slot: Integer;
 begin
-  for I := 0 to SPRITE_POOL_SIZE - 1 do
+  for Slot := 0 to SPRITE_POOL_SIZE - 1 do
   begin
-    FSlots[I].Used := False;
-    FSlots[I].Visible := False;
-    FSlots[I].AnimId := -1;
-    FSlots[I].X := 0;
-    FSlots[I].Y := 0;
-    FSlots[I].Depth := 0;
+    FSlots[Slot].Used := False;
+    FSlots[Slot].Visible := False;
+    FSlots[Slot].AnimId := -1;
+    FSlots[Slot].X := 0;
+    FSlots[Slot].Y := 0;
+    FSlots[Slot].Depth := 0;
   end;
 end;
 
-function TSpritePool.FrameRect(AnimId: Integer; out R: TRect): Boolean;
+function TSpritePool.FrameRect(AnimId: Integer; out FrameBounds: TRect): Boolean;
 begin
   Result := False;
-  R := Rect(0, 0, 0, 0);
+  FrameBounds := Rect(0, 0, 0, 0);
   if (FFrames = nil) or (AnimId < 0) or (AnimId >= FFrames.Count) then
     Exit;
-  R := FFrames[AnimId].Src;
+  FrameBounds := FFrames[AnimId].Src;
   Result := True;
 end;
 
 function TSpritePool.AllocSprite(AnimId: Integer): Integer;
 var
-  I: Integer;
+  Slot: Integer;
 begin
-  for I := 0 to SPRITE_POOL_SIZE - 1 do
-    if not FSlots[I].Used then
+  for Slot := 0 to SPRITE_POOL_SIZE - 1 do
+    if not FSlots[Slot].Used then
     begin
-      FSlots[I].Used := True;
-      FSlots[I].Visible := True;
-      FSlots[I].AnimId := AnimId;
-      FSlots[I].X := 0;
-      FSlots[I].Y := 0;
-      FSlots[I].Depth := 0;
-      Exit(I);
+      FSlots[Slot].Used := True;
+      FSlots[Slot].Visible := True;
+      FSlots[Slot].AnimId := AnimId;
+      FSlots[Slot].X := 0;
+      FSlots[Slot].Y := 0;
+      FSlots[Slot].Depth := 0;
+      Exit(Slot);
     end;
   { Full. Entity_Spawn treats this as a failed spawn and drops the entity. }
   Result := SPRITE_NONE;
@@ -183,24 +183,24 @@ end;
 
 function TSpritePool.Width(Handle: Integer): Integer;
 var
-  R: TRect;
+  FrameBounds: TRect;
 begin
   Result := 0;
   if (Handle < 0) or (Handle >= SPRITE_POOL_SIZE) then
     Exit;
-  if FrameRect(FSlots[Handle].AnimId, R) then
-    Result := R.Right - R.Left;
+  if FrameRect(FSlots[Handle].AnimId, FrameBounds) then
+    Result := FrameBounds.Right - FrameBounds.Left;
 end;
 
 function TSpritePool.Height(Handle: Integer): Integer;
 var
-  R: TRect;
+  FrameBounds: TRect;
 begin
   Result := 0;
   if (Handle < 0) or (Handle >= SPRITE_POOL_SIZE) then
     Exit;
-  if FrameRect(FSlots[Handle].AnimId, R) then
-    Result := R.Bottom - R.Top;
+  if FrameRect(FSlots[Handle].AnimId, FrameBounds) then
+    Result := FrameBounds.Bottom - FrameBounds.Top;
 end;
 
 procedure TSpritePool.SetPos(Handle, X, Y: Integer);
@@ -220,11 +220,11 @@ end;
 
 function TSpritePool.LiveCount: Integer;
 var
-  I: Integer;
+  Slot: Integer;
 begin
   Result := 0;
-  for I := 0 to SPRITE_POOL_SIZE - 1 do
-    if FSlots[I].Used then
+  for Slot := 0 to SPRITE_POOL_SIZE - 1 do
+    if FSlots[Slot].Used then
       Inc(Result);
 end;
 
@@ -252,11 +252,11 @@ end;
   the same depth. }
 procedure TSpritePool.ShiftY(Delta: Integer);
 var
-  I: Integer;
+  Slot: Integer;
 begin
-  for I := 0 to SPRITE_POOL_SIZE - 1 do
-    if FSlots[I].Used then
-      Inc(FSlots[I].Y, Delta);
+  for Slot := 0 to SPRITE_POOL_SIZE - 1 do
+    if FSlots[Slot].Used then
+      Inc(FSlots[Slot].Y, Delta);
 end;
 
 function TSpritePool.DrawOrder: TSpriteOrder;

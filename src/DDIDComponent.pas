@@ -45,7 +45,8 @@ type
     FDebugOption: TDDIDDebugOption;
     FDown: TAkujiButtons;
   public
-    { Poll current state. No-op until wired to LCL key events. }
+    { The LCL event handlers already maintain current state, so polling has no
+      additional work in this backend. }
     procedure Update;
 
     function IsDown(Button: TAkujiButton): Boolean;
@@ -63,7 +64,7 @@ implementation
 
 procedure TDDIDEX.Update;
 begin
-  { TODO: nothing to do while state is driven by KeyDown/KeyUp. }
+  { State is updated synchronously by KeyDown and KeyUp. }
 end;
 
 function TDDIDEX.IsDown(Button: TAkujiButton): Boolean;
@@ -72,22 +73,22 @@ begin
 end;
 
 { One physical key to one logical button, or nothing. }
-function ButtonOf(Key: Word; out B: TAkujiButton): Boolean;
+function ButtonOf(Key: Word; out Button: TAkujiButton): Boolean;
 begin
   Result := True;
   case Key of
-    VK_UP,    VK_NUMPAD8: B := abUp;
-    VK_DOWN,  VK_NUMPAD2: B := abDown;
-    VK_LEFT,  VK_NUMPAD4: B := abLeft;
-    VK_RIGHT, VK_NUMPAD6: B := abRight;
+    VK_UP,    VK_NUMPAD8: Button := abUp;
+    VK_DOWN,  VK_NUMPAD2: Button := abDown;
+    VK_LEFT,  VK_NUMPAD4: Button := abLeft;
+    VK_RIGHT, VK_NUMPAD6: Button := abRight;
     { Z is the original's confirm and its first action; the game reads button
       0 for both jump and confirm, so space maps to the same one. }
-    VK_Z, VK_SPACE:       B := abAction1;
-    VK_X:                 B := abAction2;
-    VK_C:                 B := abAction3;
-    VK_A:                 B := abAux1;
-    VK_S:                 B := abAux2;
-    VK_D:                 B := abAux3;
+    VK_Z, VK_SPACE:       Button := abAction1;
+    VK_X:                 Button := abAction2;
+    VK_C:                 Button := abAction3;
+    VK_A:                 Button := abAux1;
+    VK_S:                 Button := abAux2;
+    VK_D:                 Button := abAux3;
   else
     Result := False;
   end;
@@ -95,18 +96,18 @@ end;
 
 procedure TDDIDEX.KeyDown(Key: Word);
 var
-  B: TAkujiButton;
+  Button: TAkujiButton;
 begin
-  if ButtonOf(Key, B) then
-    Include(FDown, B);
+  if ButtonOf(Key, Button) then
+    Include(FDown, Button);
 end;
 
 procedure TDDIDEX.KeyUp(Key: Word);
 var
-  B: TAkujiButton;
+  Button: TAkujiButton;
 begin
-  if ButtonOf(Key, B) then
-    Exclude(FDown, B);
+  if ButtonOf(Key, Button) then
+    Exclude(FDown, Button);
 end;
 
 initialization

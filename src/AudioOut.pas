@@ -111,9 +111,9 @@ end;
 
 function TWaveOutThread.OpenDevice(out AError: string): Boolean;
 var
-  Fmt: TWAVEFORMATEX;
-  I: Integer;
-  Res: MMRESULT;
+  WaveFormat: TWAVEFORMATEX;
+  BlockIndex: Integer;
+  OpenResult: MMRESULT;
 begin
   Result := False;
   AError := '';
@@ -125,35 +125,36 @@ begin
     Exit;
   end;
 
-  FillChar(Fmt, SizeOf(Fmt), 0);
-  Fmt.wFormatTag := WAVE_FORMAT_PCM;
-  Fmt.nChannels := MIX_CHANNELS;
-  Fmt.nSamplesPerSec := MIX_RATE;
-  Fmt.wBitsPerSample := 16;
-  Fmt.nBlockAlign := MIX_CHANNELS * 2;
-  Fmt.nAvgBytesPerSec := MIX_RATE * Fmt.nBlockAlign;
-  Fmt.cbSize := 0;
+  FillChar(WaveFormat, SizeOf(WaveFormat), 0);
+  WaveFormat.wFormatTag := WAVE_FORMAT_PCM;
+  WaveFormat.nChannels := MIX_CHANNELS;
+  WaveFormat.nSamplesPerSec := MIX_RATE;
+  WaveFormat.wBitsPerSample := 16;
+  WaveFormat.nBlockAlign := MIX_CHANNELS * 2;
+  WaveFormat.nAvgBytesPerSec := MIX_RATE * WaveFormat.nBlockAlign;
+  WaveFormat.cbSize := 0;
 
-  Res := waveOutOpen(@FHandle, WAVE_MAPPER, @Fmt, DWORD_PTR(FEvent), 0,
-                     CALLBACK_EVENT);
-  if Res <> MMSYSERR_NOERROR then
+  OpenResult := waveOutOpen(@FHandle, WAVE_MAPPER, @WaveFormat,
+                            DWORD_PTR(FEvent), 0, CALLBACK_EVENT);
+  if OpenResult <> MMSYSERR_NOERROR then
   begin
-    AError := Format('waveOutOpen failed (%d)', [Res]);
+    AError := Format('waveOutOpen failed (%d)', [OpenResult]);
     CloseHandle(FEvent);
     FEvent := 0;
     Exit;
   end;
 
-  for I := 0 to OUT_BLOCK_COUNT - 1 do
+  for BlockIndex := 0 to OUT_BLOCK_COUNT - 1 do
   begin
-    GetMem(FBuffers[I], BLOCK_BYTES);
-    FillChar(FBuffers[I]^, BLOCK_BYTES, 0);
-    FillChar(FHeaders[I], SizeOf(TWAVEHDR), 0);
-    FHeaders[I].lpData := PChar(FBuffers[I]);
-    FHeaders[I].dwBufferLength := BLOCK_BYTES;
-    waveOutPrepareHeader(FHandle, @FHeaders[I], SizeOf(TWAVEHDR));
+    GetMem(FBuffers[BlockIndex], BLOCK_BYTES);
+    FillChar(FBuffers[BlockIndex]^, BLOCK_BYTES, 0);
+    FillChar(FHeaders[BlockIndex], SizeOf(TWAVEHDR), 0);
+    FHeaders[BlockIndex].lpData := PChar(FBuffers[BlockIndex]);
+    FHeaders[BlockIndex].dwBufferLength := BLOCK_BYTES;
+    waveOutPrepareHeader(FHandle, @FHeaders[BlockIndex], SizeOf(TWAVEHDR));
     { Mark done so the feed loop treats every block as free on the first pass. }
-    FHeaders[I].dwFlags := FHeaders[I].dwFlags or WHDR_DONE;
+    FHeaders[BlockIndex].dwFlags :=
+      FHeaders[BlockIndex].dwFlags or WHDR_DONE;
   end;
   FPrepared := True;
   Result := True;
@@ -161,7 +162,7 @@ end;
 
 procedure TWaveOutThread.CloseDevice;
 var
-  I: Integer;
+  BlockIndex: Integer;
 begin
   if FHandle <> 0 then
   begin
@@ -170,17 +171,18 @@ begin
       with WAVERR_STILLPLAYING and leaks the buffer. }
     waveOutReset(FHandle);
     if FPrepared then
-      for I := 0 to OUT_BLOCK_COUNT - 1 do
-        waveOutUnprepareHeader(FHandle, @FHeaders[I], SizeOf(TWAVEHDR));
+      for BlockIndex := 0 to OUT_BLOCK_COUNT - 1 do
+        waveOutUnprepareHeader(FHandle, @FHeaders[BlockIndex],
+                               SizeOf(TWAVEHDR));
     waveOutClose(FHandle);
     FHandle := 0;
   end;
   FPrepared := False;
-  for I := 0 to OUT_BLOCK_COUNT - 1 do
-    if FBuffers[I] <> nil then
+  for BlockIndex := 0 to OUT_BLOCK_COUNT - 1 do
+    if FBuffers[BlockIndex] <> nil then
     begin
-      FreeMem(FBuffers[I]);
-      FBuffers[I] := nil;
+      FreeMem(FBuffers[BlockIndex]);
+      FBuffers[BlockIndex] := nil;
     end;
   if FEvent <> 0 then
   begin
@@ -199,16 +201,16 @@ end;
 
 procedure TWaveOutThread.Execute;
 var
-  I: Integer;
+  BlockIndex: Integer;
   Queued: Boolean;
 begin
   while not Terminated do
   begin
     Queued := False;
-    for I := 0 to OUT_BLOCK_COUNT - 1 do
-      if (FHeaders[I].dwFlags and WHDR_DONE) <> 0 then
+    for BlockIndex := 0 to OUT_BLOCK_COUNT - 1 do
+      if (FHeaders[BlockIndex].dwFlags and WHDR_DONE) <> 0 then
       begin
-        FillAndQueue(I);
+        FillAndQueue(BlockIndex);
         Queued := True;
       end;
 
@@ -236,8 +238,8 @@ end;
 function TAudioOut.Start: Boolean;
 {$IFDEF WINDOWS}
 var
-  T: TWaveOutThread;
-  Err: string;
+  OutputThread: TWaveOutThread;
+  OpenError: string;
 {$ENDIF}
 begin
   Result := False;
@@ -250,15 +252,15 @@ begin
   end;
 
 {$IFDEF WINDOWS}
-  T := TWaveOutThread.Create(FMixer);
-  if not T.Open(Err) then
+  OutputThread := TWaveOutThread.Create(FMixer);
+  if not OutputThread.Open(OpenError) then
   begin
-    FLastError := Err;
-    T.Free;
+    FLastError := OpenError;
+    OutputThread.Free;
     Exit;
   end;
-  FThread := T;
-  T.Start;
+  FThread := OutputThread;
+  OutputThread.Start;
   FActive := True;
   FLastError := '';
   Result := True;

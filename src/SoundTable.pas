@@ -140,18 +140,18 @@ uses
 
 function SoundPath(const AGameDir: string; Index: Integer): string;
 var
-  Rel: string;
+  RelativePath: string;
 begin
   if (Index < 0) or (Index >= SOUND_COUNT) then
     Exit('');
-  Rel := SoundNames[Index];
+  RelativePath := SoundNames[Index];
   { On Windows the stored separator is already correct, and the compiler
     folds the comparison away and warns about unreachable code - so make the
     platform split explicit rather than leaving a dead runtime branch. }
 {$IFNDEF WINDOWS}
-  Rel := StringReplace(Rel, '\', PathDelim, [rfReplaceAll]);
+  RelativePath := StringReplace(RelativePath, '\', PathDelim, [rfReplaceAll]);
 {$ENDIF}
-  Result := IncludeTrailingPathDelimiter(AGameDir) + Rel;
+  Result := IncludeTrailingPathDelimiter(AGameDir) + RelativePath;
 end;
 
 end.

@@ -85,28 +85,29 @@ end;
   silence; 16-bit is signed with 0 as silence - the classic RIFF asymmetry. }
 function DecodePCM(const Raw: array of Byte; Bits, Channels: Integer): TSampleArray;
 var
-  BytesPerSample, Frames, I, C, Acc: Integer;
-  P: Integer;
+  BytesPerSample, FrameCount, FrameIndex, ChannelIndex, SampleSum: Integer;
+  ByteOffset: Integer;
 begin
   BytesPerSample := Bits div 8;
   if (BytesPerSample = 0) or (Channels = 0) then
     Exit(nil);
-  Frames := Length(Raw) div (BytesPerSample * Channels);
-  SetLength(Result, Frames);
-  for I := 0 to Frames - 1 do
+  FrameCount := Length(Raw) div (BytesPerSample * Channels);
+  SetLength(Result, FrameCount);
+  for FrameIndex := 0 to FrameCount - 1 do
   begin
-    Acc := 0;
-    for C := 0 to Channels - 1 do
+    SampleSum := 0;
+    for ChannelIndex := 0 to Channels - 1 do
     begin
-      P := (I * Channels + C) * BytesPerSample;
+      ByteOffset := (FrameIndex * Channels + ChannelIndex) * BytesPerSample;
       if Bits = 8 then
-        Inc(Acc, (Raw[P] - 128) * 256)
+        Inc(SampleSum, (Raw[ByteOffset] - 128) * 256)
       else
-        Inc(Acc, SmallInt(Raw[P] or (Raw[P + 1] shl 8)));
+        Inc(SampleSum, SmallInt(Raw[ByteOffset]
+                                or (Raw[ByteOffset + 1] shl 8)));
     end;
     { Downmix by averaging. Every shipped effect is mono, so this path is
       defensive only - it exists so a stereo file cannot corrupt the buffer. }
-    Result[I] := Acc div Channels;
+    Result[FrameIndex] := SampleSum div Channels;
   end;
 end;
 
@@ -114,25 +115,25 @@ end;
   Factor = 2, for the 11025 Hz files. }
 function Upsample(const Src: TSampleArray; Factor: Integer): TSampleArray;
 var
-  I, J: Integer;
+  SourceIndex, CopyIndex: Integer;
 begin
   if Factor <= 1 then
     Exit(Src);
   SetLength(Result, Length(Src) * Factor);
-  for I := 0 to High(Src) do
-    for J := 0 to Factor - 1 do
-      Result[I * Factor + J] := Src[I];
+  for SourceIndex := 0 to High(Src) do
+    for CopyIndex := 0 to Factor - 1 do
+      Result[SourceIndex * Factor + CopyIndex] := Src[SourceIndex];
 end;
 
 function LoadWave(const FileName: string; out W: TWaveData): Boolean;
 var
-  S: TFileStream;
-  Hdr: TChunkHeader;
+  Stream: TFileStream;
+  Chunk: TChunkHeader;
   RiffType: array[0..3] of AnsiChar;
-  Fmt: TWaveFormat;
-  Raw: array of Byte;
-  HaveFmt, HaveData: Boolean;
-  Next: Int64;
+  WaveFormat: TWaveFormat;
+  RawSamples: array of Byte;
+  HaveFormat, HaveData: Boolean;
+  NextChunk: Int64;
 begin
   Result := False;
   FillChar(W, SizeOf(W), 0);
@@ -140,69 +141,70 @@ begin
   if not FileExists(FileName) then
     Exit;
 
-  HaveFmt := False;
+  HaveFormat := False;
   HaveData := False;
-  FillChar(Fmt, SizeOf(Fmt), 0);
+  FillChar(WaveFormat, SizeOf(WaveFormat), 0);
 
-  S := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
-    if S.Size < 12 then
+    if Stream.Size < 12 then
       Exit;
-    S.ReadBuffer(Hdr, SizeOf(Hdr));
-    S.ReadBuffer(RiffType, 4);
-    if (Hdr.ID <> 'RIFF') or (RiffType <> 'WAVE') then
+    Stream.ReadBuffer(Chunk, SizeOf(Chunk));
+    Stream.ReadBuffer(RiffType, 4);
+    if (Chunk.ID <> 'RIFF') or (RiffType <> 'WAVE') then
       Exit;
 
     { Walk every chunk. 'fact' sits between 'fmt ' and 'data' in 49 of the 57
       files, so skipping by size rather than assuming an order is required. }
-    while S.Position + SizeOf(Hdr) <= S.Size do
+    while Stream.Position + SizeOf(Chunk) <= Stream.Size do
     begin
-      S.ReadBuffer(Hdr, SizeOf(Hdr));
+      Stream.ReadBuffer(Chunk, SizeOf(Chunk));
       { RIFF chunks are word-aligned: an odd size is followed by a pad byte
         that is not counted in Size. }
-      Next := S.Position + Hdr.Size + (Hdr.Size and 1);
+      NextChunk := Stream.Position + Chunk.Size + (Chunk.Size and 1);
 
-      if Hdr.ID = 'fmt ' then
+      if Chunk.ID = 'fmt ' then
       begin
-        if Hdr.Size >= SizeOf(Fmt) then
+        if Chunk.Size >= SizeOf(WaveFormat) then
         begin
-          S.ReadBuffer(Fmt, SizeOf(Fmt));
-          HaveFmt := True;
+          Stream.ReadBuffer(WaveFormat, SizeOf(WaveFormat));
+          HaveFormat := True;
         end;
       end
-      else if Hdr.ID = 'data' then
+      else if Chunk.ID = 'data' then
       begin
-        if Hdr.Size > 0 then
+        if Chunk.Size > 0 then
         begin
-          SetLength(Raw, Hdr.Size);
-          S.ReadBuffer(Raw[0], Hdr.Size);
+          SetLength(RawSamples, Chunk.Size);
+          Stream.ReadBuffer(RawSamples[0], Chunk.Size);
           HaveData := True;
         end;
       end;
 
-      if Next > S.Size then
+      if NextChunk > Stream.Size then
         Break;
-      S.Position := Next;
+      Stream.Position := NextChunk;
     end;
   finally
-    S.Free;
+    Stream.Free;
   end;
 
-  if not (HaveFmt and HaveData) then
+  if not (HaveFormat and HaveData) then
     Exit;
-  if Fmt.FormatTag <> WAVE_FORMAT_PCM then
+  if WaveFormat.FormatTag <> WAVE_FORMAT_PCM then
     Exit;
-  if not (Fmt.BitsPerSample in [8, 16]) then
+  if not (WaveFormat.BitsPerSample in [8, 16]) then
     Exit;
-  if (Fmt.Channels < 1) or (Fmt.Channels > 2) then
+  if (WaveFormat.Channels < 1) or (WaveFormat.Channels > 2) then
     Exit;
-  if Fmt.SamplesPerSec = 0 then
+  if WaveFormat.SamplesPerSec = 0 then
     Exit;
 
-  W.SourceRate := Fmt.SamplesPerSec;
-  W.SourceBits := Fmt.BitsPerSample;
-  W.SourceChannels := Fmt.Channels;
-  W.Samples := DecodePCM(Raw, Fmt.BitsPerSample, Fmt.Channels);
+  W.SourceRate := WaveFormat.SamplesPerSec;
+  W.SourceBits := WaveFormat.BitsPerSample;
+  W.SourceChannels := WaveFormat.Channels;
+  W.Samples := DecodePCM(RawSamples, WaveFormat.BitsPerSample,
+                         WaveFormat.Channels);
 
   { Every shipped rate divides MIX_RATE exactly. A file at some other rate is
     left at its own rate and will play at the wrong pitch rather than being

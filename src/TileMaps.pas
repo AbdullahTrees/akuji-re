@@ -123,40 +123,40 @@ end;
 { Load_Map @ 0x00466340. }
 function TTileMap.LoadFromFile(const FileName: string): Boolean;
 var
-  S: TFileStream;
-  Expected: Int64;
+  Stream: TFileStream;
+  ExpectedSize: Int64;
 begin
   Result := False;
   SetLength(FTiles, 0);
   if not FileExists(FileName) then
     Exit;
 
-  S := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
-    if S.Size < MAP_HEADER_SIZE then
+    if Stream.Size < MAP_HEADER_SIZE then
       Exit;
-    FMapW      := Integer(S.ReadDWord);
-    FMapH      := Integer(S.ReadDWord);
-    FTileW     := Integer(S.ReadDWord);
-    FTileH     := Integer(S.ReadDWord);
-    FSheetCols := Integer(S.ReadDWord);
-    FSheetRows := Integer(S.ReadDWord);
+    FMapW      := Integer(Stream.ReadDWord);
+    FMapH      := Integer(Stream.ReadDWord);
+    FTileW     := Integer(Stream.ReadDWord);
+    FTileH     := Integer(Stream.ReadDWord);
+    FSheetCols := Integer(Stream.ReadDWord);
+    FSheetRows := Integer(Stream.ReadDWord);
 
     if (FMapW <= 0) or (FMapH <= 0) then
       Exit;
 
     { Every shipped map satisfies this exactly, so a mismatch means the header
       has been misread rather than that the file is merely unusual. }
-    Expected := MAP_HEADER_SIZE + Int64(FMapW) * FMapH * 2;
-    if S.Size <> Expected then
+    ExpectedSize := MAP_HEADER_SIZE + Int64(FMapW) * FMapH * 2;
+    if Stream.Size <> ExpectedSize then
       Exit;
 
     SetLength(FTiles, FMapW * FMapH);
-    S.ReadBuffer(FTiles[0], FMapW * FMapH * 2);
+    Stream.ReadBuffer(FTiles[0], FMapW * FMapH * 2);
     BuildTileDefs;
     Result := True;
   finally
-    S.Free;
+    Stream.Free;
   end;
 end;
 
@@ -169,15 +169,16 @@ end;
   for i in 0 .. SheetCols * SheetRows - 1. }
 procedure TTileMap.BuildTileDefs;
 var
-  I, N, X, Y: Integer;
+  TileId, TileCount, SourceX, SourceY: Integer;
 begin
-  N := FSheetCols * FSheetRows;
-  SetLength(FTileDefs, N);
-  for I := 0 to N - 1 do
+  TileCount := FSheetCols * FSheetRows;
+  SetLength(FTileDefs, TileCount);
+  for TileId := 0 to TileCount - 1 do
   begin
-    X := TileSrcX(I, FTileW, FSheetCols);
-    Y := TileSrcY(I, FTileH, FSheetCols);
-    FTileDefs[I] := Rect(X, Y, X + FTileW, Y + FTileH);
+    SourceX := TileSrcX(TileId, FTileW, FSheetCols);
+    SourceY := TileSrcY(TileId, FTileH, FSheetCols);
+    FTileDefs[TileId] := Rect(SourceX, SourceY,
+                              SourceX + FTileW, SourceY + FTileH);
   end;
 end;
 
@@ -226,12 +227,12 @@ end;
 
 function TTileMap.TileAtRaw(X, Y: Integer): Integer;
 var
-  Idx: Integer;
+  TileIndex: Integer;
 begin
-  Idx := X + Y * FMapW;
-  if (Idx < 0) or (Idx >= FMapW * FMapH) then
+  TileIndex := X + Y * FMapW;
+  if (TileIndex < 0) or (TileIndex >= FMapW * FMapH) then
     Exit(0);
-  Result := FTiles[Idx];
+  Result := FTiles[TileIndex];
 end;
 
 procedure TTileMap.SetTileRaw(X, Y, Tile: Integer);
@@ -246,7 +247,8 @@ end;
   does too. }
 function WrapMod(A, Span: Integer): Integer;
 begin
-  if Span <= 0 then Exit(0);
+  if Span <= 0 then
+    Exit(0);
   if A < 0 then
     Result := ((Span - A - 1) div Span) * Span + A
   else
@@ -263,53 +265,57 @@ end;
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
   SurfaceIndex, OffsetX, OffsetY, ViewW, ViewH: Integer);
 var
-  Sheet: TBitmap;
-  MapPxW, MapPxH, SX, SY: Integer;
-  StartPxX, StartPxY, RemY: Integer;
-  FirstCol, FirstRow, Cols, Rows: Integer;
-  R, C, Col, Row, PxX, PxY, Idx: Integer;
+  TileSheet: TBitmap;
+  MapPixelWidth, MapPixelHeight, ScrollX, ScrollY: Integer;
+  StartPixelX, StartPixelY, YRemainder: Integer;
+  FirstColumn, FirstRow, ColumnCount, RowCount: Integer;
+  RowOffset, ColumnOffset, Column, Row, PixelX, PixelY, TileId: Integer;
 begin
-  if (ASurfaces = nil) or (Length(FTiles) = 0) then Exit;
-  Sheet := ASurfaces[SurfaceIndex];
-  if Sheet = nil then Exit;
+  if (ASurfaces = nil) or (Length(FTiles) = 0) then
+    Exit;
+  TileSheet := ASurfaces[SurfaceIndex];
+  if TileSheet = nil then
+    Exit;
 
-  MapPxW := FMapW * FTileW;
-  MapPxH := FMapH * FTileH;
-  if (MapPxW <= 0) or (MapPxH <= 0) then Exit;
+  MapPixelWidth := FMapW * FTileW;
+  MapPixelHeight := FMapH * FTileH;
+  if (MapPixelWidth <= 0) or (MapPixelHeight <= 0) then
+    Exit;
 
-  SX := WrapMod(OffsetX, MapPxW);
-  SY := WrapMod(OffsetY, MapPxH);
+  ScrollX := WrapMod(OffsetX, MapPixelWidth);
+  ScrollY := WrapMod(OffsetY, MapPixelHeight);
 
   { Negative, so the tile straddling the left edge is drawn too. }
-  StartPxX := -(SX mod FTileW);
-  RemY     := SY mod FTileH;
-  StartPxY := -RemY;
+  StartPixelX := -(ScrollX mod FTileW);
+  YRemainder  := ScrollY mod FTileH;
+  StartPixelY := -YRemainder;
 
-  FirstCol := (StartPxX + SX) div FTileW;
-  FirstRow := (StartPxY + SY) div FTileH;
+  FirstColumn := (StartPixelX + ScrollX) div FTileW;
+  FirstRow := (StartPixelY + ScrollY) div FTileH;
 
-  Cols := ((ViewW + FTileW - StartPxX) - 1) div FTileW;
-  Rows := (ViewH + FTileH + RemY - 1) div FTileH;
+  ColumnCount := ((ViewW + FTileW - StartPixelX) - 1) div FTileW;
+  RowCount := (ViewH + FTileH + YRemainder - 1) div FTileH;
 
   Row := WrapMod(FirstRow, FMapH);
-  PxY := StartPxY;
-  for R := 0 to Rows - 1 do
+  PixelY := StartPixelY;
+  for RowOffset := 0 to RowCount - 1 do
   begin
-    Col := WrapMod(FirstCol, FMapW);
-    PxX := StartPxX;
-    for C := 0 to Cols - 1 do
+    Column := WrapMod(FirstColumn, FMapW);
+    PixelX := StartPixelX;
+    for ColumnOffset := 0 to ColumnCount - 1 do
     begin
       { 0xFFFF is the original's "no tile"; it falls out of the range test. }
-      Idx := GetTile(Col, Row);
-      if (Idx >= 0) and (Idx < Length(FTileDefs)) then
-        Dest.CopyRect(Rect(PxX, PxY, PxX + FTileW, PxY + FTileH),
-                      Sheet.Canvas, FTileDefs[Idx]);
-      Inc(PxX, FTileW);
-      Inc(Col);
-      if Col >= FMapW then
-        Col := 0;
+      TileId := GetTile(Column, Row);
+      if (TileId >= 0) and (TileId < Length(FTileDefs)) then
+        Dest.CopyRect(Rect(PixelX, PixelY,
+                           PixelX + FTileW, PixelY + FTileH),
+                      TileSheet.Canvas, FTileDefs[TileId]);
+      Inc(PixelX, FTileW);
+      Inc(Column);
+      if Column >= FMapW then
+        Column := 0;
     end;
-    Inc(PxY, FTileH);
+    Inc(PixelY, FTileH);
     Inc(Row);
     if Row >= FMapH then
       Row := 0;

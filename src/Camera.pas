@@ -93,16 +93,16 @@ end;
   and requires the view to follow. }
 function ShouldScrollX(const L: TLayerInfo; PixelX, Vel: Integer): Boolean;
 var
-  Dest: Integer;
+  DestinationPixel: Integer;
 begin
   Result := False;
   if not (((PixelX < DEADZONE_LEFT) and (Vel < 0)) or
           ((PixelX >= DEADZONE_RIGHT) and (Vel > 0))) then
     Exit;
-  Dest := PixelOf(L.OriginX + Vel);
-  if (Vel < 0) and (Dest < 0) then
+  DestinationPixel := PixelOf(L.OriginX + Vel);
+  if (Vel < 0) and (DestinationPixel < 0) then
     Exit;
-  if (Vel > 0) and (Dest > MaxScrollX(L)) then
+  if (Vel > 0) and (DestinationPixel > MaxScrollX(L)) then
     Exit;
   Result := True;
 end;
@@ -110,16 +110,16 @@ end;
 { Camera_ShouldScrollY @ 0x00459CD8. }
 function ShouldScrollY(const L: TLayerInfo; PixelY, Vel: Integer): Boolean;
 var
-  Dest: Integer;
+  DestinationPixel: Integer;
 begin
   Result := False;
   if not (((PixelY < DEADZONE_TOP) and (Vel < 0)) or
           ((PixelY >= DEADZONE_BOTTOM) and (Vel > 0))) then
     Exit;
-  Dest := PixelOf(L.OriginY + Vel);
-  if (Vel < 0) and (Dest < 0) then
+  DestinationPixel := PixelOf(L.OriginY + Vel);
+  if (Vel < 0) and (DestinationPixel < 0) then
     Exit;
-  if (Vel > 0) and (Dest > MaxScrollY(L)) then
+  if (Vel > 0) and (DestinationPixel > MaxScrollY(L)) then
     Exit;
   Result := True;
 end;
@@ -128,15 +128,16 @@ end;
 procedure ApplyMoveX(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 var
-  Before: Integer;
+  PreviousOrigin: Integer;
 begin
   Pos := Pos + Vel;
   if Scroll then
   begin
-    Before := L.OriginX;
+    PreviousOrigin := L.OriginX;
     Pos := Pos - Vel;              // put it back; the world moves instead
     L.OriginX := L.OriginX + Vel;
-    L.DeltaX := (OriginPixel(Before) - OriginPixel(L.OriginX)) shl POSITION_SHIFT;
+    L.DeltaX := (OriginPixel(PreviousOrigin) - OriginPixel(L.OriginX))
+      shl POSITION_SHIFT;
   end;
   if Blocked then
     Vel := 0;
@@ -147,15 +148,16 @@ procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean;
                      E: PEntity; World: TEntityWorld);
 var
-  Before: Integer;
+  PreviousOrigin: Integer;
 begin
   Pos := Pos + Vel;
   if Scroll then
   begin
-    Before := L.OriginY;
+    PreviousOrigin := L.OriginY;
     Pos := Pos - Vel;
     L.OriginY := L.OriginY + Vel;
-    L.DeltaY := (OriginPixel(Before) - OriginPixel(L.OriginY)) shl POSITION_SHIFT;
+    L.DeltaY := (OriginPixel(PreviousOrigin) - OriginPixel(L.OriginY))
+      shl POSITION_SHIFT;
   end;
   if Blocked then
     Vel := 0;

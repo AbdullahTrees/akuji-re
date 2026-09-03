@@ -330,7 +330,7 @@ end;
 
 procedure TPauseMenu.Draw(C: TCanvas; F: TGameFont; ScreenW, ScreenH: Integer);
 var
-  I, Y: Integer;
+  SelectedIndex, CursorY: Integer;
 begin
   { Colour 0 over the whole screen - the paused game is NOT visible. }
   C.Brush.Color := clBlack;
@@ -341,10 +341,12 @@ begin
   F.TextOutCentered(C, PAUSE_ROW_Y[1], 'RESET', ScreenW, 2);
   F.TextOutCentered(C, PAUSE_ROW_Y[2], 'EXIT', ScreenW, 2);
 
-  I := MenuIndex;
-  if (I < 0) or (I > PAUSE_ITEMS - 1) then I := 0;
-  Y := (I * PAUSE_CURSOR_MUL + PAUSE_CURSOR_ADD) * PAUSE_CURSOR_SCALE;
-  F.TextOutCentered(C, Y, '<         >', ScreenW, 1);
+  SelectedIndex := MenuIndex;
+  if (SelectedIndex < 0) or (SelectedIndex > PAUSE_ITEMS - 1) then
+    SelectedIndex := 0;
+  CursorY := (SelectedIndex * PAUSE_CURSOR_MUL + PAUSE_CURSOR_ADD)
+    * PAUSE_CURSOR_SCALE;
+  F.TextOutCentered(C, CursorY, '<         >', ScreenW, 1);
 
   F.TextOutCentered(C, PAUSE_HINT1_Y, 'CTRL+R ... RESET', ScreenW, 1);
   F.TextOutCentered(C, PAUSE_HINT2_Y, '   ESC ... EXIT ', ScreenW, 1);
@@ -668,7 +670,7 @@ end;
 procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont;
                             BgMenu, BgOptions, Gallery: TBitmap);
 var
-  I: Integer;
+  ItemIndex: Integer;
 begin
   { The original blits p_Surfaces[1] for the menu and p_Surfaces[2] for options
     full-screen first. Colour variants match the original's param_5: 2 for menu
@@ -691,8 +693,9 @@ begin
       begin
         if BgMenu <> nil then
           C.Draw(0, 0, BgMenu);
-        for I := Low(MENU_ITEMS) to High(MENU_ITEMS) do
-          F.TextOut(C, MENU_X, (I * 2 + $11) * 8, MENU_ITEMS[I], 2);
+        for ItemIndex := Low(MENU_ITEMS) to High(MENU_ITEMS) do
+          F.TextOut(C, MENU_X, (ItemIndex * 2 + $11) * 8,
+                    MENU_ITEMS[ItemIndex], 2);
         F.TextOut(C, MENU_CURSOR_X, (MenuIndex * 2 + $11) * 8, MENU_CURSOR, 1);
         F.TextOutCentered(C, CREDIT_Y, CREDIT_TEXT, TITLE_SCREEN_W, 0);
       end;
@@ -704,13 +707,14 @@ begin
         { Centred, like the credit line - Game_DrawText's fourth argument is
           1 here. }
         F.TextOutCentered(C, OPT_TITLE_Y, OPT_TITLE, TITLE_SCREEN_W, 2);
-        for I := Low(OPT_LABELS) to High(OPT_LABELS) do
+        for ItemIndex := Low(OPT_LABELS) to High(OPT_LABELS) do
           { EXIT is drawn on the right at (0xE8, 200) in the original, not in
             the label column with the rest. }
-          if I = OPT_ROW_EXIT then
-            F.TextOut(C, OPT_VALUE_X, 200, OPT_LABELS[I], 2)
+          if ItemIndex = OPT_ROW_EXIT then
+            F.TextOut(C, OPT_VALUE_X, 200, OPT_LABELS[ItemIndex], 2)
           else
-            F.TextOut(C, OPT_LABEL_X, $38 + I * $10, OPT_LABELS[I], 2);
+            F.TextOut(C, OPT_LABEL_X, $38 + ItemIndex * $10,
+                      OPT_LABELS[ItemIndex], 2);
         DrawValues(C, F);
         F.TextOut(C, OPT_CURSOR_X, (MenuIndex * 2 + 7) * 8, OPT_CURSOR, 1);
       end;

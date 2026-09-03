@@ -409,35 +409,35 @@ end;
 
 function LoadSave(var P: TPlayerState; const FileName: string): Boolean;
 var
-  S: TFileStream;
+  Stream: TFileStream;
 begin
   Result := False;
   if not FileExists(FileName) then
     Exit;
-  S := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
     { The original reads 0x11E4 unconditionally. Refuse a short file rather
       than leaving the tail of the struct holding whatever was there before. }
-    if S.Size < PLAYER_STATE_SIZE then
+    if Stream.Size < PLAYER_STATE_SIZE then
       Exit;
-    S.ReadBuffer(P, PLAYER_STATE_SIZE);
+    Stream.ReadBuffer(P, PLAYER_STATE_SIZE);
     Result := True;
   finally
-    S.Free;
+    Stream.Free;
   end;
 end;
 
 function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
 var
-  S: TFileStream;
+  Stream: TFileStream;
 begin
   Result := False;
-  S := TFileStream.Create(FileName, fmCreate);
+  Stream := TFileStream.Create(FileName, fmCreate);
   try
-    S.WriteBuffer(P, PLAYER_STATE_SIZE);
+    Stream.WriteBuffer(P, PLAYER_STATE_SIZE);
     Result := True;
   finally
-    S.Free;
+    Stream.Free;
   end;
 end;
 

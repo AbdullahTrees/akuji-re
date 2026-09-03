@@ -8,12 +8,9 @@
   Each handler carries the address it came from, and that address is not
   decoration: tools/coverage.py reads it, and it is what to re-decompile
   against when auditing. HANDLER_ADDR below maps every type to its arm,
-  including the arms not translated yet - there is deliberately no second list
-  of what is done, because a hand-kept one drifts.
-
-  The other ~49 created handlers are named in notes/game_functions.txt but
-  their bodies have not been read. A name there asserts only which switch arm
-  reaches the function, never what it does. }
+  while tools/implemented.py verifies that all 149 game-layer functions have
+  implementations. Entity names come only from tools/entity_names.csv; blank
+  names remain numeric rather than being guessed here. }
 
 unit EntityHandlers;
 
@@ -2263,8 +2260,8 @@ const
     inside 0x004585A8..0x00460880, and --selftest-entities checks both - a
     transcription slip in 78 hand-copied addresses would otherwise be invisible.
 
-    Only the two named below are translated; HANDLER_ADDR is what says where to
-    re-decompile for the rest. }
+    Every mapped arm is now translated. HANDLER_ADDR remains the address index
+    used to re-decompile and audit each implementation. }
   HANDLER_ADDR: array[0..ENTITY_TYPE_COUNT - 1] of Cardinal = (
     $00000000, $004585A8, $00459A0C, $00459EB4,   { 0..3 }
     $00459F1C, $00459F6C, $0045A020, $0045A08C,   { 4..7 }
@@ -2392,7 +2389,7 @@ implementation
 function EntityUpdateDying(var E: TEntity; AGameState: Integer;
                            World: TEntityWorld): Boolean;
 var
-  Slot: Integer;
+  SpawnedSlot: Integer;
 begin
   { Outside play the guard reports True without doing anything, so every
     handler stops dead during an event script or the game-over screen. }
@@ -2414,25 +2411,25 @@ begin
         begin
           E.Raw[EF_DEATH_TIMER] := 30;
           E.Raw[EF_TIMER] := 60;
-          Slot := World.Spawn(2, EMITTER_TYPE,
+          SpawnedSlot := World.Spawn(2, EMITTER_TYPE,
                               E.Raw[EF_POS_X] - POSITION_BIAS,
                               E.Raw[EF_POS_Y] - POSITION_BIAS - $20);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 1, 8);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 2, 2);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 3, 1);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 4, 2);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 1, 8);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 2, 2);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 3, 1);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 4, 2);
         end;
       DEATH_CLASS_BIG:
         begin
           E.Raw[EF_DEATH_TIMER] := 180;
           E.Raw[EF_TIMER] := 240;
-          Slot := World.Spawn(2, EMITTER_TYPE,
+          SpawnedSlot := World.Spawn(2, EMITTER_TYPE,
                               E.Raw[EF_POS_X] - POSITION_BIAS,
                               E.Raw[EF_POS_Y] - POSITION_BIAS - $20);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 1, 4);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 2, $20);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 3, 4);
-          World.SetSpawnField(Slot, EF_BLOCK_A + 4, 1);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 1, 4);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 2, $20);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 3, 4);
+          World.SetSpawnField(SpawnedSlot, EF_BLOCK_A + 4, 1);
         end;
       DEATH_CLASS_DEBRIS:
         begin
@@ -2469,14 +2466,14 @@ end;
 procedure EntityTouchPickup(var E: TEntity; var P: TPlayerState;
                             World: TEntityWorld);
 var
-  Slot: Integer;
+  SpawnedSlot: Integer;
 begin
   case E.Raw[EF_VARIANT] of
     0: Inc(P.Counter, MANA_SMALL);
     1: Inc(P.Counter, MANA_LARGE);
   end;
 
-  Slot := PickupCommon(E, World);
+  SpawnedSlot := PickupCommon(E, World);
 
   { The comparison happens AFTER the counter has already gone up, so a stone
     that takes you exactly to the target counts as reaching it. }
@@ -2486,7 +2483,7 @@ begin
       World.PlaySound(SND_GET01)
     else if E.Raw[EF_VARIANT] = 1 then
       World.PlaySound(SND_GET02);
-    World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_NORMAL);
+    World.SetSpawnField(SpawnedSlot, EF_VARIANT, PICKUP_FX_NORMAL);
   end
   else
   begin
@@ -2494,7 +2491,7 @@ begin
     Inc(P.MaxLives);
     P.Lives := P.MaxLives;
     World.PlaySound(SND_POWER02);
-    World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_LEVELUP);
+    World.SetSpawnField(SpawnedSlot, EF_VARIANT, PICKUP_FX_LEVELUP);
   end;
 
   World.DestroyEntity(E, False);
@@ -2503,19 +2500,19 @@ end;
 procedure EntityTouchHeal(var E: TEntity; var P: TPlayerState;
                           World: TEntityWorld);
 var
-  Slot: Integer;
+  SpawnedSlot: Integer;
 begin
   World.PlaySound(SND_KACHI02);
   P.Lives := P.MaxLives;
-  Slot := PickupCommon(E, World);
-  World.SetSpawnField(Slot, EF_VARIANT, PICKUP_FX_HEAL);
+  SpawnedSlot := PickupCommon(E, World);
+  World.SetSpawnField(SpawnedSlot, EF_VARIANT, PICKUP_FX_HEAL);
   World.DestroyEntity(E, False);
 end;
 
 procedure EntityTouchLife(var E: TEntity; var P: TPlayerState;
                           World: TEntityWorld);
 var
-  Slot, Variant: Integer;
+  SpawnedSlot, Variant: Integer;
 begin
   { EF_FLAG1C, not EF_VARIANT - the field a dropped item carries its rarity in. }
   Variant := E.Raw[EF_FLAG1C];
@@ -2526,15 +2523,15 @@ begin
   { Note there is no clamp on the +1 path. Lives can exceed MaxLives here and
     the original does not stop it; whatever bounds it does so elsewhere. }
   World.PlaySound(SND_GET01);
-  Slot := PickupCommon(E, World);
-  World.SetSpawnField(Slot, EF_VARIANT, Variant + 2);
+  SpawnedSlot := PickupCommon(E, World);
+  World.SetSpawnField(SpawnedSlot, EF_VARIANT, Variant + 2);
   World.DestroyEntity(E, False);
 end;
 
 procedure PlayerTakeDamage(var Player: TEntity; var P: TPlayerState;
                            Damage: Integer; World: TEntityWorld);
 var
-  Left, I, Slot: Integer;
+  DamageLeft, SoulIndex, SpawnedSlot: Integer;
 begin
   { Being hit out of a glide or an air dash leaves a puff behind. }
   if (Player.Raw[EF_STATE] = 6) or (Player.Raw[EF_STATE] = 7) then
@@ -2555,36 +2552,38 @@ begin
 
   if Damage <= 0 then
     Exit;
-  Left := Damage;
+  DamageLeft := Damage;
   repeat
-    for I := 0 to SOULS_PER_LIFE - 1 do
+    for SoulIndex := 0 to SOULS_PER_LIFE - 1 do
     begin
       { At the HUD icon, in screen space - the life being knocked off. }
-      Slot := World.Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
+      SpawnedSlot := World.Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
                           (P.Lives * HUD_LIFE_STEP + HUD_LIFE_X0) * 32,
                           HUD_LIFE_Y * 32);
-      World.SetSpawnField(Slot, EF_FACING,
-                          World.RandomBelow(4) + I * 8 + 8);
-      World.SetSpawnField(Slot, EF_VEL_Y,
-                          World.RandomBelow($10) + Abs(1 - I) * $10 - $20);
+      World.SetSpawnField(SpawnedSlot, EF_FACING,
+                          World.RandomBelow(4) + SoulIndex * 8 + 8);
+      World.SetSpawnField(SpawnedSlot, EF_VEL_Y,
+                          World.RandomBelow($10)
+                            + Abs(1 - SoulIndex) * $10 - $20);
     end;
     Dec(P.Lives);
-    Dec(Left);
-  until (P.Lives = 0) or (Left = 0);
+    Dec(DamageLeft);
+  until (P.Lives = 0) or (DamageLeft = 0);
 end;
 
 procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
                       var Inp: TInputState; World: TEntityWorld);
 var
-  Kind, EventId, Op: Integer;
+  TouchKind, EventId, Opcode: Integer;
 begin
-  Kind := E.Raw[EF_TOUCH_KIND];
+  TouchKind := E.Raw[EF_TOUCH_KIND];
   if (Player.Raw[EF_ALIVE] and $FF) = 0 then
     Exit;
   { Invulnerability blocks everything except kind 3. }
-  if (Player.Raw[EF_TIMER] <> 0) and (Kind <> TOUCH_KIND_THRU_INVULN) then
+  if (Player.Raw[EF_TIMER] <> 0)
+     and (TouchKind <> TOUCH_KIND_THRU_INVULN) then
     Exit;
-  if Kind = 0 then
+  if TouchKind = 0 then
     Exit;
   if E.Raw[EF_TIMER] <> 0 then
     Exit;
@@ -2595,14 +2594,14 @@ begin
   EventId := E.Raw[EF_EVENT_ID];
   if EventId <> -1 then
   begin
-    Op := World.EventOpcode(EventId);
-    if (Op = 0)
-    or ((Op = 1) and (Player.Raw[EF_VEL_Y] = 0)
+    Opcode := World.EventOpcode(EventId);
+    if (Opcode = 0)
+    or ((Opcode = 1) and (Player.Raw[EF_VEL_Y] = 0)
         and (Inp.AxisY < 0) and (not Inp.AxisYNegative)) then
       World.BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
   end;
 
-  case Kind of
+  case TouchKind of
     TOUCH_KIND_HURT:      PlayerTakeDamage(Player, P, 1, World);
     TOUCH_KIND_MANA:      EntityTouchPickup(E, P, World);
     TOUCH_KIND_LIFE:      EntityTouchLife(E, P, World);
@@ -2617,128 +2616,136 @@ end;
 
 function HitSound(const E: TEntity): Integer;
 var
-  I: Integer;
+  SoundIndex: Integer;
 begin
-  I := E.Raw[EF_HIT_SOUND];
-  if (I < 0) or (I >= HIT_SOUND_COUNT) then
-    I := 0;                     { the original indexes this unchecked }
-  Result := HIT_SOUNDS[I];
+  SoundIndex := E.Raw[EF_HIT_SOUND];
+  if (SoundIndex < 0) or (SoundIndex >= HIT_SOUND_COUNT) then
+    SoundIndex := 0;            { the original indexes this unchecked }
+  Result := HIT_SOUNDS[SoundIndex];
 end;
 
 procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
 var
-  Slot, Vuln, Power, Dir, NewSlot, EventId, Box: Integer;
-  Target, Shot: TBox;
-  S: PEntity;
+  ProjectileSlot, Vulnerability, ProjectilePower, Direction: Integer;
+  ReflectedSlot, EventId, BoxPercent: Integer;
+  TargetBox, ProjectileBox: TBox;
+  Projectile: PEntity;
 begin
-  Vuln := E.Raw[EF_VULN_KIND];
-  if (Vuln = 0) or (E.Raw[EF_TIMER] <> 0) or (World.Pool = nil) then
+  Vulnerability := E.Raw[EF_VULN_KIND];
+  if (Vulnerability = 0) or (E.Raw[EF_TIMER] <> 0)
+     or (World.Pool = nil) then
     Exit;
 
-  Target := EntityBox(E, 1, 1);
+  TargetBox := EntityBox(E, 1, 1);
 
-  for Slot := SLOT_ACTOR_FIRST to SLOT_ACTOR_LAST do
+  for ProjectileSlot := SLOT_ACTOR_FIRST to SLOT_ACTOR_LAST do
   begin
-    S := World.Pool.Entity(Slot);
-    Power := S^.Raw[EF_STATE];
+    Projectile := World.Pool.Entity(ProjectileSlot);
+    ProjectilePower := Projectile^.Raw[EF_STATE];
 
     { A power-3 shot is invisible to everything except kind $5D. }
-    if not ((Vuln = VULN_ONLY_POWER3) or (Power <> 3)) then
+    if not ((Vulnerability = VULN_ONLY_POWER3)
+            or (ProjectilePower <> 3)) then
       Continue;
-    if (S^.Raw[EF_ALIVE] and $FF) = 0 then
+    if (Projectile^.Raw[EF_ALIVE] and $FF) = 0 then
       Continue;
-    if S^.Raw[EF_HP] = 0 then          { no damage means not a projectile }
+    if Projectile^.Raw[EF_HP] = 0 then { no damage means not a projectile }
       Continue;
     if (E.Raw[EF_ALIVE] and $FF) = 0 then
       Continue;
     if E.Raw[EF_HP] = 0 then
       Continue;
 
-    Shot := EntityBox(S^, 1, 1);
-    if not RectOverlap(Shot, Target, 0, 0) then
+    ProjectileBox := EntityBox(Projectile^, 1, 1);
+    if not RectOverlap(ProjectileBox, TargetBox, 0, 0) then
       Continue;
 
     World.Spawn(EKIND_MINOR, HIT_SPARK_TYPE,
-                S^.Raw[EF_POS_X] - POSITION_BIAS,
-                S^.Raw[EF_POS_Y] - POSITION_BIAS);
+                Projectile^.Raw[EF_POS_X] - POSITION_BIAS,
+                Projectile^.Raw[EF_POS_Y] - POSITION_BIAS);
 
     EventId := E.Raw[EF_EVENT_ID];
     if (EventId <> -1) and (World.EventOpcode(EventId) = 6) then
       World.BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
 
-    if Vuln = VULN_REFLECT then
+    if Vulnerability = VULN_REFLECT then
     begin
-      NewSlot := World.Spawn(EKIND_MINOR, REFLECT_TYPE,
-                             S^.Raw[EF_POS_X] - POSITION_BIAS,
-                             S^.Raw[EF_POS_Y] - POSITION_BIAS);
-      World.SetSpawnField(NewSlot, EF_VEL_X, -S^.Raw[EF_VEL_X]);
-      World.SetSpawnField(NewSlot, EF_STATE, Power);
-      World.SetSpawnField(NewSlot, EF_CHILD_B, REFLECT_LIFE);
-      World.SetSpawnField(NewSlot, EF_CLASS, 0);
-      if Power = PIERCING_POWER_A then
+      ReflectedSlot := World.Spawn(EKIND_MINOR, REFLECT_TYPE,
+        Projectile^.Raw[EF_POS_X] - POSITION_BIAS,
+        Projectile^.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(ReflectedSlot, EF_VEL_X,
+        -Projectile^.Raw[EF_VEL_X]);
+      World.SetSpawnField(ReflectedSlot, EF_STATE, ProjectilePower);
+      World.SetSpawnField(ReflectedSlot, EF_CHILD_B, REFLECT_LIFE);
+      World.SetSpawnField(ReflectedSlot, EF_CLASS, 0);
+      if ProjectilePower = PIERCING_POWER_A then
       begin
-        World.SetSpawnField(NewSlot, EF_TOUCH_KIND, TOUCH_KIND_HURT_HARD);
-        Box := REFLECT_BOX_STRONG;
+        World.SetSpawnField(ReflectedSlot, EF_TOUCH_KIND,
+          TOUCH_KIND_HURT_HARD);
+        BoxPercent := REFLECT_BOX_STRONG;
       end
       else
       begin
-        World.SetSpawnField(NewSlot, EF_TOUCH_KIND, TOUCH_KIND_HURT);
-        Box := REFLECT_BOX_WEAK;
+        World.SetSpawnField(ReflectedSlot, EF_TOUCH_KIND, TOUCH_KIND_HURT);
+        BoxPercent := REFLECT_BOX_WEAK;
       end;
-      World.SetSpawnField(NewSlot, EF_BOX_PCT_X, Box);
-      World.SetSpawnField(NewSlot, EF_BOX_PCT_Y, Box);
-      World.SetSpawnField(NewSlot, EF_INSET_PCT_X, Box);
-      World.SetSpawnField(NewSlot, EF_INSET_PCT_Y, Box);
+      World.SetSpawnField(ReflectedSlot, EF_BOX_PCT_X, BoxPercent);
+      World.SetSpawnField(ReflectedSlot, EF_BOX_PCT_Y, BoxPercent);
+      World.SetSpawnField(ReflectedSlot, EF_INSET_PCT_X, BoxPercent);
+      World.SetSpawnField(ReflectedSlot, EF_INSET_PCT_Y, BoxPercent);
       World.PlaySound(HitSound(E));
-      World.DestroyEntity(S^, False);
+      World.DestroyEntity(Projectile^, False);
       Exit;
     end;
 
-    if Vuln = VULN_SPIN then
+    if Vulnerability = VULN_SPIN then
     begin
       E.Raw[EF_SHOTS] := SPIN_MARK;
       Inc(E.Raw[EF_FACING], SPIN_TURN);
       if E.Raw[EF_FACING] > DIR_COUNT - 1 then
         Dec(E.Raw[EF_FACING], DIR_COUNT);
       World.PlaySound(HitSound(E));
-      World.DestroyEntity(S^, False);
+      World.DestroyEntity(Projectile^, False);
       Exit;
     end;
 
-    if Vuln = VULN_SHOVE then
+    if Vulnerability = VULN_SHOVE then
     begin
       { Compare(0, X) is how the original spells Sign(X). }
-      Dir := Compare(0, S^.Raw[EF_VEL_X]);
-      E.Raw[EF_VEL_X] := Dir shl SHOVE_SPEED_SHIFT;
+      Direction := Compare(0, Projectile^.Raw[EF_VEL_X]);
+      E.Raw[EF_VEL_X] := Direction shl SHOVE_SPEED_SHIFT;
       Inc(E.Raw[EF_FLAG1C], Compare(0, E.Raw[EF_VEL_X]));
       if E.Raw[EF_FLAG1C] > SHOVE_FRAMES - 1 then
         E.Raw[EF_FLAG1C] := 0;
       if E.Raw[EF_FLAG1C] < 0 then
         E.Raw[EF_FLAG1C] := SHOVE_FRAMES - 1;
       World.PlaySound(HitSound(E));
-      World.DestroyEntity(S^, False);
+      World.DestroyEntity(Projectile^, False);
       Exit;
     end;
 
     { Immunity, some of it conditional on the shot's power. }
-    if (Vuln = VULN_IMMUNE) or (Vuln = VULN_IMMUNE_ALT)
-    or ((Vuln = VULN_ARMOUR_1) and (Power < 1))
-    or ((Vuln = VULN_ARMOUR_2) and (Power < 2))
-    or ((Vuln = VULN_ONLY_POWER3) and (Power <> 3))
-    or ((Vuln = VULN_ONLY_POWER4) and (Power <> LOOT_POWER)) then
+    if (Vulnerability = VULN_IMMUNE)
+    or (Vulnerability = VULN_IMMUNE_ALT)
+    or ((Vulnerability = VULN_ARMOUR_1) and (ProjectilePower < 1))
+    or ((Vulnerability = VULN_ARMOUR_2) and (ProjectilePower < 2))
+    or ((Vulnerability = VULN_ONLY_POWER3) and (ProjectilePower <> 3))
+    or ((Vulnerability = VULN_ONLY_POWER4)
+        and (ProjectilePower <> LOOT_POWER)) then
     begin
       World.PlaySound(HitSound(E));
-      World.DestroyEntity(S^, Power = LOOT_POWER);
+      World.DestroyEntity(Projectile^, ProjectilePower = LOOT_POWER);
       Exit;
     end;
 
     { A real hit. The projectile's EF_HP is its DAMAGE - the same slot that
       holds hit points on a target. }
-    Dec(E.Raw[EF_HP], S^.Raw[EF_HP]);
+    Dec(E.Raw[EF_HP], Projectile^.Raw[EF_HP]);
 
     { Powers 2 and 3 pierce and are not consumed. }
-    if (Power <> PIERCING_POWER_A) and (Power <> PIERCING_POWER_B) then
-      World.DestroyEntity(S^, Power = LOOT_POWER);
+    if (ProjectilePower <> PIERCING_POWER_A)
+       and (ProjectilePower <> PIERCING_POWER_B) then
+      World.DestroyEntity(Projectile^, ProjectilePower = LOOT_POWER);
 
     E.Raw[EF_TIMER] := HIT_INVULN;
     E.Raw[EF_DEATH_TIMER] := HIT_INVULN;
@@ -7907,100 +7914,103 @@ end;
 
 function ScaleByPercent(Half, Percent: Integer): Integer;
 var
-  Sign, K, S, I, M, G, T, EV, X: Integer;
-  N, Q, R, R200, V2, Lhs, Rhs: Int64;
+  SignMultiplier, NormalizeShift, SignificandShift, BitIndex: Integer;
+  Pow2Mod200, ErrorMagnitude, ScaledError, ValueExponent: Integer;
+  ComparisonShift: Integer;
+  Product, Quotient, Remainder, Remainder200, TwiceTie: Int64;
+  LeftSide, RightSide: Int64;
 begin
-  Sign := 1;
+  SignMultiplier := 1;
   if Half < 0 then
   begin
-    Sign := -1;
+    SignMultiplier := -1;
     Half := -Half;
   end;
   if Percent < 0 then
   begin
-    Sign := -Sign;
+    SignMultiplier := -SignMultiplier;
     Percent := -Percent;
   end;
   if (Half = 0) or (Percent = 0) then
     Exit(0);
 
-  N := Int64(Half) * Percent;
-  Q := N div 100;
-  R := N mod 100;
-  if R > 50 then
-    Exit(Sign * Integer(Q + 1));
-  if R < 50 then
-    Exit(Sign * Integer(Q));
+  Product := Int64(Half) * Percent;
+  Quotient := Product div 100;
+  Remainder := Product mod 100;
+  if Remainder > 50 then
+    Exit(SignMultiplier * Integer(Quotient + 1));
+  if Remainder < 50 then
+    Exit(SignMultiplier * Integer(Quotient));
 
   { --- a tie, and the only case where the FPU's own error decides -----------
-    S is the shift that normalises Percent/100 to a 64-bit significand: the K
-    with 100 <= Percent * 2^K < 200, then S = 63 + K. }
-  K := 0;
+    SignificandShift normalises Percent/100 to a 64-bit significand: starting
+    with NormalizeShift such that
+    100 <= Percent * 2^NormalizeShift < 200, then adding 63. }
+  NormalizeShift := 0;
   if Percent < 100 then
-    while (Int64(Percent) shl K) < 100 do Inc(K)
+    while (Int64(Percent) shl NormalizeShift) < 100 do
+      Inc(NormalizeShift)
   else
-    while (Int64(Percent) shr (-K)) >= 200 do Dec(K);
-  S := 63 + K;
+    while (Int64(Percent) shr (-NormalizeShift)) >= 200 do
+      Dec(NormalizeShift);
+  SignificandShift := 63 + NormalizeShift;
 
-  { T = D*100 - Percent*2^S, the rounding error of the divide scaled up. It is
-    at most 50 in magnitude, and it is obtainable from Percent*2^S mod 200
-    alone - which is why none of this needs a 128-bit product. The mod 200
-    rather than mod 100 is what carries the parity needed for a tie inside the
-    tie. }
-  M := 1;
-  for I := 1 to S do
-    M := (M * 2) mod 200;
-  R200 := (Int64(Percent) * M) mod 200;
-  G := Integer(R200 mod 100);
-  if G < 50 then
-    T := -G
-  else if G > 50 then
-    T := 100 - G
-  else if R200 >= 100 then
-    T := 50
+  { ScaledError = D*100 - Percent*2^SignificandShift: the divide's rounding
+    error scaled up. Its magnitude is at most 50 and can be derived from
+    Percent*2^SignificandShift mod 200, avoiding a 128-bit product. Modulo 200
+    rather than 100 carries the parity needed for a tie inside the tie. }
+  Pow2Mod200 := 1;
+  for BitIndex := 1 to SignificandShift do
+    Pow2Mod200 := (Pow2Mod200 * 2) mod 200;
+  Remainder200 := (Int64(Percent) * Pow2Mod200) mod 200;
+  ErrorMagnitude := Integer(Remainder200 mod 100);
+  if ErrorMagnitude < 50 then
+    ScaledError := -ErrorMagnitude
+  else if ErrorMagnitude > 50 then
+    ScaledError := 100 - ErrorMagnitude
+  else if Remainder200 >= 100 then
+    ScaledError := 50
   else
-    T := -50;
+    ScaledError := -50;
 
-  if T <> 0 then
+  if ScaledError <> 0 then
   begin
-    { Compare |Half * T| / (100 * 2^S) against half an ulp of V = Q + 1/2,
-      which is 2^(EV - 64). Both sides scale to integers well inside Int64. }
-    V2 := 2 * Q + 1;
-    EV := -1;
-    while (Int64(1) shl (EV + 2)) <= V2 do
-      Inc(EV);
-    X := S + EV - 64;
-    Lhs := Abs(Int64(Half) * T);
-    if X >= 0 then
-      Rhs := Int64(100) shl X
+    { Compare |Half * ScaledError| / (100 * 2^SignificandShift) against half
+      an ulp of V = Quotient + 1/2, which is 2^(ValueExponent - 64). Both
+      sides scale to integers well inside Int64. }
+    TwiceTie := 2 * Quotient + 1;
+    ValueExponent := -1;
+    while (Int64(1) shl (ValueExponent + 2)) <= TwiceTie do
+      Inc(ValueExponent);
+    ComparisonShift := SignificandShift + ValueExponent - 64;
+    LeftSide := Abs(Int64(Half) * ScaledError);
+    if ComparisonShift >= 0 then
+      RightSide := Int64(100) shl ComparisonShift
     else
     begin
-      Lhs := Lhs shl (-X);
-      Rhs := 100;
+      LeftSide := LeftSide shl (-ComparisonShift);
+      RightSide := 100;
     end;
-    { Lhs = Rhs - the product landing exactly half an ulp off the tie - happens
-      five times in the domain the self-test sweeps, and falls through to the
-      round-half-even below because RN64 breaks ITS tie toward the even
-      significand, which V always has. Writing >= here instead changes no answer
-      anywhere in that domain, so the mutation suite cannot tell the two apart;
-      the > is right by derivation, not by test, and that is worth saying rather
-      than leaving it to look covered. }
-    if Lhs > Rhs then
+    { Equality means the product landed exactly half an ulp off the tie. It
+      occurs five times in the self-test domain and falls through because RN64
+      breaks its own tie toward V's even significand. Writing >= here changes
+      no tested answer; > is established by the derivation. }
+    if LeftSide > RightSide then
     begin
       { The product landed off the tie, and the sign of the error decides. }
-      if T > 0 then
-        Exit(Sign * Integer(Q + 1))
+      if ScaledError > 0 then
+        Exit(SignMultiplier * Integer(Quotient + 1))
       else
-        Exit(Sign * Integer(Q));
+        Exit(SignMultiplier * Integer(Quotient));
     end;
   end;
 
   { The second rounding pulled the product back onto the tie exactly, so the
     final store rounds half to even. }
-  if Q mod 2 = 0 then
-    Result := Sign * Integer(Q)
+  if Quotient mod 2 = 0 then
+    Result := SignMultiplier * Integer(Quotient)
   else
-    Result := Sign * Integer(Q + 1);
+    Result := SignMultiplier * Integer(Quotient + 1);
 end;
 
 { The type switch, lifted out of EntityUpdateAll's loop so a test can drive
@@ -8110,34 +8120,35 @@ procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
                           var P: TPlayerState; var L: TLayerInfo;
                           var Inp: TInputState; var AGameState: Integer);
 var
-  Slot, Handle, ScreenX, ScreenY, Depth, HalfW, HalfH: Integer;
-  E: PEntity;
+  EntitySlot, SpriteHandle, ScreenX, ScreenY, Depth: Integer;
+  HalfWidth, HalfHeight: Integer;
+  EntityPtr: PEntity;
 begin
   EntitiesDrawn := 0;
   EntitiesLive  := 0;
 
-  for Slot := 0 to ENTITY_UPDATE_COUNT - 1 do
+  for EntitySlot := 0 to ENTITY_UPDATE_COUNT - 1 do
   begin
-    E := Pool.Entity(Slot);
-    if not IsAlive(E^) then
+    EntityPtr := Pool.Entity(EntitySlot);
+    if not IsAlive(EntityPtr^) then
       Continue;
     Inc(EntitiesLive);
 
     { Carried along by the scroll unless the type is screen-space. This is why
       a HUD element placed as an entity stays put while the map moves under it. }
-    if E^.Raw[EF_SCREEN_SPACE] = 0 then
+    if EntityPtr^.Raw[EF_SCREEN_SPACE] = 0 then
     begin
-      Inc(E^.Raw[EF_POS_X], L.DeltaX);
-      Inc(E^.Raw[EF_POS_Y], L.DeltaY);
+      Inc(EntityPtr^.Raw[EF_POS_X], L.DeltaX);
+      Inc(EntityPtr^.Raw[EF_POS_Y], L.DeltaY);
     end;
 
-    EntityRunHandler(E^, P, L, Inp, World, AGameState);
+    EntityRunHandler(EntityPtr^, P, L, Inp, World, AGameState);
 
     { --- push the entity onto its sprite ---------------------------------
       Skipped entirely for a type with no sprite, and re-tests aliveness
       because the handler above may have destroyed the entity. }
-    Handle := E^.Raw[EF_SPRITE];
-    if (Handle <> SPRITE_NONE) and IsAlive(E^) then
+    SpriteHandle := EntityPtr^.Raw[EF_SPRITE];
+    if (SpriteHandle <> SPRITE_NONE) and IsAlive(EntityPtr^) then
     begin
       Inc(EntitiesDrawn);
 
@@ -8146,38 +8157,39 @@ begin
         down. On even frames the sprite takes EF_BYTE94 verbatim - a byte copy,
         so it is that field and not a normalised boolean that decides
         visibility. }
-      if E^.Raw[EF_DEATH_TIMER] mod 2 = 0 then
-        Sprites.SetVisible(Handle, (E^.Raw[EF_BYTE94] and $FF) <> 0)
+      if EntityPtr^.Raw[EF_DEATH_TIMER] mod 2 = 0 then
+        Sprites.SetVisible(SpriteHandle,
+          (EntityPtr^.Raw[EF_BYTE94] and $FF) <> 0)
       else
-        Sprites.SetVisible(Handle, False);
+        Sprites.SetVisible(SpriteHandle, False);
 
-      Sprites.SetAnim(Handle, E^.Raw[EF_ANIM_ID]);
+      Sprites.SetAnim(SpriteHandle, EntityPtr^.Raw[EF_ANIM_ID]);
 
       { Extents refresh only while visible, so a hidden entity keeps the size it
         had when it was last drawn - and keeps colliding at that size. }
-      if Sprites.GetVisible(Handle) then
+      if Sprites.GetVisible(SpriteHandle) then
       begin
-        E^.Raw[EF_EXTENT_X] := Sprites.Width(Handle);
-        E^.Raw[EF_EXTENT_Y] := Sprites.Height(Handle);
+        EntityPtr^.Raw[EF_EXTENT_X] := Sprites.Width(SpriteHandle);
+        EntityPtr^.Raw[EF_EXTENT_Y] := Sprites.Height(SpriteHandle);
       end;
 
       { The sprite is placed by its top-left, the entity by its CENTRE: half the
         sprite comes off each axis. That is what fixes an entity position as a
         centre point rather than a corner. }
-      ScreenX := OriginPixel(E^.Raw[EF_POS_X]) - POSITION_BIAS_PIXELS
-                 - HalfExtent(E^.Raw[EF_EXTENT_X]);
-      ScreenY := OriginPixel(E^.Raw[EF_POS_Y]) - POSITION_BIAS_PIXELS
-                 - HalfExtent(E^.Raw[EF_EXTENT_Y]);
-      Sprites.SetPos(Handle, ScreenX, ScreenY);
+      ScreenX := OriginPixel(EntityPtr^.Raw[EF_POS_X]) - POSITION_BIAS_PIXELS
+                 - HalfExtent(EntityPtr^.Raw[EF_EXTENT_X]);
+      ScreenY := OriginPixel(EntityPtr^.Raw[EF_POS_Y]) - POSITION_BIAS_PIXELS
+                 - HalfExtent(EntityPtr^.Raw[EF_EXTENT_Y]);
+      Sprites.SetPos(SpriteHandle, ScreenX, ScreenY);
 
-      Depth := E^.Raw[EF_DEPTH];
+      Depth := EntityPtr^.Raw[EF_DEPTH];
       if Depth = DEPTH_BY_SCREEN_Y then
       begin
         Depth := ScreenY;
         if Depth < 1 then Depth := 1;
         if Depth > SCREEN_H then Depth := SCREEN_H;
       end;
-      Sprites.SetDepth(Handle, Depth);
+      Sprites.SetDepth(SpriteHandle, Depth);
     end;
 
     { --- the two timers -------------------------------------------------
@@ -8185,38 +8197,42 @@ begin
       paused invulnerability or a paused death animation hold. }
     if (AGameState <> GS_PAUSE) and (AGameState <> GS_STATE_140) then
     begin
-      if E^.Raw[EF_TIMER] <> 0 then
-        Dec(E^.Raw[EF_TIMER]);
-      if E^.Raw[EF_DEATH_TIMER] <> 0 then
-        Dec(E^.Raw[EF_DEATH_TIMER]);
+      if EntityPtr^.Raw[EF_TIMER] <> 0 then
+        Dec(EntityPtr^.Raw[EF_TIMER]);
+      if EntityPtr^.Raw[EF_DEATH_TIMER] <> 0 then
+        Dec(EntityPtr^.Raw[EF_DEATH_TIMER]);
     end;
 
     if AGameState <> GS_PLAY then
       Continue;
 
     { --- collision boxes, rebuilt from the sprite size ------------------- }
-    HalfW := HalfExtent(E^.Raw[EF_EXTENT_X]);
-    HalfH := HalfExtent(E^.Raw[EF_EXTENT_Y]);
-    E^.Raw[EF_BOX_OFS_X]      := ScaleByPercent(HalfW, E^.Raw[EF_BOX_PCT_X]);
-    E^.Raw[EF_BOX_OFS_Y]      := ScaleByPercent(HalfH, E^.Raw[EF_BOX_PCT_Y]);
-    E^.Raw[EF_HITBOX_INSET_X] := ScaleByPercent(HalfW, E^.Raw[EF_INSET_PCT_X]);
-    E^.Raw[EF_HITBOX_INSET_Y] := ScaleByPercent(HalfH, E^.Raw[EF_INSET_PCT_Y]);
+    HalfWidth := HalfExtent(EntityPtr^.Raw[EF_EXTENT_X]);
+    HalfHeight := HalfExtent(EntityPtr^.Raw[EF_EXTENT_Y]);
+    EntityPtr^.Raw[EF_BOX_OFS_X] :=
+      ScaleByPercent(HalfWidth, EntityPtr^.Raw[EF_BOX_PCT_X]);
+    EntityPtr^.Raw[EF_BOX_OFS_Y] :=
+      ScaleByPercent(HalfHeight, EntityPtr^.Raw[EF_BOX_PCT_Y]);
+    EntityPtr^.Raw[EF_HITBOX_INSET_X] :=
+      ScaleByPercent(HalfWidth, EntityPtr^.Raw[EF_INSET_PCT_X]);
+    EntityPtr^.Raw[EF_HITBOX_INSET_Y] :=
+      ScaleByPercent(HalfHeight, EntityPtr^.Raw[EF_INSET_PCT_Y]);
 
     { Only the minor slots are touch-tested and shot-tested. The player and the
       actors below SLOT_MINOR_FIRST are not, which is the same boundary
       Entity_TakeProjectileHits scans up to from the other side. }
-    if (Slot >= SLOT_MINOR_FIRST) and IsAlive(E^) then
+    if (EntitySlot >= SLOT_MINOR_FIRST) and IsAlive(EntityPtr^) then
     begin
       if Assigned(EntityPlayerTouch) then
-        EntityPlayerTouch(E^, Pool.Entity(0)^, P, Inp, World);
+        EntityPlayerTouch(EntityPtr^, Pool.Entity(0)^, P, Inp, World);
       if Assigned(EntityTakeProjectileHits) then
-        EntityTakeProjectileHits(E^, World);
+        EntityTakeProjectileHits(EntityPtr^, World);
     end;
 
-    if (E^.Raw[EF_TYPE] = TYPE_TOUCH_IN_STATE_3) and (E^.Raw[EF_STATE] = 3)
-       and IsAlive(E^) then
+    if (EntityPtr^.Raw[EF_TYPE] = TYPE_TOUCH_IN_STATE_3)
+       and (EntityPtr^.Raw[EF_STATE] = 3) and IsAlive(EntityPtr^) then
       if Assigned(EntityPlayerTouch) then
-        EntityPlayerTouch(E^, Pool.Entity(0)^, P, Inp, World);
+        EntityPlayerTouch(EntityPtr^, Pool.Entity(0)^, P, Inp, World);
 
     { A touch can change the game state - start an event script, kill the
       player - and when it does the original ABANDONS the rest of the pool for
@@ -8227,9 +8243,9 @@ begin
     if (AGameState <> GS_PLAY) and (AGameState <> GS_STATE_140) then
       Exit;
 
-    if IsAlive(E^) and (E^.Raw[EF_CULL_OFFSCREEN] = 1)
-       and IsOffScreen(E^, CULL_MARGIN) then
-      World.DestroyEntity(E^, False);
+    if IsAlive(EntityPtr^) and (EntityPtr^.Raw[EF_CULL_OFFSCREEN] = 1)
+       and IsOffScreen(EntityPtr^, CULL_MARGIN) then
+      World.DestroyEntity(EntityPtr^, False);
   end;
 end;
 
@@ -8246,14 +8262,15 @@ procedure CheckSpriteData;
 
   procedure Same(const Name: string; At: Integer; const Want: array of Integer);
   var
-    I: Integer;
+    ValueIndex: Integer;
   begin
-    for I := 0 to High(Want) do
-      if SPRITE_DATA[At + I] <> Want[I] then
+    for ValueIndex := 0 to High(Want) do
+      if SPRITE_DATA[At + ValueIndex] <> Want[ValueIndex] then
         raise Exception.CreateFmt(
           '%s[%d] is %d but SPRITE_DATA at 0x%.8x is %d - the region and the '
-          + 'tables have been edited apart', [Name, I, Want[I],
-          SPRITE_DATA_BASE + 4 * (At + I), SPRITE_DATA[At + I]]);
+          + 'tables have been edited apart', [Name, ValueIndex,
+          Want[ValueIndex], SPRITE_DATA_BASE + 4 * (At + ValueIndex),
+          SPRITE_DATA[At + ValueIndex]]);
   end;
 
 begin

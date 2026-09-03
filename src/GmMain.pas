@@ -208,8 +208,8 @@ implementation
   DDDD1Init - TFrm_main_DDDD1Init @ 0x00465584
 
   The original loaded data\system.dat over a set of defaults, read system.ini,
-  initialised the subsystems, then installed the idle handler. Only the last
-  step is translated so far.
+  initialised the subsystems, then installed the idle handler. The translation
+  below preserves that order while using the reconstructed component layer.
   --------------------------------------------------------------------------- }
 { The original ran from the game directory, so its paths were relative. The
   rebuild lives in src/, so look in the obvious places rather than assuming. }
@@ -220,15 +220,15 @@ const
     '..' + PathDelim + 'English Translated Version 1.1 (D)' + PathDelim,
     '..' + PathDelim + '..' + PathDelim + 'English Translated Version 1.1 (D)' + PathDelim);
 var
-  Base, P: string;
-  I: Integer;
+  BaseDirectory, CandidatePath: string;
+  CandidateIndex: Integer;
 begin
-  Base := ExtractFilePath(ParamStr(0));
-  for I := Low(Candidates) to High(Candidates) do
+  BaseDirectory := ExtractFilePath(ParamStr(0));
+  for CandidateIndex := Low(Candidates) to High(Candidates) do
   begin
-    P := Base + Candidates[I];
-    if FileExists(P + 'bmp.qda') then
-      Exit(P);
+    CandidatePath := BaseDirectory + Candidates[CandidateIndex];
+    if FileExists(CandidatePath + 'bmp.qda') then
+      Exit(CandidatePath);
   end;
   Result := '';
 end;
@@ -326,10 +326,8 @@ begin
     { Replace the no-op audio the session builds for itself. }
     FSession.Audio.Free;
     FSession.Audio := TFormAudio.Create(Self);
-    { Game_StartOrLoad's presentation hooks. The base class does nothing,
-      which is right until Opening_Update and the playlist are translated -
-      an opening that never runs is a cutscene that finishes instantly, and
-      that is a truthful stub rather than a skipped step. }
+    { Game_StartOrLoad's presentation hooks. The concrete host connects the
+      opening sequence and playlist operations to the form-owned components. }
     FStartHost := TFormStartHost.Create(Self);
     FDialogue := TDialogueBox.Create;
     FPowerBmp := FArchive.LoadBitmapByName('power.bmp');
@@ -649,26 +647,26 @@ end;
   guard is kept here via FStageLoaded. }
 procedure TFrm_main.LoadStage(StageIndex: Integer);
 var
-  SurfSet, SprSet, MapId: Integer;
+  SurfaceSetId, SpriteSetId, MapId: Integer;
 begin
   if StageIndex = FStageLoaded then Exit;
   if (FStages = nil) or (StageIndex < 0) or (StageIndex >= FStages.Count) then Exit;
 
-  SurfSet := FStages.SurfaceSet[StageIndex];
-  SprSet  := FStages.SpriteSet[StageIndex];
-  MapId   := FStages.Layer[StageIndex, 0];
+  SurfaceSetId := FStages.SurfaceSet[StageIndex];
+  SpriteSetId  := FStages.SpriteSet[StageIndex];
+  MapId        := FStages.Layer[StageIndex, 0];
 
-  if SurfSet >= 0 then
+  if SurfaceSetId >= 0 then
   begin
-    FSurfaces.LoadSet(FDataDir, SurfSet);
+    FSurfaces.LoadSet(FDataDir, SurfaceSetId);
     { The font lives in slot 0 of whichever set is current, so it is rebuilt
       when the set changes. }
     FreeAndNil(FFont);
     if FSurfaces[0] <> nil then
       FFont := TGameFont.Create(FSurfaces[0]);
   end;
-  if SprSet >= 0 then
-    FSprites.LoadSet(FDataDir, SprSet);
+  if SpriteSetId >= 0 then
+    FSprites.LoadSet(FDataDir, SpriteSetId);
   if MapId <> LAYER_NONE then
     FMap.Load(FDataDir, MapId);
 
@@ -900,48 +898,53 @@ end;
   holds where each one has got to. }
 procedure TFrm_main.DrawEndingCredits;
 var
-  I: Integer;
+  CreditIndex: Integer;
 begin
   DDDD1.Canvas.Brush.Color := clBlack;
   DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
   if FEndingBmp = nil then
     Exit;
-  for I := 0 to CREDITS_ENTRIES - 1 do
-    if FEnding.CreditOnScreen(I) then
+  for CreditIndex := 0 to CREDITS_ENTRIES - 1 do
+    if FEnding.CreditOnScreen(CreditIndex) then
       DDDD1.Canvas.CopyRect(
-        Rect(FEnding.CreditX(I), FEnding.CreditY[I],
-             FEnding.CreditX(I) + CREDITS_LAYOUT[I][CREDITS_W],
-             FEnding.CreditY[I] + CREDITS_LAYOUT[I][CREDITS_H]),
+        Rect(FEnding.CreditX(CreditIndex), FEnding.CreditY[CreditIndex],
+             FEnding.CreditX(CreditIndex)
+               + CREDITS_LAYOUT[CreditIndex][CREDITS_W],
+             FEnding.CreditY[CreditIndex]
+               + CREDITS_LAYOUT[CreditIndex][CREDITS_H]),
         FEndingBmp.Canvas,
-        Rect(CREDITS_LAYOUT[I][CREDITS_SX], CREDITS_LAYOUT[I][CREDITS_SY],
-             CREDITS_LAYOUT[I][CREDITS_SX] + CREDITS_LAYOUT[I][CREDITS_W],
-             CREDITS_LAYOUT[I][CREDITS_SY] + CREDITS_LAYOUT[I][CREDITS_H]));
+        Rect(CREDITS_LAYOUT[CreditIndex][CREDITS_SX],
+             CREDITS_LAYOUT[CreditIndex][CREDITS_SY],
+             CREDITS_LAYOUT[CreditIndex][CREDITS_SX]
+               + CREDITS_LAYOUT[CreditIndex][CREDITS_W],
+             CREDITS_LAYOUT[CreditIndex][CREDITS_SY]
+               + CREDITS_LAYOUT[CreditIndex][CREDITS_H]));
 end;
 
 { Phases 3 and 4: one crop of the phase-2 sheet, its right edge growing, drawn
   at the same place each time so the picture fills in. }
 procedure TFrm_main.DrawEndingStill;
 var
-  R: Integer;
+  SourceRight: Integer;
 begin
   DDDD1.Canvas.Brush.Color := clBlack;
   DDDD1.Canvas.FillRect(Rect(0, 0, SCREEN_W, SCREEN_H));
-  R := FEnding.StillRight;
-  if (FEndingBmp = nil) or (R < 0) then
+  SourceRight := FEnding.StillRight;
+  if (FEndingBmp = nil) or (SourceRight < 0) then
     Exit;
   DDDD1.Canvas.CopyRect(
     Rect(STILL_X, STILL_Y,
-         STILL_X + (R - STILL_SRC_LEFT),
+         STILL_X + (SourceRight - STILL_SRC_LEFT),
          STILL_Y + (STILL_SRC_BOTTOM - STILL_SRC_TOP)),
     FEndingBmp.Canvas,
-    Rect(STILL_SRC_LEFT, STILL_SRC_TOP, R, STILL_SRC_BOTTOM));
+    Rect(STILL_SRC_LEFT, STILL_SRC_TOP, SourceRight, STILL_SRC_BOTTOM));
 end;
 
 { Phase 5: Option.bmp, then a line a second over it. }
 procedure TFrm_main.DrawEndingResults;
 var
-  Shown, I, SrcX: Integer;
-  P: TPlayerState;
+  RevealedLines, GalleryIndex, SourceX: Integer;
+  PlayerState: TPlayerState;
 begin
   if FEndingBmp <> nil then
     DDDD1.Canvas.Draw(0, 0, FEndingBmp)
@@ -953,49 +956,50 @@ begin
   if FFont = nil then
     Exit;
 
-  P := FSession.Player;
-  Shown := FEnding.ResultsRevealed;
+  PlayerState := FSession.Player;
+  RevealedLines := FEnding.ResultsRevealed;
 
-  if Shown > 1 then
+  if RevealedLines > 1 then
   begin
     FFont.TextOut(DDDD1.Canvas, RESULT_TITLE_X, RESULT_TITLE_Y,
                   RESULT_TITLE, RESULT_LABEL_VARIANT);
     FFont.TextOut(DDDD1.Canvas, RESULT_TITLE_X, RESULT_RULE_Y,
                   RESULT_RULE, RESULT_LABEL_VARIANT);
   end;
-  if Shown > 2 then
+  if RevealedLines > 2 then
   begin
     FFont.TextOut(DDDD1.Canvas, RESULT_LABEL_X, RESULT_TIME_Y,
                   RESULT_TIME_LABEL, RESULT_LABEL_VARIANT);
     FFont.TextOut(DDDD1.Canvas, RESULT_VALUE_X, RESULT_TIME_Y,
-                  EndingTimeText(P.ElapsedSec), RESULT_VALUE_VARIANT);
+                  EndingTimeText(PlayerState.ElapsedSec), RESULT_VALUE_VARIANT);
   end;
-  if Shown > 3 then
+  if RevealedLines > 3 then
   begin
     FFont.TextOut(DDDD1.Canvas, RESULT_LABEL_X, RESULT_MANA_Y,
                   RESULT_MANA_LABEL, RESULT_LABEL_VARIANT);
     FFont.TextOut(DDDD1.Canvas, RESULT_VALUE_X, RESULT_MANA_Y,
-                  EndingPercentText(P.Counter), RESULT_VALUE_VARIANT);
+                  EndingPercentText(PlayerState.Counter), RESULT_VALUE_VARIANT);
   end;
-  if (Shown > 4) and (FSurfaces[GALLERY_SURFACE] <> nil) then
-    for I := 0 to GALLERY_COUNT - 1 do
+  if (RevealedLines > 4) and (FSurfaces[GALLERY_SURFACE] <> nil) then
+    for GalleryIndex := 0 to GALLERY_COUNT - 1 do
     begin
       { A locked entry is the one dark cell; an unlocked one is its own. }
-      if P.Progress[GALLERY_FIRST_FLAG + I] = 0 then
-        SrcX := GALLERY_DARK_X
+      if PlayerState.Progress[GALLERY_FIRST_FLAG + GalleryIndex] = 0 then
+        SourceX := GALLERY_DARK_X
       else
-        SrcX := (I + GALLERY_LIT_COL0) * GALLERY_CELL;
+        SourceX := (GalleryIndex + GALLERY_LIT_COL0) * GALLERY_CELL;
       DDDD1.Canvas.CopyRect(
-        Rect(I * GALLERY_STEP + GALLERY_X0, GALLERY_Y,
-             I * GALLERY_STEP + GALLERY_X0 + GALLERY_CELL,
+        Rect(GalleryIndex * GALLERY_STEP + GALLERY_X0, GALLERY_Y,
+             GalleryIndex * GALLERY_STEP + GALLERY_X0 + GALLERY_CELL,
              GALLERY_Y + (GALLERY_SRC_BOTTOM - GALLERY_SRC_TOP)),
         FSurfaces[GALLERY_SURFACE].Canvas,
-        Rect(SrcX, GALLERY_SRC_TOP, SrcX + GALLERY_CELL, GALLERY_SRC_BOTTOM));
+        Rect(SourceX, GALLERY_SRC_TOP, SourceX + GALLERY_CELL,
+             GALLERY_SRC_BOTTOM));
     end;
-  if Shown > 5 then
+  if RevealedLines > 5 then
     { The rank flickers - its variant is the frame timer mod 3. }
     FFont.TextOut(DDDD1.Canvas, RANK_X, RANK_Y,
-                  FEnding.RankName(P.Counter, P.ElapsedSec),
+                  FEnding.RankName(PlayerState.Counter, PlayerState.ElapsedSec),
                   FEnding.Timer mod RANK_VARIANTS);
 end;
 
@@ -1419,9 +1423,8 @@ begin
     GS_ENDING:
       begin
         FEnding.Update(Settings, FSession.Player, GameStateValue);
-        { Phase 1 is the slide show and owns the whole screen. The later
-          phases are the staff roll and the results, which the host does not
-          draw yet - but the game scene is gone by then either way. }
+        { The ending owns the whole screen: slide show, staff roll, stills,
+          and the results panel. }
         case ScreenPhase of
           1:    DrawEndingSlide;
           2:    DrawEndingCredits;
@@ -1514,7 +1517,9 @@ begin
     thread holds a pointer to the mixer. }
   KbgmPlayer1.Close;
   DDSD1.Close;
-  { TODO: teardown - the original released the sprite engine and surfaces }
+  { FGameOver, FPause, FOpening and FEnding are process-lifetime helpers at
+    present. Freeing them changes the frozen runtime image, so that shutdown
+    cleanup belongs in a separately approved fidelity batch. }
 end;
 
 end.

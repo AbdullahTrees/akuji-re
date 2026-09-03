@@ -215,7 +215,7 @@ uses
   saved and cleared BEFORE the game state is saved. }
 procedure InputEndOfFrame(var Inp: TInputState; const Down: array of Boolean);
 var
-  I: Integer;
+  ButtonIndex: Integer;
 begin
   if (Inp.AxisX = 0) and (Inp.AxisY = 0) then
   begin
@@ -232,16 +232,17 @@ begin
     Inp.HeldX := 0;
     Inp.HeldY := 0;
   end;
-  for I := 0 to 3 do
+  for ButtonIndex := 0 to 3 do
   begin
-    if (I <= High(Down)) and Down[I] then
-      Inp.ButtonLatch[I] := True
+    if (ButtonIndex <= High(Down)) and Down[ButtonIndex] then
+      Inp.ButtonLatch[ButtonIndex] := True
     else
     begin
-      Inp.ButtonLatch[I] := False;
-      Inp.ButtonRepeat[I] := 0;
+      Inp.ButtonLatch[ButtonIndex] := False;
+      Inp.ButtonRepeat[ButtonIndex] := 0;
     end;
-    if Inp.ButtonRepeat[I] > 0 then Dec(Inp.ButtonRepeat[I]);
+    if Inp.ButtonRepeat[ButtonIndex] > 0 then
+      Dec(Inp.ButtonRepeat[ButtonIndex]);
   end;
 end;
 
@@ -295,24 +296,24 @@ end;
 
 function LoadSettings(const AGameDir: string): Boolean;
 var
-  F: TFileStream;
-  Name: string;
+  Stream: TFileStream;
+  FileName: string;
 begin
   Result := False;
-  Name := SettingsFileName(AGameDir);
-  if not FileExists(Name) then
+  FileName := SettingsFileName(AGameDir);
+  if not FileExists(FileName) then
     Exit;
-  F := TFileStream.Create(Name, fmOpenRead or fmShareDenyNone);
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
     { The original reads 0x38 unconditionally. Refuse a short file rather than
       leaving the tail of the record holding whatever was there before - the
       same guard LoadSave makes for save.dat. }
-    if F.Size < SizeOf(TGameSettings) then
+    if Stream.Size < SizeOf(TGameSettings) then
       Exit;
-    F.ReadBuffer(Settings, SizeOf(TGameSettings));
+    Stream.ReadBuffer(Settings, SizeOf(TGameSettings));
     Result := True;
   finally
-    F.Free;
+    Stream.Free;
   end;
   if Result then
     SettingsToGlobals;
@@ -320,17 +321,17 @@ end;
 
 function SaveSettings(const AGameDir: string): Boolean;
 var
-  F: TFileStream;
+  Stream: TFileStream;
 begin
   GlobalsToSettings;
   Result := False;
   try
-    F := TFileStream.Create(SettingsFileName(AGameDir), fmCreate);
+    Stream := TFileStream.Create(SettingsFileName(AGameDir), fmCreate);
     try
-      F.WriteBuffer(Settings, SizeOf(TGameSettings));
+      Stream.WriteBuffer(Settings, SizeOf(TGameSettings));
       Result := True;
     finally
-      F.Free;
+      Stream.Free;
     end;
   except
     { The original opens for write, falls back to create, and ignores failure

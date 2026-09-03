@@ -121,8 +121,8 @@ implementation
 
 constructor TGameFont.Create(Sheet: TBitmap);
 var
-  V, I, Col, Row, SrcX, SrcY: Integer;
-  G: TBitmap;
+  VariantIndex, CharacterIndex, Column, Row, SourceX, SourceY: Integer;
+  Glyph: TBitmap;
 begin
   inherited Create;
   FVariants := Sheet.Height div (FONT_CELL_H * 2);
@@ -131,62 +131,63 @@ begin
 
   SetLength(FGlyphs, FVariants * (FONT_LAST_CHAR - FONT_FIRST_CHAR + 1));
 
-  for V := 0 to FVariants - 1 do
-    for I := 0 to FONT_LAST_CHAR - FONT_FIRST_CHAR do
+  for VariantIndex := 0 to FVariants - 1 do
+    for CharacterIndex := 0 to FONT_LAST_CHAR - FONT_FIRST_CHAR do
     begin
-      Col := I mod FONT_COLS;
-      Row := I div FONT_COLS;
-      SrcX := Col * FONT_CELL_W;
-      SrcY := Row * FONT_CELL_H + FONT_CELL_H * V * 2;
+      Column := CharacterIndex mod FONT_COLS;
+      Row := CharacterIndex div FONT_COLS;
+      SourceX := Column * FONT_CELL_W;
+      SourceY := Row * FONT_CELL_H + FONT_CELL_H * VariantIndex * 2;
 
-      G := TBitmap.Create;
-      G.SetSize(FONT_CELL_W, FONT_CELL_H);
-      G.Canvas.CopyRect(Rect(0, 0, FONT_CELL_W, FONT_CELL_H), Sheet.Canvas,
-        Rect(SrcX, SrcY, SrcX + FONT_CELL_W, SrcY + FONT_CELL_H));
-      G.TransparentColor := FONT_KEY_COLOR;
-      G.Transparent := True;
+      Glyph := TBitmap.Create;
+      Glyph.SetSize(FONT_CELL_W, FONT_CELL_H);
+      Glyph.Canvas.CopyRect(Rect(0, 0, FONT_CELL_W, FONT_CELL_H), Sheet.Canvas,
+        Rect(SourceX, SourceY, SourceX + FONT_CELL_W, SourceY + FONT_CELL_H));
+      Glyph.TransparentColor := FONT_KEY_COLOR;
+      Glyph.Transparent := True;
 
-      FGlyphs[V * (FONT_LAST_CHAR - FONT_FIRST_CHAR + 1) + I] := G;
+      FGlyphs[VariantIndex * (FONT_LAST_CHAR - FONT_FIRST_CHAR + 1)
+              + CharacterIndex] := Glyph;
     end;
 end;
 
 destructor TGameFont.Destroy;
 var
-  I: Integer;
+  GlyphIndex: Integer;
 begin
-  for I := 0 to High(FGlyphs) do
-    FGlyphs[I].Free;
+  for GlyphIndex := 0 to High(FGlyphs) do
+    FGlyphs[GlyphIndex].Free;
   inherited Destroy;
 end;
 
 function TGameFont.GlyphIndex(Ch: Char; AVariant: Integer): Integer;
 var
-  C: Integer;
+  CharacterCode: Integer;
 begin
-  C := Ord(Ch);
+  CharacterCode := Ord(Ch);
   { Game_DrawText silently skips anything outside the range. Lowercase is
     folded up rather than dropped, since the sheet has no lowercase and the
     original's strings are all upper case anyway. }
-  if (C >= Ord('a')) and (C <= Ord('z')) then
-    Dec(C, 32);
-  if (C < FONT_FIRST_CHAR) or (C > FONT_LAST_CHAR) then
+  if (CharacterCode >= Ord('a')) and (CharacterCode <= Ord('z')) then
+    Dec(CharacterCode, 32);
+  if (CharacterCode < FONT_FIRST_CHAR) or (CharacterCode > FONT_LAST_CHAR) then
     Exit(-1);
   if (AVariant < 0) or (AVariant >= FVariants) then
     AVariant := 0;
   Result := AVariant * (FONT_LAST_CHAR - FONT_FIRST_CHAR + 1)
-            + (C - FONT_FIRST_CHAR);
+            + (CharacterCode - FONT_FIRST_CHAR);
 end;
 
 procedure TGameFont.TextOut(Dest: TCanvas; X, Y: Integer; const S: string;
   AVariant: Integer);
 var
-  I, G: Integer;
+  CharacterIndex, Glyph: Integer;
 begin
-  for I := 1 to Length(S) do
+  for CharacterIndex := 1 to Length(S) do
   begin
-    G := GlyphIndex(S[I], AVariant);
-    if G >= 0 then
-      Dest.Draw(X + (I - 1) * FONT_ADVANCE, Y, FGlyphs[G]);
+    Glyph := GlyphIndex(S[CharacterIndex], AVariant);
+    if Glyph >= 0 then
+      Dest.Draw(X + (CharacterIndex - 1) * FONT_ADVANCE, Y, FGlyphs[Glyph]);
   end;
 end;
 

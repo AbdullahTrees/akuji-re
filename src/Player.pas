@@ -240,12 +240,12 @@ end;
 
 function FacingIndex(const E: TEntity): Integer;
 var
-  F: Integer;
+  Facing: Integer;
 begin
-  F := E.Raw[EF_FACING];
-  if F < 0 then
-    F := F + 31;
-  Result := F shr 5;
+  Facing := E.Raw[EF_FACING];
+  if Facing < 0 then
+    Facing := Facing + 31;
+  Result := Facing shr 5;
 end;
 
 { Player_UpdateGlide @ 0x004593B0. }
@@ -442,7 +442,7 @@ procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
                        World: TPlayerWorld; AGameState: Integer);
 var
-  SavedVX, Slot, Frames, W: Integer;
+  SavedVelocityX, SpawnedSlot, WorkValue, WeaponIndex: Integer;
   ScrollX, ScrollY, BlockedX, BlockedY: Boolean;
   JumpEdge, AttackEdge: Boolean;
 begin
@@ -594,7 +594,7 @@ begin
   if E.Raw[PF_STATE] < PS_AIRBORNE then
     E.Raw[PF_RIDE_REF] := E.Raw[PF_RIDE_REF] - E.Raw[EF_VEL_X];
 
-  SavedVX := E.Raw[EF_VEL_X];
+  SavedVelocityX := E.Raw[EF_VEL_X];
   if E.Raw[PF_PEND_VX] <> 0 then
   begin
     E.Raw[EF_VEL_X] := E.Raw[PF_PEND_VX];
@@ -732,14 +732,14 @@ begin
     if E.Raw[PF_FALL_FRAMES] > FALL_FRAMES_CAP then
       E.Raw[PF_FALL_FRAMES] := FALL_FRAMES_CAP;
     if E.Raw[PF_RIDING] = 1 then
-      E.Raw[EF_VEL_X] := SavedVX;
+      E.Raw[EF_VEL_X] := SavedVelocityX;
     E.Raw[PF_LANDED] := 0;
     E.Raw[PF_RIDING] := 0;
     if E.Raw[PF_AIR_LATCH] = 0 then
     begin
       E.Raw[PF_STATE_BEFORE] := E.Raw[PF_STATE];
       if E.Raw[EF_VEL_Y] < 0 then
-        E.Raw[PF_AIR_VX] := SavedVX
+        E.Raw[PF_AIR_VX] := SavedVelocityX
       else
         E.Raw[PF_AIR_VX] := 0;
       E.Raw[PF_AIR_LATCH] := 1;
@@ -759,8 +759,8 @@ begin
     if E.Raw[PF_LANDED] = 0 then
     begin
       E.Raw[PF_LANDED] := 1;
-      Frames := E.Raw[PF_FALL_FRAMES] div 3;
-      if Frames < FALL_HARD_THRESHOLD then
+      WorkValue := E.Raw[PF_FALL_FRAMES] div 3;
+      if WorkValue < FALL_HARD_THRESHOLD then
       begin
         if not World.Fading then
           World.PlaySound(SND_LAND_SOFT);
@@ -768,15 +768,17 @@ begin
       else
       begin
         World.PlaySound(SND_LAND_HARD);
-        Slot := World.Spawn(2, 3, E.Raw[EF_POS_X] - POSITION_BIAS - $100,
-                            E.Raw[EF_POS_Y] - POSITION_BIAS + $80);
-        World.SetSpawnField(Slot, EF_VEL_X, -$20);
-        Slot := World.Spawn(2, 3, E.Raw[EF_POS_X] - POSITION_BIAS + $100,
-                            E.Raw[EF_POS_Y] - POSITION_BIAS + $80);
-        World.SetSpawnField(Slot, EF_VEL_X, $20);
+        SpawnedSlot := World.Spawn(2, 3,
+          E.Raw[EF_POS_X] - POSITION_BIAS - $100,
+          E.Raw[EF_POS_Y] - POSITION_BIAS + $80);
+        World.SetSpawnField(SpawnedSlot, EF_VEL_X, -$20);
+        SpawnedSlot := World.Spawn(2, 3,
+          E.Raw[EF_POS_X] - POSITION_BIAS + $100,
+          E.Raw[EF_POS_Y] - POSITION_BIAS + $80);
+        World.SetSpawnField(SpawnedSlot, EF_VEL_X, $20);
       end;
       E.Raw[PF_STATE] := PS_LANDING;
-      E.Raw[PF_ANIM_TIMER] := Frames;
+      E.Raw[PF_ANIM_TIMER] := WorkValue;
       if E.Raw[PF_LAND_FRAMES] <> 0 then
       begin
         E.Raw[PF_ANIM_TIMER] := E.Raw[PF_LAND_FRAMES];
@@ -823,14 +825,14 @@ begin
              @E, World);
 
   { --- attacking ---------------------------------------------------------- }
-  W := P.Weapon;
-  if (W < 0) or (W >= WEAPON_COUNT) then
-    W := 0;
+  WeaponIndex := P.Weapon;
+  if (WeaponIndex < 0) or (WeaponIndex >= WEAPON_COUNT) then
+    WeaponIndex := 0;
 
   { Only weapon 3 charges - the original tests the index for 3, not a flag. }
   if Inp.Button[1] and (E.Raw[PF_STATE] <> PS_LANDING) and
      (E.Raw[PF_STATE] <> PS_ATTACK) and (P.Weapon = CHARGE_WEAPON) and
-     (E.Raw[PF_SHOTS] < WEAPONS[W].MaxShots) then
+     (E.Raw[PF_SHOTS] < WEAPONS[WeaponIndex].MaxShots) then
   begin
     Inc(E.Raw[PF_CHARGE]);
     if E.Raw[PF_CHARGE] = CHARGE_FULL_FRAMES then
@@ -838,13 +840,14 @@ begin
     if (E.Raw[PF_CHARGE] mod CHARGE_SPARK_EVERY = 0) and
        (E.Raw[PF_CHARGE] < CHARGE_FULL_FRAMES) then
     begin
-      Slot := World.Spawn(2, 5, E.Raw[EF_POS_X] - POSITION_BIAS,
-                          E.Raw[EF_POS_Y] - POSITION_BIAS);
-      World.SetSpawnField(Slot, PF_OWNER, E.Raw[EF_SLOT]);
-      Frames := World.RandomBelow(DIR_COUNT);
-      World.SetSpawnField(Slot, EF_FACING, Frames);
-      World.SetSpawnField(Slot, EF_VEL_X, DirVelX(Frames) shl 5);
-      World.SetSpawnField(Slot, EF_VEL_Y, DirVelY(Frames) shl 5);
+      SpawnedSlot := World.Spawn(2, 5,
+        E.Raw[EF_POS_X] - POSITION_BIAS,
+        E.Raw[EF_POS_Y] - POSITION_BIAS);
+      World.SetSpawnField(SpawnedSlot, PF_OWNER, E.Raw[EF_SLOT]);
+      WorkValue := World.RandomBelow(DIR_COUNT);
+      World.SetSpawnField(SpawnedSlot, EF_FACING, WorkValue);
+      World.SetSpawnField(SpawnedSlot, EF_VEL_X, DirVelX(WorkValue) shl 5);
+      World.SetSpawnField(SpawnedSlot, EF_VEL_Y, DirVelY(WorkValue) shl 5);
     end;
   end;
 
@@ -858,25 +861,27 @@ begin
       E.Raw[PF_ANIM_TIMER] := 0;
       if E.Raw[EF_VEL_Y] = 0 then
         E.Raw[EF_VEL_X] := 0;
-      Slot := World.Spawn(1, 2,
+      SpawnedSlot := World.Spawn(1, 2,
         DirVelX(E.Raw[EF_FACING]) * $18 + E.Raw[EF_POS_X] - POSITION_BIAS,
         E.Raw[EF_POS_Y] - POSITION_BIAS - $60);
-      World.SetSpawnField(Slot, PF_OWNER, E.Raw[EF_SLOT]);
-      World.SetSpawnField(Slot, EF_VEL_X, DirVelX(E.Raw[EF_FACING]) div 4);
-      World.SetSpawnField(Slot, EF_STATE, 2);
-      World.SetSpawnField(Slot, PF_PROJ_LIFE, WEAPONS[W].Lifetime);
-      World.SetSpawnField(Slot, EF_HP, 8);
-      World.SetSpawnField(Slot, $3A, $1E);
-      World.SetSpawnField(Slot, $3B, $1E);
-      World.SetSpawnField(Slot, $3C, $1E);
-      World.SetSpawnField(Slot, $3D, $1E);
+      World.SetSpawnField(SpawnedSlot, PF_OWNER, E.Raw[EF_SLOT]);
+      World.SetSpawnField(SpawnedSlot, EF_VEL_X,
+        DirVelX(E.Raw[EF_FACING]) div 4);
+      World.SetSpawnField(SpawnedSlot, EF_STATE, 2);
+      World.SetSpawnField(SpawnedSlot, PF_PROJ_LIFE,
+        WEAPONS[WeaponIndex].Lifetime);
+      World.SetSpawnField(SpawnedSlot, EF_HP, 8);
+      World.SetSpawnField(SpawnedSlot, EF_BOX_PCT_X, $1E);
+      World.SetSpawnField(SpawnedSlot, EF_BOX_PCT_Y, $1E);
+      World.SetSpawnField(SpawnedSlot, EF_INSET_PCT_X, $1E);
+      World.SetSpawnField(SpawnedSlot, EF_INSET_PCT_Y, $1E);
     end;
     E.Raw[PF_CHARGE] := 0;
   end;
 
   if AttackEdge and (E.Raw[PF_STATE] <> PS_LANDING) and
      (E.Raw[PF_STATE] <> PS_ATTACK) and
-     (E.Raw[PF_SHOTS] < WEAPONS[W].MaxShots) then
+     (E.Raw[PF_SHOTS] < WEAPONS[WeaponIndex].MaxShots) then
   begin
     Inc(E.Raw[PF_SHOTS]);
     World.PlaySound(SND_ATTACK);
@@ -884,17 +889,19 @@ begin
     E.Raw[PF_ANIM_TIMER] := 0;
     if E.Raw[EF_VEL_Y] = 0 then
       E.Raw[EF_VEL_X] := 0;
-    Slot := World.Spawn(1, 2,
+    SpawnedSlot := World.Spawn(1, 2,
       DirVelX(E.Raw[EF_FACING]) * $C + E.Raw[EF_POS_X] - POSITION_BIAS,
       E.Raw[EF_POS_Y] - POSITION_BIAS - $60);
-    World.SetSpawnField(Slot, PF_OWNER, E.Raw[EF_SLOT]);
-    World.SetSpawnField(Slot, EF_VEL_X, WEAPONS[W].Speed * DirVelX(E.Raw[EF_FACING]));
-    World.SetSpawnField(Slot, EF_STATE, WEAPONS[W].ProjState);
-    World.SetSpawnField(Slot, PF_PROJ_LIFE, WEAPONS[W].Lifetime);
+    World.SetSpawnField(SpawnedSlot, PF_OWNER, E.Raw[EF_SLOT]);
+    World.SetSpawnField(SpawnedSlot, EF_VEL_X,
+      WEAPONS[WeaponIndex].Speed * DirVelX(E.Raw[EF_FACING]));
+    World.SetSpawnField(SpawnedSlot, EF_STATE, WEAPONS[WeaponIndex].ProjState);
+    World.SetSpawnField(SpawnedSlot, PF_PROJ_LIFE,
+      WEAPONS[WeaponIndex].Lifetime);
     if P.Weapon > 1 then
-      World.SetSpawnField(Slot, EF_HP, 2)
+      World.SetSpawnField(SpawnedSlot, EF_HP, 2)
     else
-      World.SetSpawnField(Slot, EF_HP, 1);
+      World.SetSpawnField(SpawnedSlot, EF_HP, 1);
   end;
 end;
 

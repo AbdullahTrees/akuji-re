@@ -283,15 +283,16 @@ end;
 
 procedure TGameWorld.BeginEvent(EventId, Arg: Integer);
 var
-  GS: Integer;
+  CurrentGameState: Integer;
 begin
   if (FSession.Runner = nil) or (FSession.Events = nil) then
     Exit;
   { Entity_Destroy reaches this in the middle of a frame and the game state is
     what Event_Begin locks on, so it has to be the real one. }
-  GS := GameStateValue;
-  FSession.Runner.StartEvent(FSession.Events, EventId, Arg, FSession.Player, GS);
-  GameStateValue := GS;
+  CurrentGameState := GameStateValue;
+  FSession.Runner.StartEvent(FSession.Events, EventId, Arg, FSession.Player,
+    CurrentGameState);
+  GameStateValue := CurrentGameState;
 end;
 
 procedure TGameWorld.ClearEventEntity(EventId: Integer);
@@ -502,8 +503,10 @@ end;
 
 procedure TGameSession.LoadStageAssets(StageIndex: Integer);
 var
-  Terrain, Thr, Kill: Integer;
-  Anim: TTerrainAnim;
+  TerrainId: Integer;
+  SolidThreshold: Integer;
+  KillTile: Integer;
+  TerrainAnim: TTerrainAnim;
 begin
   { Load_Stage_Assets' share, which used to sit inside BeginStage. It does not
     belong there: the xrefs put Terrain_Configure at 0x004645B0 and
@@ -519,21 +522,21 @@ begin
     Both globals are written together - 0x00484EF4 and 0x00484EF8, adjacent -
     and the kill tile was being computed here and thrown away, which is why
     water was not lethal. }
-  Terrain := 0;
+  TerrainId := 0;
   if (FStages <> nil) and (StageIndex >= 0) and (StageIndex < FStages.Count) then
-    Terrain := FStages.TerrainId[StageIndex];
-  Thr := FWorld.SolidThreshold;
-  Kill := KILL_TILE;
-  TerrainConfigure(Terrain, Thr, Kill, Anim);
-  FWorld.SolidThreshold := Thr;
-  FWorld.KillTile := Kill;
-  FWorld.TerrainId := Terrain;
+    TerrainId := FStages.TerrainId[StageIndex];
+  SolidThreshold := FWorld.SolidThreshold;
+  KillTile := KILL_TILE;
+  TerrainConfigure(TerrainId, SolidThreshold, KillTile, TerrainAnim);
+  FWorld.SolidThreshold := SolidThreshold;
+  FWorld.KillTile := KillTile;
+  FWorld.TerrainId := TerrainId;
 
   { Terrain_Configure builds the animator for terrains 1..4 and nothing for
     5..9. Rebuilt per stage because its tracks are the terrain's. }
   FreeAndNil(FBgAnime);
-  if Anim.TrackCount > 0 then
-    FBgAnime := TBgAnime.Create(Map, Anim);
+  if TerrainAnim.TrackCount > 0 then
+    FBgAnime := TBgAnime.Create(Map, TerrainAnim);
 
   FEvents.Load(FGameDir, StageIndex);
 

@@ -191,15 +191,15 @@ implementation
 
 constructor TKbgmThread.Create(ADevice: TMidiOutDevice);
 var
-  I: Integer;
+  Channel: Integer;
 begin
   FDevice := ADevice;
   FLock := TCriticalSection.Create;
   FFile := TMidiFile.Create;
   FIndex := -1;
   FMasterGain := 1024;
-  for I := 0 to MIDI_CHANNELS - 1 do
-    FChannelVolume[I] := DEFAULT_CHANNEL_VOLUME;
+  for Channel := 0 to MIDI_CHANNELS - 1 do
+    FChannelVolume[Channel] := DEFAULT_CHANNEL_VOLUME;
   inherited Create(False);
   FreeOnTerminate := False;
 end;
@@ -217,68 +217,68 @@ end;
   the volume setting entirely. Scaling CC7 always works. }
 procedure TKbgmThread.ApplyChannelVolumes;
 var
-  Ch, V: Integer;
+  Channel, ChannelGain: Integer;
 begin
-  for Ch := 0 to MIDI_CHANNELS - 1 do
+  for Channel := 0 to MIDI_CHANNELS - 1 do
   begin
-    V := (Integer(FChannelVolume[Ch]) * FMasterGain) div 1024;
-    if V > 127 then V := 127;
-    if V < 0 then V := 0;
-    FDevice.Send(LongWord($B0 or Ch) or (LongWord(CC_VOLUME) shl 8) or
-                 (LongWord(V) shl 16));
+    ChannelGain := (Integer(FChannelVolume[Channel]) * FMasterGain) div 1024;
+    if ChannelGain > 127 then ChannelGain := 127;
+    if ChannelGain < 0 then ChannelGain := 0;
+    FDevice.Send(LongWord($B0 or Channel) or (LongWord(CC_VOLUME) shl 8) or
+                 (LongWord(ChannelGain) shl 16));
   end;
 end;
 
 procedure TKbgmThread.RewindLocked;
 var
-  I: Integer;
+  Channel: Integer;
 begin
   FCursor := 0;
   FStartMs := MsNow;
-  for I := 0 to MIDI_CHANNELS - 1 do
-    FChannelVolume[I] := DEFAULT_CHANNEL_VOLUME;
+  for Channel := 0 to MIDI_CHANNELS - 1 do
+    FChannelVolume[Channel] := DEFAULT_CHANNEL_VOLUME;
   FDirtyVolume := True;
 end;
 
 procedure TKbgmThread.DispatchDue(ElapsedUs: Int64);
 var
-  Ev: TMidiEvent;
-  Status, Ch, CtrlNum, CtrlVal, Scaled: Integer;
-  Msg: LongWord;
+  MidiEvent: TMidiEvent;
+  Status, Channel, ControllerNumber, ControllerValue, ScaledValue: Integer;
+  Message: LongWord;
 begin
   while (FCursor < FFile.Count) and (FFile[FCursor].TimeUs <= ElapsedUs) do
   begin
-    Ev := FFile[FCursor];
+    MidiEvent := FFile[FCursor];
     Inc(FCursor);
 
-    case Ev.Kind of
+    case MidiEvent.Kind of
       mekShort:
         begin
-          Msg := Ev.Msg;
-          Status := Msg and $FF;
-          Ch := Status and $0F;
+          Message := MidiEvent.Msg;
+          Status := Message and $FF;
+          Channel := Status and $0F;
 
           { Intercept CC7 so the song's own volume automation composes with the
             master gain instead of overwriting it. Without this, any track that
             sets channel volume mid-song jumps back to full. }
           if ((Status and $F0) = $B0) then
           begin
-            CtrlNum := (Msg shr 8) and $7F;
-            CtrlVal := (Msg shr 16) and $7F;
-            if CtrlNum = CC_VOLUME then
+            ControllerNumber := (Message shr 8) and $7F;
+            ControllerValue := (Message shr 16) and $7F;
+            if ControllerNumber = CC_VOLUME then
             begin
-              FChannelVolume[Ch] := CtrlVal;
-              Scaled := (CtrlVal * FMasterGain) div 1024;
-              if Scaled > 127 then Scaled := 127;
-              Msg := LongWord(Status) or (LongWord(CC_VOLUME) shl 8) or
-                     (LongWord(Scaled) shl 16);
+              FChannelVolume[Channel] := ControllerValue;
+              ScaledValue := (ControllerValue * FMasterGain) div 1024;
+              if ScaledValue > 127 then ScaledValue := 127;
+              Message := LongWord(Status) or (LongWord(CC_VOLUME) shl 8) or
+                         (LongWord(ScaledValue) shl 16);
             end;
           end;
 
-          FDevice.Send(Msg);
+          FDevice.Send(Message);
         end;
       mekSysEx:
-        FDevice.SendSysEx(Ev.Blob);
+        FDevice.SendSysEx(MidiEvent.Blob);
       mekTempo, mekEndOfTrack:
         ;   { tempo is already folded into TimeUs by MidiFile.ComputeTimes }
     end;
@@ -290,7 +290,7 @@ var
   NowMs: DWord;
   ElapsedUs: Int64;
   Done, Fading: Boolean;
-  T: Integer;
+  FadeProgress: Integer;
 begin
   while not Terminated do
   begin
@@ -306,16 +306,18 @@ begin
         if Fading then
         begin
           if FFadeMs <= 0 then
-            T := 1024
+            FadeProgress := 1024
           else
           begin
-            T := Integer((Int64(NowMs - FFadeStartMs) * 1024) div FFadeMs);
-            if T > 1024 then T := 1024;
-            if T < 0 then T := 0;
+            FadeProgress :=
+              Integer((Int64(NowMs - FFadeStartMs) * 1024) div FFadeMs);
+            if FadeProgress > 1024 then FadeProgress := 1024;
+            if FadeProgress < 0 then FadeProgress := 0;
           end;
-          FMasterGain := FFadeFrom + ((FFadeTo - FFadeFrom) * T) div 1024;
+          FMasterGain := FFadeFrom
+                         + ((FFadeTo - FFadeFrom) * FadeProgress) div 1024;
           FDirtyVolume := True;
-          if T >= 1024 then
+          if FadeProgress >= 1024 then
           begin
             FFading := False;
             if FStopAfterFade then
@@ -515,29 +517,29 @@ end;
 
 function TKbgmPlayer.ResolvePath(const Name: string): string;
 var
-  Rel: string;
+  RelativePath: string;
 begin
   Result := '';
   if Name = '' then
     Exit;
-  Rel := Name;
+  RelativePath := Name;
 {$IFNDEF WINDOWS}
-  Rel := StringReplace(Rel, '\', PathDelim, [rfReplaceAll]);
+  RelativePath := StringReplace(RelativePath, '\', PathDelim, [rfReplaceAll]);
 {$ENDIF}
   { The playlist stores no extension - the original appended it, and the
     literal '.mid' is still in the binary at file offset 0x0004F700. }
-  if ExtractFileExt(Rel) = '' then
-    Rel := Rel + '.mid';
-  Result := IncludeTrailingPathDelimiter(FGameDir) + Rel;
+  if ExtractFileExt(RelativePath) = '' then
+    RelativePath := RelativePath + '.mid';
+  Result := IncludeTrailingPathDelimiter(FGameDir) + RelativePath;
 end;
 
 function TKbgmPlayer.IndexOfName(const Name: string): Integer;
 var
-  I: Integer;
+  TrackIndex: Integer;
 begin
-  for I := 0 to FAutoLoadMidis.Count - 1 do
-    if SameText(FAutoLoadMidis[I], Name) then
-      Exit(I);
+  for TrackIndex := 0 to FAutoLoadMidis.Count - 1 do
+    if SameText(FAutoLoadMidis[TrackIndex], Name) then
+      Exit(TrackIndex);
   Result := -1;
 end;
 
@@ -596,20 +598,20 @@ end;
 
 procedure TKbgmPlayer.PlayName(const Name: string; Loop: Boolean);
 var
-  Path: string;
-  Index: Integer;
+  TrackPath: string;
+  TrackIndex: Integer;
 begin
   if FThread = nil then
     Exit;
-  Index := IndexOfName(Name);
+  TrackIndex := IndexOfName(Name);
   { NO "already playing" GUARD. This used to return early when the requested
     track was the one already running, which is a reasonable thing to do and
     is not what the original does: both wrappers stop unconditionally and then
     play, so asking for the current track RESTARTS it. }
-  Path := ResolvePath(Name);
-  if Path = '' then
+  TrackPath := ResolvePath(Name);
+  if TrackPath = '' then
     Exit;
-  FThread.StartTrack(Path, Index, Loop, 0);
+  FThread.StartTrack(TrackPath, TrackIndex, Loop, 0);
   FCurrent := FThread.CurrentIndex;
 end;
 
@@ -641,16 +643,16 @@ end;
 
 procedure TKbgmPlayer.FadeIn(Index: Integer; MilliSeconds: Integer);
 var
-  Path: string;
+  TrackPath: string;
 begin
   if FThread = nil then
     Exit;
   if (Index < 0) or (Index >= FAutoLoadMidis.Count) then
     Exit;
-  Path := ResolvePath(FAutoLoadMidis[Index]);
-  if Path = '' then
+  TrackPath := ResolvePath(FAutoLoadMidis[Index]);
+  if TrackPath = '' then
     Exit;
-  FThread.StartTrack(Path, Index, True, MilliSeconds);
+  FThread.StartTrack(TrackPath, Index, True, MilliSeconds);
   FCurrent := FThread.CurrentIndex;
 end;
 

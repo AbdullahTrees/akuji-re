@@ -26,6 +26,10 @@ The individual modes, if you want one:
     akuji.exe --selftest-stages <gamedir>           # stage.dat relationships
     akuji.exe --selftest-player <gamedir>           # camera, helpers, player
     akuji.exe --selftest-trace <gamedir>            # the controller, frame by frame
+    akuji.exe --selftest-layouts <gamedir>          # record sizes and field offsets
+    akuji.exe --selftest-entities <gamedir>         # entity tables and dispatcher
+    akuji.exe --selftest-runner <gamedir>           # event interpreter behaviour
+    akuji.exe --selftest-session <gamedir>          # integrated stage/session flow
     akuji.exe --selftest-settings <gamedir> <scratch>
 
 `akuji.exe` is a GUI-subsystem binary, so these print nothing to stdout — each
@@ -36,21 +40,33 @@ against it.
 
 ## Layout
 
-Deliberately flat. FPC units are flat-namespaced — a subdirectory would not
-create `graphics.Sprites`, it would still be `Sprites`, so folders buy filing
-without encapsulation and cost a search-path entry. Unit names are globally
-unique whatever directory they sit in: `Maps.pas` collided with LazUtils' own
-`Maps` unit and had to become `TileMaps`, and nesting it would not have helped.
-The original Delphi project was one directory too.
+Currently flat. FPC units are flat-namespaced: placing `Sprites.pas` under a
+`graphics` directory would not create `graphics.Sprites`; it would still be
+the globally named `Sprites` unit and would add a search-path entry without
+adding encapsulation. This is why moving files and introducing dotted unit
+names (`Akuji.Graphics.Sprites`) are separate decisions.
 
-Revisit past roughly 40 units, and use dotted unit names (`Akuji.Graphics.Font`)
-rather than directories — that is the Pascal-native answer.
+The tree is now close to forty units, so grouping is worth revisiting. Any move
+must also update the project/package files, mutation specifications, and source
+scanners under `tools/`, several of which currently assume `src/*.pas`. Unit
+names still need checking against Lazarus and LCL even after a move: nesting
+the old `Maps.pas` would not have prevented its collision with LazUtils, which
+is why it remains `TileMaps`.
+
+The recommended structural batch is physical grouping without renaming units:
+`gameplay`, `events`, `media`, `render`, `screens`, and `components`. It is
+feasible, but it is not a source-only move: the Lazarus project and package,
+the explicit `GmMain in ...` entry, source scanners, and five mutation
+specifications all carry flat paths. Keep that migration separate so the full
+gate can prove the moved tree still emits the v1.0 runtime image. Dotted unit
+names would be a second, much wider refactor and are not recommended during
+fidelity work.
 
 ## Entry point
 
 | File | Provenance |
 |---|---|
-| `akuji.lpr` | reconstructed from `entry` @ `0x004671AC` |
+| `akuji.lpr` | reconstructed from `entry` @ `0x0046716C` |
 | `akuji.lpi` | project file; hand-written, not IDE-generated |
 | `GmMain.lfm` | **recovered verbatim** from the binary's TPF0 form resource |
 | `GmMain.pas` | `TFrm_main` — frame loop, state dispatch, stage loading |
@@ -109,10 +125,10 @@ nothing else. See `../notes/audio_map.md` for the recovered call map.
 | `Title.pas` | `Title_MainMenu` `0x462330` — menu, options, gallery |
 | `Entities.pas` | the pool, the 81-entry type table, the record layout |
 | `Directions.pas` | the 64-step angle system, both tables confirmed |
-| `PlayerState.pas` | `save.dat`, and the player controller's state machine |
+| `PlayerState.pas` | `save.dat`, player constants, and game start/load state |
 | `Camera.pas` | the scrolling dead zone and the map-edge clamp |
 | `Player.pas` | **the player controller, as running code** - the first behaviour |
-| `EntityHandlers.pas` | `Entity_UpdateAll` and the per-type handlers translated so far |
+| `EntityHandlers.pas` | `Entity_UpdateAll` and all per-type handlers |
 
 `Entities.pas` and `PlayerState.pas` carry long header comments recording what
 each field means and what the evidence for it was. That is deliberate: the
@@ -120,22 +136,21 @@ entity record has 65 integer slots and several are reused for different things
 by role — `$24` is hit points on a target and damage on a projectile, `$1C` is
 a timer with three separate uses. Read the headers before naming anything new.
 
-## Not yet written
+## Coverage and verification
 
-The entity behaviours themselves — 74 of the 78 per-type update handlers.
-`EntityHandlers.HANDLER_ADDR` lists every one of them by address, read out of
-the jump table in the binary rather than transcribed by hand, so it doubles as
-the to-do list. `tools/coverage.py` deliberately does **not** count those
-addresses: a table of addresses is a to-do list, not a translation, and
-counting it would take the figure from 34% to 85% without a line being read.
+All 149 game-layer functions tracked by `notes/audited.md` now have executable
+Pascal, including every per-type entity handler and the complete event
+interpreter. Implementation is not the same as verification: consult the
+ledger before editing any game function. `MATCHES`, `FIXED`, and the compared
+part of `PARTIAL` rows are frozen; `EMUDIFF` handlers require the differential
+sweep after an edit; `UNVERIFIED` means implemented but not yet checked against
+the original instruction by instruction.
 
-The older text below is kept because the rest of it still applies. The
-*structure* around them is decoded: the dispatcher, the record, collision,
-death, damage, and the player's own state machine. See `../CLAUDE.md` section
-8a.
-
-Event opcodes 4 and 9 also remain, and the entity type table has 18 columns of
-which only two are decoded outright (the destination of all 18 is known).
+`EntityHandlers.HANDLER_ADDR` remains the address authority for the dispatch
+table. The handler sweep attempts 308 cases under Ghidra emulation: 296 execute
+and compare with the Pascal, while 12 hit documented emulator faults.
+`tools/coverage.py` deliberately does not count an address merely because it
+appears in that table: an address list alone is still not an implementation.
 
 ## Rules
 

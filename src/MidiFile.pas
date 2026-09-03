@@ -108,28 +108,29 @@ end;
   the last. Four bytes is the format's own limit. }
 function ReadVLQ(var R: TReader): LongWord;
 var
-  B: Byte;
-  N: Integer;
+  CurrentByte: Byte;
+  ByteCount: Integer;
 begin
   Result := 0;
-  N := 0;
+  ByteCount := 0;
   repeat
-    B := ReadByte(R);
-    Result := (Result shl 7) or (B and $7F);
-    Inc(N);
-  until ((B and $80) = 0) or (N >= 4) or (R.Pos >= R.Limit);
+    CurrentByte := ReadByte(R);
+    Result := (Result shl 7) or (CurrentByte and $7F);
+    Inc(ByteCount);
+  until ((CurrentByte and $80) = 0) or (ByteCount >= 4)
+        or (R.Pos >= R.Limit);
 end;
 
 { Clears a TMidiEvent field by field. FillChar must not be used on a record
   holding a dynamic array: it would overwrite the reference without releasing
   it, leaking the SysEx blob of the previous event. }
-procedure ClearEvent(var E: TMidiEvent);
+procedure ClearEvent(var MidiEvent: TMidiEvent);
 begin
-  E.Tick := 0;
-  E.TimeUs := 0;
-  E.Kind := mekShort;
-  E.Msg := 0;
-  E.Blob := nil;
+  MidiEvent.Tick := 0;
+  MidiEvent.TimeUs := 0;
+  MidiEvent.Kind := mekShort;
+  MidiEvent.Msg := 0;
+  MidiEvent.Blob := nil;
 end;
 
 destructor TMidiFile.Destroy;
@@ -173,24 +174,26 @@ end;
   loop from drifting. }
 procedure TMidiFile.ComputeTimes;
 var
-  I: Integer;
-  Tempo: LongWord;
+  EventIndex: Integer;
+  TempoUs: LongWord;
   LastTick: LongWord;
-  Acc: Int64;
+  ElapsedUs: Int64;
 begin
-  Tempo := DEFAULT_TEMPO_US;
+  TempoUs := DEFAULT_TEMPO_US;
   LastTick := 0;
-  Acc := 0;
-  for I := 0 to High(FEvents) do
+  ElapsedUs := 0;
+  for EventIndex := 0 to High(FEvents) do
   begin
     if FDivision > 0 then
-      Acc := Acc + (Int64(FEvents[I].Tick - LastTick) * Tempo) div FDivision;
-    LastTick := FEvents[I].Tick;
-    FEvents[I].TimeUs := Acc;
-    if FEvents[I].Kind = mekTempo then
-      Tempo := FEvents[I].Msg;
+      ElapsedUs := ElapsedUs
+                   + (Int64(FEvents[EventIndex].Tick - LastTick) * TempoUs)
+                     div FDivision;
+    LastTick := FEvents[EventIndex].Tick;
+    FEvents[EventIndex].TimeUs := ElapsedUs;
+    if FEvents[EventIndex].Kind = mekTempo then
+      TempoUs := FEvents[EventIndex].Msg;
   end;
-  FDurationUs := Acc;
+  FDurationUs := ElapsedUs;
 end;
 
 { Parses one MTrk body into a tick-ordered event list. R.Pos must be at the
@@ -198,13 +201,13 @@ end;
 function ParseTrack(var R: TReader; TrackEnd: Integer): TMidiEventArray;
 var
   Tick: LongWord;
-  Status, RunningStatus, D1, D2, MetaType: Byte;
-  Len: LongWord;
-  Ev: TMidiEvent;
-  N, I: Integer;
+  Status, RunningStatus, Data1, Data2, MetaType: Byte;
+  DataLength: LongWord;
+  MidiEvent: TMidiEvent;
+  EventCount, ByteIndex: Integer;
 begin
   Result := nil;
-  N := 0;
+  EventCount := 0;
   Tick := 0;
   RunningStatus := 0;
 
@@ -230,60 +233,61 @@ begin
     if Status = 0 then
       Break;   { running status with nothing to run - corrupt track }
 
-    ClearEvent(Ev);
-    Ev.Tick := Tick;
+    ClearEvent(MidiEvent);
+    MidiEvent.Tick := Tick;
 
     case Status and $F0 of
       $80, $90, $A0, $B0, $E0:
         begin
-          D1 := ReadByte(R);
-          D2 := ReadByte(R);
-          Ev.Kind := mekShort;
-          Ev.Msg := Status or (LongWord(D1) shl 8) or (LongWord(D2) shl 16);
+          Data1 := ReadByte(R);
+          Data2 := ReadByte(R);
+          MidiEvent.Kind := mekShort;
+          MidiEvent.Msg := Status or (LongWord(Data1) shl 8)
+                           or (LongWord(Data2) shl 16);
         end;
       $C0, $D0:
         begin
-          D1 := ReadByte(R);
-          Ev.Kind := mekShort;
-          Ev.Msg := Status or (LongWord(D1) shl 8);
+          Data1 := ReadByte(R);
+          MidiEvent.Kind := mekShort;
+          MidiEvent.Msg := Status or (LongWord(Data1) shl 8);
         end;
     else
       case Status of
         $FF:
           begin
             MetaType := ReadByte(R);
-            Len := ReadVLQ(R);
+            DataLength := ReadVLQ(R);
             if MetaType = $51 then
             begin
               { Set Tempo: three bytes of microseconds per quarter. }
-              Ev.Kind := mekTempo;
-              Ev.Msg := (LongWord(ReadByte(R)) shl 16) or
-                        (LongWord(ReadByte(R)) shl 8) or
-                         LongWord(ReadByte(R));
-              if Len > 3 then
-                Inc(R.Pos, Integer(Len) - 3);
+              MidiEvent.Kind := mekTempo;
+              MidiEvent.Msg := (LongWord(ReadByte(R)) shl 16) or
+                               (LongWord(ReadByte(R)) shl 8) or
+                                LongWord(ReadByte(R));
+              if DataLength > 3 then
+                Inc(R.Pos, Integer(DataLength) - 3);
             end
             else if MetaType = $2F then
             begin
-              Ev.Kind := mekEndOfTrack;
-              Inc(R.Pos, Integer(Len));
+              MidiEvent.Kind := mekEndOfTrack;
+              Inc(R.Pos, Integer(DataLength));
             end
             else
             begin
               { Track names, copyright, lyrics - carried by the file but not
                 needed to make sound. Skipped, not stored. }
-              Inc(R.Pos, Integer(Len));
+              Inc(R.Pos, Integer(DataLength));
               Continue;
             end;
           end;
         $F0, $F7:
           begin
-            Len := ReadVLQ(R);
-            Ev.Kind := mekSysEx;
-            SetLength(Ev.Blob, Len + 1);
-            Ev.Blob[0] := Status;
-            for I := 0 to Integer(Len) - 1 do
-              Ev.Blob[I + 1] := ReadByte(R);
+            DataLength := ReadVLQ(R);
+            MidiEvent.Kind := mekSysEx;
+            SetLength(MidiEvent.Blob, DataLength + 1);
+            MidiEvent.Blob[0] := Status;
+            for ByteIndex := 0 to Integer(DataLength) - 1 do
+              MidiEvent.Blob[ByteIndex + 1] := ReadByte(R);
           end;
       else
         { An unknown status byte means the stream is out of sync; abandoning the
@@ -292,24 +296,25 @@ begin
       end;
     end;
 
-    if N >= Length(Result) then
+    if EventCount >= Length(Result) then
       SetLength(Result, (Length(Result) * 2) + 256);
-    Result[N] := Ev;
-    Inc(N);
+    Result[EventCount] := MidiEvent;
+    Inc(EventCount);
   end;
 
-  SetLength(Result, N);
+  SetLength(Result, EventCount);
 end;
 
 function TMidiFile.LoadFromFile(const FileName: string): Boolean;
 var
-  S: TFileStream;
-  All: TBytes;
-  R: TReader;
+  Stream: TFileStream;
+  FileData: TBytes;
+  Reader: TReader;
   ChunkID, ChunkLen, HeaderLen: LongWord;
-  T, K, I, Total, Best, TrackEnd: Integer;
+  TrackCount, CandidateTrack, EventIndex, TotalEvents, BestTrack: Integer;
+  TrackEnd: Integer;
   Tracks: array of TMidiEventArray;
-  Cursor: array of Integer;
+  TrackCursor: array of Integer;
   BestTick: LongWord;
 begin
   Result := False;
@@ -317,51 +322,52 @@ begin
   if not FileExists(FileName) then
     Exit;
 
-  S := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
-    if S.Size < 14 then
+    if Stream.Size < 14 then
       Exit;
-    SetLength(All, S.Size);
-    S.ReadBuffer(All[0], S.Size);
+    SetLength(FileData, Stream.Size);
+    Stream.ReadBuffer(FileData[0], Stream.Size);
   finally
-    S.Free;
+    Stream.Free;
   end;
 
-  R.Data := All;
-  R.Pos := 0;
-  R.Limit := Length(All);
+  Reader.Data := FileData;
+  Reader.Pos := 0;
+  Reader.Limit := Length(FileData);
 
-  ChunkID := ReadBE32(R);
+  ChunkID := ReadBE32(Reader);
   if ChunkID <> $4D546864 then   { 'MThd' }
     Exit;
-  HeaderLen := ReadBE32(R);
-  FFormat := ReadBE16(R);
-  FTrackCount := ReadBE16(R);
-  FDivision := ReadBE16(R);
+  HeaderLen := ReadBE32(Reader);
+  FFormat := ReadBE16(Reader);
+  FTrackCount := ReadBE16(Reader);
+  FDivision := ReadBE16(Reader);
   { SMPTE division has the top bit set and means frames per second, not ticks
     per quarter. None of the 15 files use it; refuse rather than mis-time. }
   if ((FDivision and $8000) <> 0) or (FDivision = 0) then
     Exit;
   { Skip any header bytes beyond the six we understand. }
-  R.Pos := 8 + Integer(HeaderLen);
+  Reader.Pos := 8 + Integer(HeaderLen);
 
   SetLength(Tracks, FTrackCount);
-  T := 0;
-  while (T < FTrackCount) and (R.Pos + 8 <= R.Limit) do
+  TrackCount := 0;
+  while (TrackCount < FTrackCount)
+        and (Reader.Pos + 8 <= Reader.Limit) do
   begin
-    ChunkID := ReadBE32(R);
-    ChunkLen := ReadBE32(R);
+    ChunkID := ReadBE32(Reader);
+    ChunkLen := ReadBE32(Reader);
     if ChunkID <> $4D54726B then   { 'MTrk' - skip anything else by length }
     begin
-      Inc(R.Pos, ChunkLen);
+      Inc(Reader.Pos, ChunkLen);
       Continue;
     end;
-    TrackEnd := R.Pos + Integer(ChunkLen);
-    if TrackEnd > R.Limit then
-      TrackEnd := R.Limit;
-    Tracks[T] := ParseTrack(R, TrackEnd);
-    R.Pos := TrackEnd;
-    Inc(T);
+    TrackEnd := Reader.Pos + Integer(ChunkLen);
+    if TrackEnd > Reader.Limit then
+      TrackEnd := Reader.Limit;
+    Tracks[TrackCount] := ParseTrack(Reader, TrackEnd);
+    Reader.Pos := TrackEnd;
+    Inc(TrackCount);
   end;
 
   { k-way merge. Each track is already tick-ordered, so repeatedly taking the
@@ -371,35 +377,37 @@ begin
 
     This replaces sorting the concatenation, which would be quadratic - boss01
     alone holds tens of thousands of events. }
-  Total := 0;
-  for I := 0 to T - 1 do
-    Inc(Total, Length(Tracks[I]));
-  if Total = 0 then
+  TotalEvents := 0;
+  for EventIndex := 0 to TrackCount - 1 do
+    Inc(TotalEvents, Length(Tracks[EventIndex]));
+  if TotalEvents = 0 then
     Exit;
 
-  SetLength(FEvents, Total);
-  SetLength(Cursor, T);
-  for I := 0 to T - 1 do
-    Cursor[I] := 0;
+  SetLength(FEvents, TotalEvents);
+  SetLength(TrackCursor, TrackCount);
+  for EventIndex := 0 to TrackCount - 1 do
+    TrackCursor[EventIndex] := 0;
 
-  for I := 0 to Total - 1 do
+  for EventIndex := 0 to TotalEvents - 1 do
   begin
-    Best := -1;
+    BestTrack := -1;
     BestTick := 0;
-    for K := 0 to High(Cursor) do
-      if Cursor[K] < Length(Tracks[K]) then
-        if (Best < 0) or (Tracks[K][Cursor[K]].Tick < BestTick) then
+    for CandidateTrack := 0 to High(TrackCursor) do
+      if TrackCursor[CandidateTrack] < Length(Tracks[CandidateTrack]) then
+        if (BestTrack < 0)
+           or (Tracks[CandidateTrack][TrackCursor[CandidateTrack]].Tick
+               < BestTick) then
         begin
-          Best := K;
-          BestTick := Tracks[K][Cursor[K]].Tick;
+          BestTrack := CandidateTrack;
+          BestTick := Tracks[CandidateTrack][TrackCursor[CandidateTrack]].Tick;
         end;
-    if Best < 0 then
+    if BestTrack < 0 then
     begin
-      SetLength(FEvents, I);
+      SetLength(FEvents, EventIndex);
       Break;
     end;
-    FEvents[I] := Tracks[Best][Cursor[Best]];
-    Inc(Cursor[Best]);
+    FEvents[EventIndex] := Tracks[BestTrack][TrackCursor[BestTrack]];
+    Inc(TrackCursor[BestTrack]);
   end;
 
   ComputeTimes;

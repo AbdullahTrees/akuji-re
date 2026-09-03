@@ -73,43 +73,43 @@ const
 var
   Dir: string;
 
-  function Looks(const FN: string): Boolean;
+  function LooksLikeOriginal(const FileName: string): Boolean;
   var
-    F: TFileStream;
-    Buf: array[0..15] of Char;
+    Stream: TFileStream;
+    Buffer: array[0..15] of Char;
   begin
     Result := False;
-    if not FileExists(FN) then
+    if not FileExists(FileName) then
       Exit;
-    F := TFileStream.Create(FN, fmOpenRead or fmShareDenyNone);
+    Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
     try
-      if F.Size <> ORIGINAL_BYTES then
+      if Stream.Size <> ORIGINAL_BYTES then
         Exit;
       { 0x004568BC in the CODE section: VA - 0x400C00 is the file offset. }
-      F.Position := $004568BC - $00400C00;
-      F.ReadBuffer(Buf, SizeOf(Buf));
-      Result := Buf = ' was recovered! ';
+      Stream.Position := $004568BC - $00400C00;
+      Stream.ReadBuffer(Buffer, SizeOf(Buffer));
+      Result := Buffer = ' was recovered! ';
     finally
-      F.Free;
+      Stream.Free;
     end;
   end;
 
 begin
   Dir := IncludeTrailingPathDelimiter(GameDir);
   Result := Dir + 'akuji_source.exe';
-  if Looks(Result) then
+  if LooksLikeOriginal(Result) then
     Exit;
   Result := Dir + 'akuji.exe';
-  if Looks(Result) then
+  if LooksLikeOriginal(Result) then
     Exit;
   Result := '';
 end;
 
 function SelfTestArchive(Log: TStrings): Integer;
 var
-  A: TQdaArchive;
-  I: Integer;
-  Raw: TMemoryStream;
+  Archive: TQdaArchive;
+  EntryIndex: Integer;
+  RawData: TMemoryStream;
   OutDir: string;
 begin
   Result := 0;
@@ -117,40 +117,42 @@ begin
   if ParamCount >= 3 then
     OutDir := IncludeTrailingPathDelimiter(ParamStr(3));
 
-  A := TQdaArchive.Create(ParamStr(2));
+  Archive := TQdaArchive.Create(ParamStr(2));
   try
     Log.Add(Format('archive: %s', [ParamStr(2)]));
-    Log.Add(Format('entries: %d', [A.Count]));
-    for I := 0 to A.Count - 1 do
+    Log.Add(Format('entries: %d', [Archive.Count]));
+    for EntryIndex := 0 to Archive.Count - 1 do
     begin
       Log.Add(Format('%-18s off=%-9d size=%d',
-        [A.Entries[I].Name, A.Entries[I].Offset, A.Entries[I].Size]));
+        [Archive.Entries[EntryIndex].Name, Archive.Entries[EntryIndex].Offset,
+         Archive.Entries[EntryIndex].Size]));
       if OutDir <> '' then
       begin
-        Raw := TMemoryStream.Create;
+        RawData := TMemoryStream.Create;
         try
-          A.LoadRaw(I, Raw);
-          Raw.SaveToFile(OutDir + A.Entries[I].Name);
+          Archive.LoadRaw(EntryIndex, RawData);
+          RawData.SaveToFile(OutDir + Archive.Entries[EntryIndex].Name);
         finally
-          Raw.Free;
+          RawData.Free;
         end;
       end;
     end;
     Log.Add('OK');
   finally
-    A.Free;
+    Archive.Free;
   end;
 end;
 
 { Additive 32-bit checksum over the decoded samples. Cheap, order-sensitive,
   and trivial to reproduce in another language - which is the whole point. }
-function SampleChecksum(const W: TWaveData): LongWord;
+function SampleChecksum(const Wave: TWaveData): LongWord;
 var
-  I: Integer;
+  SampleIndex: Integer;
 begin
   Result := 0;
-  for I := 0 to High(W.Samples) do
-    Result := ((Result shl 1) or (Result shr 31)) xor LongWord(Word(W.Samples[I]));
+  for SampleIndex := 0 to High(Wave.Samples) do
+    Result := ((Result shl 1) or (Result shr 31))
+      xor LongWord(Word(Wave.Samples[SampleIndex]));
 end;
 
 { --selftest-audio <gamedir> [outdir] : the sound-effect path.
@@ -161,9 +163,9 @@ end;
 function SelfTestAudio(Log: TStrings): Integer;
 var
   GameDir, OutDir, Path: string;
-  I, Ok, Missing: Integer;
-  W: TWaveData;
-  F: TFileStream;
+  SoundIndex, DecodedCount, MissingCount: Integer;
+  Wave: TWaveData;
+  Stream: TFileStream;
 begin
   Result := 0;
   GameDir := ParamStr(2);
@@ -176,48 +178,53 @@ begin
   Log.Add('');
   Log.Add('idx name              rate  bits ch  samples     ms  checksum');
 
-  Ok := 0;
-  Missing := 0;
-  for I := 0 to SOUND_COUNT - 1 do
+  DecodedCount := 0;
+  MissingCount := 0;
+  for SoundIndex := 0 to SOUND_COUNT - 1 do
   begin
-    Path := SoundPath(GameDir, I);
-    if not LoadWave(Path, W) then
+    Path := SoundPath(GameDir, SoundIndex);
+    if not LoadWave(Path, Wave) then
     begin
       Log.Add(Format('%3d %-17s MISSING OR UNDECODABLE (%s)',
-        [I, SoundNames[I], Path]));
-      Inc(Missing);
+        [SoundIndex, SoundNames[SoundIndex], Path]));
+      Inc(MissingCount);
       Continue;
     end;
-    Inc(Ok);
+    Inc(DecodedCount);
     Log.Add(Format('%3d %-17s %5d %5d %2d %8d %6d  %8.8x',
-      [I, SoundNames[I], W.SourceRate, W.SourceBits, W.SourceChannels,
-       Length(W.Samples), WaveDurationMs(W), SampleChecksum(W)]));
+      [SoundIndex, SoundNames[SoundIndex], Wave.SourceRate, Wave.SourceBits,
+       Wave.SourceChannels, Length(Wave.Samples), WaveDurationMs(Wave),
+       SampleChecksum(Wave)]));
 
-    if (OutDir <> '') and (Length(W.Samples) > 0) then
+    if (OutDir <> '') and (Length(Wave.Samples) > 0) then
     begin
-      F := TFileStream.Create(Format('%s%.2d.pcm', [OutDir, I]), fmCreate);
+      Stream := TFileStream.Create(
+        Format('%s%.2d.pcm', [OutDir, SoundIndex]), fmCreate);
       try
-        F.WriteBuffer(W.Samples[0], Length(W.Samples) * SizeOf(SmallInt));
+        Stream.WriteBuffer(Wave.Samples[0],
+          Length(Wave.Samples) * SizeOf(SmallInt));
       finally
-        F.Free;
+        Stream.Free;
       end;
     end;
   end;
 
   Log.Add('');
-  Log.Add(Format('decoded %d of %d, %d missing', [Ok, SOUND_COUNT, Missing]));
-  if Ok = 0 then
+  Log.Add(Format('decoded %d of %d, %d missing',
+    [DecodedCount, SOUND_COUNT, MissingCount]));
+  if DecodedCount = 0 then
     Log.Add('FAILED: nothing decoded at all - wrong game directory?');
 
   { The original's attenuation curve, tabulated so it can be checked against
     the disassembly by hand: SetVolume((10 - v) * -0x1C2), hundredths of a dB. }
   Log.Add('');
   Log.Add('volume curve (settings +0x24 -> DirectSound mB -> linear gain):');
-  for I := 0 to VOLUME_MAX do
+  for SoundIndex := 0 to VOLUME_MAX do
     Log.Add(Format('  v=%2d  %6d mB  gain %.5f',
-      [I, (VOLUME_MAX - I) * VOLUME_STEP_MB, VolumeToGain(I) / 65536.0]));
+      [SoundIndex, (VOLUME_MAX - SoundIndex) * VOLUME_STEP_MB,
+       VolumeToGain(SoundIndex) / 65536.0]));
 
-  if Missing > 0 then
+  if MissingCount > 0 then
     Result := 1
   else
     Log.Add('OK');
@@ -240,10 +247,10 @@ const
     'end05');
 var
   GameDir, Path: string;
-  I, J, Bad: Integer;
-  M: TMidiFile;
-  Ev: TMidiEvent;
-  Sum: LongWord;
+  TrackIndex, EventIndex, FailedCount: Integer;
+  Midi: TMidiFile;
+  MidiEvent: TMidiEvent;
+  Checksum: LongWord;
 begin
   Result := 0;
   GameDir := IncludeTrailingPathDelimiter(ParamStr(2));
@@ -251,39 +258,42 @@ begin
   Log.Add('');
   Log.Add('name        fmt trks  div   events   ms  checksum');
 
-  Bad := 0;
-  M := TMidiFile.Create;
+  FailedCount := 0;
+  Midi := TMidiFile.Create;
   try
-    for I := 0 to High(PLAYLIST) do
+    for TrackIndex := 0 to High(PLAYLIST) do
     begin
-      Path := GameDir + 'midi' + PathDelim + PLAYLIST[I] + '.mid';
-      if not M.LoadFromFile(Path) then
+      Path := GameDir + 'midi' + PathDelim + PLAYLIST[TrackIndex] + '.mid';
+      if not Midi.LoadFromFile(Path) then
       begin
-        Log.Add(Format('%-11s PARSE FAILED (%s)', [PLAYLIST[I], Path]));
-        Inc(Bad);
+        Log.Add(Format('%-11s PARSE FAILED (%s)',
+          [PLAYLIST[TrackIndex], Path]));
+        Inc(FailedCount);
         Continue;
       end;
 
-      Sum := 0;
-      for J := 0 to M.Count - 1 do
+      Checksum := 0;
+      for EventIndex := 0 to Midi.Count - 1 do
       begin
-        Ev := M[J];
-        Sum := ((Sum shl 1) or (Sum shr 31)) xor Ev.Tick;
-        Sum := ((Sum shl 1) or (Sum shr 31)) xor Ev.Msg;
-        Sum := ((Sum shl 1) or (Sum shr 31)) xor LongWord(Ord(Ev.Kind));
+        MidiEvent := Midi[EventIndex];
+        Checksum := ((Checksum shl 1) or (Checksum shr 31)) xor MidiEvent.Tick;
+        Checksum := ((Checksum shl 1) or (Checksum shr 31)) xor MidiEvent.Msg;
+        Checksum := ((Checksum shl 1) or (Checksum shr 31))
+          xor LongWord(Ord(MidiEvent.Kind));
       end;
 
       Log.Add(Format('%-11s %3d %4d %4d %8d %6d  %8.8x',
-        [PLAYLIST[I], M.Format, M.TrackCount, M.Division, M.Count,
-         M.DurationUs div 1000, Sum]));
+        [PLAYLIST[TrackIndex], Midi.Format, Midi.TrackCount, Midi.Division,
+         Midi.Count, Midi.DurationUs div 1000, Checksum]));
     end;
   finally
-    M.Free;
+    Midi.Free;
   end;
 
   Log.Add('');
-  Log.Add(Format('parsed %d of %d', [Length(PLAYLIST) - Bad, Length(PLAYLIST)]));
-  if Bad > 0 then
+  Log.Add(Format('parsed %d of %d',
+    [Length(PLAYLIST) - FailedCount, Length(PLAYLIST)]));
+  if FailedCount > 0 then
     Result := 1
   else
     Log.Add('OK');

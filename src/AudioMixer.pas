@@ -157,11 +157,11 @@ end;
   the whole of it. }
 function TAudioMixer.LoadAll(const AGameDir: string): Integer;
 var
-  I: Integer;
+  SoundIndex: Integer;
 begin
   Result := 0;
-  for I := 0 to SOUND_COUNT - 1 do
-    if LoadWave(SoundPath(AGameDir, I), FWaves[I]) then
+  for SoundIndex := 0 to SOUND_COUNT - 1 do
+    if LoadWave(SoundPath(AGameDir, SoundIndex), FWaves[SoundIndex]) then
       Inc(Result);
 end;
 
@@ -173,11 +173,11 @@ end;
 
 function TAudioMixer.Loaded: Integer;
 var
-  I: Integer;
+  SoundIndex: Integer;
 begin
   Result := 0;
-  for I := 0 to SOUND_COUNT - 1 do
-    if Length(FWaves[I].Samples) > 0 then
+  for SoundIndex := 0 to SOUND_COUNT - 1 do
+    if Length(FWaves[SoundIndex].Samples) > 0 then
       Inc(Result);
 end;
 
@@ -214,14 +214,14 @@ end;
 
 procedure TAudioMixer.StopAll;
 var
-  I: Integer;
+  SoundIndex: Integer;
 begin
   FLock.Acquire;
   try
-    for I := 0 to SOUND_COUNT - 1 do
+    for SoundIndex := 0 to SOUND_COUNT - 1 do
     begin
-      FVoices[I].Playing := False;
-      FVoices[I].Pos := 0;
+      FVoices[SoundIndex].Playing := False;
+      FVoices[SoundIndex].Pos := 0;
     end;
   finally
     FLock.Release;
@@ -235,9 +235,9 @@ end;
 
 procedure TAudioMixer.MixInto(Dest: PSmallInt; Frames: Integer);
 var
-  Acc: array of Integer;
-  I, F, N, Take, Gain, V: Integer;
-  Src: TSampleArray;
+  Accumulator: array of Integer;
+  SoundIndex, FrameIndex, SampleCount, FramesToMix, Gain, V: Integer;
+  Samples: TSampleArray;
 begin
   if Frames <= 0 then
     Exit;
@@ -245,43 +245,44 @@ begin
   { Accumulate in 32 bits so that several loud effects at once cannot wrap;
     clamp once at the end. Mixing straight into the 16-bit buffer is the
     classic way to get crackle on a busy frame. }
-  SetLength(Acc, Frames);
-  FillChar(Acc[0], Frames * SizeOf(Integer), 0);
+  SetLength(Accumulator, Frames);
+  FillChar(Accumulator[0], Frames * SizeOf(Integer), 0);
 
   FLock.Acquire;
   try
     Gain := FGain;
-    for I := 0 to SOUND_COUNT - 1 do
+    for SoundIndex := 0 to SOUND_COUNT - 1 do
     begin
-      if not FVoices[I].Playing then
+      if not FVoices[SoundIndex].Playing then
         Continue;
-      Src := FWaves[I].Samples;
-      N := Length(Src);
-      if N = 0 then
+      Samples := FWaves[SoundIndex].Samples;
+      SampleCount := Length(Samples);
+      if SampleCount = 0 then
       begin
-        FVoices[I].Playing := False;
+        FVoices[SoundIndex].Playing := False;
         Continue;
       end;
 
-      F := 0;
-      while F < Frames do
+      FrameIndex := 0;
+      while FrameIndex < Frames do
       begin
-        Take := N - FVoices[I].Pos;
-        if Take > Frames - F then
-          Take := Frames - F;
-        if Take <= 0 then
+        FramesToMix := SampleCount - FVoices[SoundIndex].Pos;
+        if FramesToMix > Frames - FrameIndex then
+          FramesToMix := Frames - FrameIndex;
+        if FramesToMix <= 0 then
           Break;
-        for V := 0 to Take - 1 do
-          Inc(Acc[F + V], Src[FVoices[I].Pos + V]);
-        Inc(F, Take);
-        Inc(FVoices[I].Pos, Take);
-        if FVoices[I].Pos >= N then
+        for V := 0 to FramesToMix - 1 do
+          Inc(Accumulator[FrameIndex + V],
+              Samples[FVoices[SoundIndex].Pos + V]);
+        Inc(FrameIndex, FramesToMix);
+        Inc(FVoices[SoundIndex].Pos, FramesToMix);
+        if FVoices[SoundIndex].Pos >= SampleCount then
         begin
-          if FVoices[I].Loop then
-            FVoices[I].Pos := 0
+          if FVoices[SoundIndex].Loop then
+            FVoices[SoundIndex].Pos := 0
           else
           begin
-            FVoices[I].Playing := False;
+            FVoices[SoundIndex].Playing := False;
             Break;
           end;
         end;
@@ -291,16 +292,16 @@ begin
     FLock.Release;
   end;
 
-  for F := 0 to Frames - 1 do
+  for FrameIndex := 0 to Frames - 1 do
   begin
-    V := (Acc[F] * Gain) div 65536;
+    V := (Accumulator[FrameIndex] * Gain) div 65536;
     if V > 32767 then
       V := 32767
     else if V < -32768 then
       V := -32768;
     { Mono source duplicated to both output channels. }
-    Dest[F * MIX_CHANNELS] := V;
-    Dest[F * MIX_CHANNELS + 1] := V;
+    Dest[FrameIndex * MIX_CHANNELS] := V;
+    Dest[FrameIndex * MIX_CHANNELS + 1] := V;
   end;
 end;
 

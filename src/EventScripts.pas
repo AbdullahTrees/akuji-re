@@ -2,7 +2,7 @@
   Load_Event_Scripts @ 0x00465B50, the only reader of either file:
 
       data\ev%.03d.dat   the event table, CSV
-      data	k%.03d.dat   the dialogue, one line per string
+      data\tk%.03d.dat   the dialogue, one line per string
 
   THE FIELD ORDER IN THE FILE IS NOT THE ORDER IN THE RECORD. The loader
   scatters 7 CSV fields into a 0x24-byte record:
@@ -101,8 +101,8 @@ type
     function Load(const ADataDir: string; StageIndex: Integer): Integer;
 
     procedure SetActive(Index: Integer; Value: Boolean);
-    { EntityUpdate_Type15_Switch's throw. Distinct from Disable, which also moves the
-      record off the map - a thrown switch keeps its tile and its entity. }
+    { EntityUpdate_Type15_Switch's throw. Distinct from Disable, which also
+      moves the record off the map: a thrown switch keeps its tile and entity. }
     procedure SetOpcode(Index, Value: Integer);
     procedure SetInWindow(Index: Integer; Value: Boolean);
     procedure SetEntity(Index, Slot: Integer);
@@ -218,54 +218,54 @@ end;
   and the dialogue - which is why one routine covers both. }
 function TEventScript.Load(const ADataDir: string; StageIndex: Integer): Integer;
 var
-  Src, Fields: TStringList;
-  Base, FileName: string;
-  I, N: Integer;
+  SourceLines, Fields: TStringList;
+  DataPath, FileName: string;
+  LineIndex, EventCount: Integer;
 begin
   SetLength(FEvents, 0);
   FLines.Clear;
-  Base := IncludeTrailingPathDelimiter(ADataDir) + 'data' + PathDelim;
+  DataPath := IncludeTrailingPathDelimiter(ADataDir) + 'data' + PathDelim;
 
-  Src := TStringList.Create;
+  SourceLines := TStringList.Create;
   Fields := TStringList.Create;
   try
-    FileName := Base + Format('ev%.3d.dat', [StageIndex]);
+    FileName := DataPath + Format('ev%.3d.dat', [StageIndex]);
     if FileExists(FileName) then
     begin
-      Src.LoadFromFile(FileName);
-      N := 0;
-      SetLength(FEvents, Src.Count);
-      for I := 0 to Src.Count - 1 do
+      SourceLines.LoadFromFile(FileName);
+      EventCount := 0;
+      SetLength(FEvents, SourceLines.Count);
+      for LineIndex := 0 to SourceLines.Count - 1 do
       begin
-        if Trim(Src[I]) = '' then
+        if Trim(SourceLines[LineIndex]) = '' then
           Continue;
         { The original sets .CommaText, exactly as the other CSV loaders do. }
-        Fields.CommaText := Src[I];
+        Fields.CommaText := SourceLines[LineIndex];
         if Fields.Count < EVENT_CSV_FIELDS then
           Continue;
 
-        FEvents[N].Opcode  := StrToIntDef(Trim(Fields[0]), 0);
-        FEvents[N].NeedsFlag := StrToIntDef(Trim(Fields[1]), 0);
-        FEvents[N].BlockedBy := StrToIntDef(Trim(Fields[2]), 0);
-        FEvents[N].TileX := StrToIntDef(Trim(Fields[3]), 0);
-        FEvents[N].TileY := StrToIntDef(Trim(Fields[4]), 0);
-        FEvents[N].ParamA  := Fields[5];
-        FEvents[N].ParamB  := Fields[6];
-        FEvents[N].Active  := False;
-        Inc(N);
+        FEvents[EventCount].Opcode  := StrToIntDef(Trim(Fields[0]), 0);
+        FEvents[EventCount].NeedsFlag := StrToIntDef(Trim(Fields[1]), 0);
+        FEvents[EventCount].BlockedBy := StrToIntDef(Trim(Fields[2]), 0);
+        FEvents[EventCount].TileX := StrToIntDef(Trim(Fields[3]), 0);
+        FEvents[EventCount].TileY := StrToIntDef(Trim(Fields[4]), 0);
+        FEvents[EventCount].ParamA  := Fields[5];
+        FEvents[EventCount].ParamB  := Fields[6];
+        FEvents[EventCount].Active  := False;
+        Inc(EventCount);
       end;
-      SetLength(FEvents, N);
+      SetLength(FEvents, EventCount);
     end;
 
     { The dialogue file is read straight into a string list - the original
       copies one string per line with no parsing at all. Its escape codes
       (\n, \e, \k, \w) are the consumer's problem, not the loader's. }
-    FileName := Base + Format('tk%.3d.dat', [StageIndex]);
+    FileName := DataPath + Format('tk%.3d.dat', [StageIndex]);
     if FileExists(FileName) then
       FLines.LoadFromFile(FileName);
   finally
     Fields.Free;
-    Src.Free;
+    SourceLines.Free;
   end;
 
   Result := Length(FEvents);
@@ -273,17 +273,17 @@ end;
 
 function ProgressIndexOf(const ParamB: string): Integer;
 var
-  Head: string;
-  I: Integer;
+  Prefix: string;
+  CharacterIndex: Integer;
 begin
   Result := -1;
   if Length(ParamB) < 4 then
     Exit;
-  Head := Copy(ParamB, 1, 4);
-  for I := 1 to 4 do
-    if not (Head[I] in ['0'..'9']) then
+  Prefix := Copy(ParamB, 1, 4);
+  for CharacterIndex := 1 to 4 do
+    if not (Prefix[CharacterIndex] in ['0'..'9']) then
       Exit;
-  Result := StrToIntDef(Head, -1);
+  Result := StrToIntDef(Prefix, -1);
 end;
 
 end.

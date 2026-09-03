@@ -1,14 +1,11 @@
 { TDDDD - display surface component.
 
-  STUB - DIVERGENCE DIV-008. Does nothing yet. Its only job right now is to
-  exist with the exact
-  published interface GmMain.lfm expects, so the form can load and the project
-  can build.
-
   The original was a third-party Delphi DirectDraw component. This is NOT a
   reconstruction of it - it is a fresh implementation of the same published
-  interface, backed by LCL (later SDL2). Only the properties and events the game
-  actually uses are needed; those are exactly what the form resource lists. }
+  interface, backed by LCL. Clear, drawing, presentation and fades are
+  implemented; DIV-008 records the remaining hardware/component differences.
+  Only properties and events used by the game are exposed, exactly as listed
+  by the form resource. }
 
 unit DDDDComponent;
 
@@ -250,7 +247,7 @@ end;
   Reproduced. }
 procedure TDDDD.ApplyFade;
 var
-  L, W, H: Integer;
+  Level, Width, Height: Integer;
 begin
   { The painter alone. TickFade owns the guards, because the original's
     single Fader_Tick draws and advances inside one `busy` and mode-0 test -
@@ -259,16 +256,16 @@ begin
     drives a bare component with no screen behind it. }
   if (FSurface = nil) or (FSurface.Width = 0) or (FSurface.Height = 0) then
     Exit;
-  L := FFadeLevel;
-  if L <= 0 then
+  Level := FFadeLevel;
+  if Level <= 0 then
     Exit;
-  W := FSurface.Width;
-  H := FSurface.Height;
+  Width := FSurface.Width;
+  Height := FSurface.Height;
   FSurface.Canvas.Brush.Color := clBlack;
-  FSurface.Canvas.FillRect(0, 0, L, H);          { left }
-  FSurface.Canvas.FillRect(W - L, 0, W, H);      { right }
-  FSurface.Canvas.FillRect(0, 0, W, L);          { top }
-  FSurface.Canvas.FillRect(0, H - L, W, H);      { bottom }
+  FSurface.Canvas.FillRect(0, 0, Level, Height);              { left }
+  FSurface.Canvas.FillRect(Width - Level, 0, Width, Height);  { right }
+  FSurface.Canvas.FillRect(0, 0, Width, Level);                { top }
+  FSurface.Canvas.FillRect(0, Height - Level, Width, Height);  { bottom }
 end;
 
 procedure TDDDD.Present;

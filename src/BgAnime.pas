@@ -87,7 +87,7 @@ implementation
 
 constructor TBgAnime.Create(AMap: TTileMap; const Anim: TTerrainAnim);
 var
-  T, F: Integer;
+  TrackIndex, FrameIndex: Integer;
 begin
   inherited Create;
   FMap := AMap;
@@ -95,25 +95,26 @@ begin
   if FCount > TERRAIN_ANIM_TRACKS then
     FCount := TERRAIN_ANIM_TRACKS;
 
-  for T := 0 to FCount - 1 do
+  for TrackIndex := 0 to FCount - 1 do
   begin
-    FTracks[T].TileId := Anim.Tracks[T].TileId;
-    FTracks[T].FrameCount := Anim.Tracks[T].FrameCount;
-    FTracks[T].Cursor := 0;
-    FTracks[T].Timer := 0;
-    for F := 0 to TERRAIN_ANIM_FRAMES - 1 do
-      FTracks[T].Frames[F] := Anim.Tracks[T].Frames[F];
+    FTracks[TrackIndex].TileId := Anim.Tracks[TrackIndex].TileId;
+    FTracks[TrackIndex].FrameCount := Anim.Tracks[TrackIndex].FrameCount;
+    FTracks[TrackIndex].Cursor := 0;
+    FTracks[TrackIndex].Timer := 0;
+    for FrameIndex := 0 to TERRAIN_ANIM_FRAMES - 1 do
+      FTracks[TrackIndex].Frames[FrameIndex] :=
+        Anim.Tracks[TrackIndex].Frames[FrameIndex];
   end;
 end;
 
 procedure TBgAnime.Restart;
 var
-  T: Integer;
+  TrackIndex: Integer;
 begin
-  for T := 0 to FCount - 1 do
+  for TrackIndex := 0 to FCount - 1 do
   begin
-    FTracks[T].Cursor := 0;
-    FTracks[T].Timer := 0;
+    FTracks[TrackIndex].Cursor := 0;
+    FTracks[TrackIndex].Timer := 0;
   end;
 end;
 
@@ -133,35 +134,35 @@ end;
 
 procedure TBgAnime.Tick;
 var
-  T, F, SrcTile: Integer;
+  TrackIndex, FrameIndex, SourceTile: Integer;
 begin
   if FMap = nil then
     Exit;
 
-  for T := 0 to FCount - 1 do
+  for TrackIndex := 0 to FCount - 1 do
   begin
-    Dec(FTracks[T].Timer);
-    if FTracks[T].Timer >= 1 then
+    Dec(FTracks[TrackIndex].Timer);
+    if FTracks[TrackIndex].Timer >= 1 then
       Continue;
 
-    F := FTracks[T].Cursor;
-    if (F < 0) or (F >= TERRAIN_ANIM_FRAMES) then
-      F := 0;
+    FrameIndex := FTracks[TrackIndex].Cursor;
+    if (FrameIndex < 0) or (FrameIndex >= TERRAIN_ANIM_FRAMES) then
+      FrameIndex := 0;
 
     { The frame's picture is another tile's cell. Stages.pas stores the frames
       as tile IDS because that is what the data means; the original stores the
       coordinates it computed from them, and --selftest-stages checks the two
       agree over all thirty frames. }
-    SrcTile := FTracks[T].Frames[F];
-    FMap.DefineTile(FTracks[T].TileId,
-                    TileSrcY(SrcTile, FMap.TileHeight, FMap.SheetCols),
-                    TileSrcX(SrcTile, FMap.TileWidth, FMap.SheetCols));
+    SourceTile := FTracks[TrackIndex].Frames[FrameIndex];
+    FMap.DefineTile(FTracks[TrackIndex].TileId,
+                    TileSrcY(SourceTile, FMap.TileHeight, FMap.SheetCols),
+                    TileSrcX(SourceTile, FMap.TileWidth, FMap.SheetCols));
 
-    FTracks[T].Timer := TERRAIN_ANIM_TICKS;
+    FTracks[TrackIndex].Timer := TERRAIN_ANIM_TICKS;
 
-    Inc(FTracks[T].Cursor);
-    if FTracks[T].Cursor >= FTracks[T].FrameCount then
-      FTracks[T].Cursor := 0;
+    Inc(FTracks[TrackIndex].Cursor);
+    if FTracks[TrackIndex].Cursor >= FTracks[TrackIndex].FrameCount then
+      FTracks[TrackIndex].Cursor := 0;
   end;
 end;
 

@@ -74,17 +74,17 @@ end;
 function TMidiOutDevice.Open: Boolean;
 {$IFDEF WINDOWS}
 var
-  Res: MMRESULT;
+  OpenResult: MMRESULT;
 {$ENDIF}
 begin
   Result := False;
   if FActive then
     Exit(True);
 {$IFDEF WINDOWS}
-  Res := midiOutOpen(@FHandle, MIDI_MAPPER, 0, 0, 0);
-  if Res <> MMSYSERR_NOERROR then
+  OpenResult := midiOutOpen(@FHandle, MIDI_MAPPER, 0, 0, 0);
+  if OpenResult <> MMSYSERR_NOERROR then
   begin
-    FLastError := Format('midiOutOpen failed (%d)', [Res]);
+    FLastError := Format('midiOutOpen failed (%d)', [OpenResult]);
     Exit;
   end;
   FActive := True;
@@ -119,9 +119,9 @@ end;
 procedure TMidiOutDevice.SendSysEx(const B: TBytes);
 {$IFDEF WINDOWS}
 var
-  Hdr: TMIDIHDR;
-  Buf: PChar;
-  Waited: Integer;
+  Header: TMIDIHDR;
+  Buffer: PChar;
+  WaitedMs: Integer;
 {$ENDIF}
 begin
 {$IFDEF WINDOWS}
@@ -132,33 +132,34 @@ begin
     prepared until MHDR_DONE comes back. The game sends exactly three SysEx
     messages, all in init.mid at startup, so a bounded wait here costs nothing
     and is far simpler than a completion callback. }
-  GetMem(Buf, Length(B));
+  GetMem(Buffer, Length(B));
   try
-    Move(B[0], Buf^, Length(B));
-    FillChar(Hdr, SizeOf(Hdr), 0);
-    Hdr.lpData := Buf;
-    Hdr.dwBufferLength := Length(B);
-    if midiOutPrepareHeader(FHandle, @Hdr, SizeOf(Hdr)) <> MMSYSERR_NOERROR then
+    Move(B[0], Buffer^, Length(B));
+    FillChar(Header, SizeOf(Header), 0);
+    Header.lpData := Buffer;
+    Header.dwBufferLength := Length(B);
+    if midiOutPrepareHeader(FHandle, @Header,
+                            SizeOf(Header)) <> MMSYSERR_NOERROR then
       Exit;
-    if midiOutLongMsg(FHandle, @Hdr, SizeOf(Hdr)) = MMSYSERR_NOERROR then
+    if midiOutLongMsg(FHandle, @Header, SizeOf(Header)) = MMSYSERR_NOERROR then
     begin
-      Waited := 0;
-      while ((Hdr.dwFlags and MHDR_DONE) = 0) and (Waited < 500) do
+      WaitedMs := 0;
+      while ((Header.dwFlags and MHDR_DONE) = 0) and (WaitedMs < 500) do
       begin
         Sleep(1);
-        Inc(Waited);
+        Inc(WaitedMs);
       end;
     end;
-    midiOutUnprepareHeader(FHandle, @Hdr, SizeOf(Hdr));
+    midiOutUnprepareHeader(FHandle, @Header, SizeOf(Header));
   finally
-    FreeMem(Buf);
+    FreeMem(Buffer);
   end;
 {$ENDIF}
 end;
 
 procedure TMidiOutDevice.Reset;
 var
-  Ch: Integer;
+  Channel: Integer;
 begin
   if not FActive then
     Exit;
@@ -168,10 +169,12 @@ begin
 {$IFDEF WINDOWS}
   midiOutReset(FHandle);
 {$ENDIF}
-  for Ch := 0 to MIDI_CHANNELS - 1 do
+  for Channel := 0 to MIDI_CHANNELS - 1 do
   begin
-    Send(LongWord($B0 or Ch) or (LongWord(CC_ALL_SOUND_OFF) shl 8));
-    Send(LongWord($B0 or Ch) or (LongWord(CC_ALL_NOTES_OFF) shl 8));
+    Send(LongWord($B0 or Channel)
+         or (LongWord(CC_ALL_SOUND_OFF) shl 8));
+    Send(LongWord($B0 or Channel)
+         or (LongWord(CC_ALL_NOTES_OFF) shl 8));
   end;
 end;
 

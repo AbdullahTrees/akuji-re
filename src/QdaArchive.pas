@@ -93,35 +93,35 @@ end;
 procedure TQdaArchive.ReadDirectory;
 var
   Magic: array[0..3] of AnsiChar;
-  Count_, I, Accounted: LongWord;
-  NameBuf: array[0..QDA_NAME_SIZE - 1] of AnsiChar;
+  EntryCount, EntryIndex, AccountedSize: LongWord;
+  NameBuffer: array[0..QDA_NAME_SIZE - 1] of AnsiChar;
 begin
   FStream.Position := 4;
   FStream.ReadBuffer(Magic, 4);
   if Magic <> QDA_MAGIC then
     raise EQdaError.CreateFmt('not a QDA0 archive (magic "%s")', [Magic]);
 
-  Count_ := FStream.ReadDWord;
-  SetLength(FEntries, Count_);
+  EntryCount := FStream.ReadDWord;
+  SetLength(FEntries, EntryCount);
 
-  Accounted := QDA_DIR_OFFSET + Count_ * QDA_ENTRY_SIZE;
-  for I := 0 to Count_ - 1 do
+  AccountedSize := QDA_DIR_OFFSET + EntryCount * QDA_ENTRY_SIZE;
+  for EntryIndex := 0 to EntryCount - 1 do
   begin
-    FStream.Position := QDA_DIR_OFFSET + I * QDA_ENTRY_SIZE;
-    FEntries[I].Offset := FStream.ReadDWord;
-    FEntries[I].Size   := FStream.ReadDWord;
+    FStream.Position := QDA_DIR_OFFSET + EntryIndex * QDA_ENTRY_SIZE;
+    FEntries[EntryIndex].Offset := FStream.ReadDWord;
+    FEntries[EntryIndex].Size   := FStream.ReadDWord;
     FStream.ReadDWord;   { size repeated; equal in every known archive }
-    FStream.ReadBuffer(NameBuf, QDA_NAME_SIZE);
-    FEntries[I].Name := string(PAnsiChar(@NameBuf[0]));
-    Inc(Accounted, FEntries[I].Size);
+    FStream.ReadBuffer(NameBuffer, QDA_NAME_SIZE);
+    FEntries[EntryIndex].Name := string(PAnsiChar(@NameBuffer[0]));
+    Inc(AccountedSize, FEntries[EntryIndex].Size);
   end;
 
   { The archive should account for itself exactly. If it does not, the entry
     layout has been misread and every offset below is suspect. }
-  if Accounted <> LongWord(FStream.Size) then
+  if AccountedSize <> LongWord(FStream.Size) then
     raise EQdaError.CreateFmt(
       'directory accounts for %d bytes but the file is %d - format mismatch',
-      [Accounted, FStream.Size]);
+      [AccountedSize, FStream.Size]);
 end;
 
 function TQdaArchive.GetCount: Integer;
@@ -138,51 +138,51 @@ end;
 
 function TQdaArchive.IndexOf(const AName: string): Integer;
 var
-  I: Integer;
+  EntryIndex: Integer;
 begin
-  for I := 0 to High(FEntries) do
-    if SameText(FEntries[I].Name, AName) then
-      Exit(I);
+  for EntryIndex := 0 to High(FEntries) do
+    if SameText(FEntries[EntryIndex].Name, AName) then
+      Exit(EntryIndex);
   Result := -1;
 end;
 
 procedure TQdaArchive.LoadRaw(Index: Integer; Dest: TStream);
 var
-  E: TQdaEntry;
+  Entry: TQdaEntry;
 begin
-  E := GetEntry(Index);
-  FStream.Position := E.Offset;
-  Dest.CopyFrom(FStream, E.Size);
+  Entry := GetEntry(Index);
+  FStream.Position := Entry.Offset;
+  Dest.CopyFrom(FStream, Entry.Size);
   Dest.Position := 0;
 end;
 
 function TQdaArchive.LoadBitmap(Index: Integer): TBitmap;
 var
-  Mem: TMemoryStream;
+  Buffer: TMemoryStream;
 begin
-  Mem := TMemoryStream.Create;
+  Buffer := TMemoryStream.Create;
   try
-    LoadRaw(Index, Mem);
+    LoadRaw(Index, Buffer);
     Result := TBitmap.Create;
     try
-      Result.LoadFromStream(Mem);
+      Result.LoadFromStream(Buffer);
     except
       Result.Free;
       raise;
     end;
   finally
-    Mem.Free;
+    Buffer.Free;
   end;
 end;
 
 function TQdaArchive.LoadBitmapByName(const AName: string): TBitmap;
 var
-  I: Integer;
+  EntryIndex: Integer;
 begin
-  I := IndexOf(AName);
-  if I < 0 then
+  EntryIndex := IndexOf(AName);
+  if EntryIndex < 0 then
     raise EQdaError.CreateFmt('"%s" is not in the archive', [AName]);
-  Result := LoadBitmap(I);
+  Result := LoadBitmap(EntryIndex);
 end;
 
 end.

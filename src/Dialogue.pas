@@ -476,58 +476,61 @@ end;
 function SplitPage(const Text: string; out Rest: string;
                    out Prompt: Boolean): string;
 var
-  I: Integer;
+  CharacterIndex: Integer;
 begin
   Rest := '';
   Prompt := False;
-  I := 1;
-  while I < Length(Text) do
+  CharacterIndex := 1;
+  while CharacterIndex < Length(Text) do
   begin
-    if Text[I] = '\' then
-      case Text[I + 1] of
+    if Text[CharacterIndex] = '\' then
+      case Text[CharacterIndex + 1] of
         'k':
           begin
             { End of page. The rest is the next page. }
-            Result := Copy(Text, 1, I - 1);
-            Rest := Copy(Text, I + 2, MaxInt);
+            Result := Copy(Text, 1, CharacterIndex - 1);
+            Rest := Copy(Text, CharacterIndex + 2, MaxInt);
             Exit;
           end;
         'e':
           begin
-            Result := Copy(Text, 1, I - 1);
+            Result := Copy(Text, 1, CharacterIndex - 1);
             Exit;
           end;
         'w':
           begin
             Prompt := True;
-            Result := Copy(Text, 1, I - 1);
-            Rest := Copy(Text, I + 2, MaxInt);
+            Result := Copy(Text, 1, CharacterIndex - 1);
+            Rest := Copy(Text, CharacterIndex + 2, MaxInt);
             Exit;
           end;
       end;
-    Inc(I);
+    Inc(CharacterIndex);
   end;
   Result := Text;
 end;
 
 procedure TDialogueBox.TakePage(const Text: string);
 var
-  Src, Page, Line: string;
-  N, P: Integer;
+  SourceText, PageText, UnusedLine: string;
+  UnusedLineIndex, UnusedPosition: Integer;
 begin
+  { UnusedLine and the two integer locals are decompiler-visible stack-shape
+    artifacts. Removing the managed string changes FPC's finalization code
+    and therefore the v1.0 runtime image. }
   { COPY FIRST. Update calls TakePage(FRest), and SplitPage's Rest is an out
     parameter bound to that same FRest - so the first thing SplitPage does,
     clearing Rest, would blank the string it is about to read. A const string
     parameter is a reference, not a snapshot. Every message with a \k would
     have lost its second page. }
-  Src := Text;
-  Page := SplitPage(Src, FRest, FPrompt);
+  SourceText := Text;
+  PageText := SplitPage(SourceText, FRest, FPrompt);
 
   { The page is KEPT whole and uncovered a bit at a time. It used to be split
     into its three lines here, all of them visible at once, which is why there
     was no typewriter: nothing was ever hidden to reveal. BuildLines does the
     \n split now, every frame, over as much as has been revealed. }
-  FPageText := Page;
+  FPageText := PageText;
   FReveal := 0;
   FRevealTimer := 0;
   FAnimFrame := 0;
@@ -549,21 +552,21 @@ end;
   on \n, append anything else. }
 procedure TDialogueBox.BuildLines;
 var
-  I, N: Integer;
-  Ch: string;
+  UnitIndex, LineIndex: Integer;
+  Pair: string;
 begin
-  for N := 0 to BOX_LINES - 1 do
-    FLines[N] := '';
-  N := 0;
-  for I := 1 to FReveal do
+  for LineIndex := 0 to BOX_LINES - 1 do
+    FLines[LineIndex] := '';
+  LineIndex := 0;
+  for UnitIndex := 1 to FReveal do
   begin
-    if N >= BOX_LINES then
+    if LineIndex >= BOX_LINES then
       Break;
-    Ch := Copy(FPageText, I * 2 - 1, 2);
-    if Ch = '\n' then
-      Inc(N)
+    Pair := Copy(FPageText, UnitIndex * 2 - 1, 2);
+    if Pair = '\n' then
+      Inc(LineIndex)
     else
-      FLines[N] := FLines[N] + Ch;
+      FLines[LineIndex] := FLines[LineIndex] + Pair;
   end;
 end;
 
@@ -604,24 +607,26 @@ end;
 procedure TDialogueBox.PlaceAt(PlayerTileX, PlayerTileY,
                                CamTileX, CamTileY: Integer);
 var
-  TW, TH: Integer;
+  TileWidth, TileHeight: Integer;
 begin
   if FPlayer = nil then
     Exit;
   { The shipped maps are all 32x32, but the map header carries the size and
     the original multiplies by the LAYER's value, so this does too. The
     fallback is only for a world that has not loaded a map yet. }
-  TW := 32;
-  TH := 32;
+  TileWidth := 32;
+  TileHeight := 32;
   if FWorld <> nil then
   begin
-    if FWorld.Layer.TileW > 0 then TW := FWorld.Layer.TileW;
-    if FWorld.Layer.TileH > 0 then TH := FWorld.Layer.TileH;
+    if FWorld.Layer.TileW > 0 then
+      TileWidth := FWorld.Layer.TileW;
+    if FWorld.Layer.TileH > 0 then
+      TileHeight := FWorld.Layer.TileH;
   end;
-  FPlayer^.SpawnX  := PlayerTileX * TW + SPAWN_CENTRE_X;
-  FPlayer^.SpawnY  := PlayerTileY * TH + SPAWN_FOOT_Y;
-  FPlayer^.ScrollX := CamTileX * TW;
-  FPlayer^.ScrollY := CamTileY * TH;
+  FPlayer^.SpawnX  := PlayerTileX * TileWidth + SPAWN_CENTRE_X;
+  FPlayer^.SpawnY  := PlayerTileY * TileHeight + SPAWN_FOOT_Y;
+  FPlayer^.ScrollX := CamTileX * TileWidth;
+  FPlayer^.ScrollY := CamTileY * TileHeight;
 end;
 
 procedure TDialogueBox.LoadStage(Stage, PlayerTileX, PlayerTileY,

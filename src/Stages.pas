@@ -39,7 +39,13 @@ const
   STAGE_FIELDS  = 16;   { columns in stage.dat }
   STAGE_RECORD  = 19;   { ints per record, stride 0x4C }
   STAGE_LAYERS  = 3;    { rec[2..4] maps, rec[5..7] their tilesets }
+  STAGE_SURFACE_SET = 0;
+  STAGE_SPRITE_SET  = 1;
+  STAGE_MAP         = 2;    { rec[2 + layer] }
   STAGE_TILESET = 5;    { rec[5 + layer] }
+  STAGE_TERRAIN = 18;
+  STAGE_FILE_GAP_START = 8;
+  STAGE_FILE_GAP_SIZE  = 3;
 
   { From Terrain_Configure @ 0x004645B0. Index is the terrain id 1..9; entry 0
     is the placeholder row, which the original leaves alone. }
@@ -190,12 +196,12 @@ end;
 
 function TStageTable.GetRecord(Index: Integer): TStageRecord;
 var
-  I: Integer;
+  FieldIndex: Integer;
 begin
   if (Index < 0) or (Index >= Length(FRecords)) then
   begin
-    for I := 0 to STAGE_RECORD - 1 do
-      Result.Raw[I] := 0;
+    for FieldIndex := 0 to STAGE_RECORD - 1 do
+      Result.Raw[FieldIndex] := 0;
     Exit;
   end;
   Result := FRecords[Index];
@@ -203,19 +209,19 @@ end;
 
 function TStageTable.GetSurfaceSet(Index: Integer): Integer;
 begin
-  Result := GetRecord(Index).Raw[0];
+  Result := GetRecord(Index).Raw[STAGE_SURFACE_SET];
 end;
 
 function TStageTable.GetSpriteSet(Index: Integer): Integer;
 begin
-  Result := GetRecord(Index).Raw[1];
+  Result := GetRecord(Index).Raw[STAGE_SPRITE_SET];
 end;
 
 function TStageTable.GetLayer(StageIndex, Layer: Integer): Integer;
 begin
   if (Layer < 0) or (Layer >= STAGE_LAYERS) then
     Exit(LAYER_NONE);
-  Result := GetRecord(StageIndex).Raw[2 + Layer];
+  Result := GetRecord(StageIndex).Raw[STAGE_MAP + Layer];
 end;
 
 function TStageTable.GetTileset(StageIndex, Layer: Integer): Integer;
@@ -227,7 +233,7 @@ end;
 
 function TStageTable.GetTerrainId(Index: Integer): Integer;
 begin
-  Result := GetRecord(Index).Raw[18];
+  Result := GetRecord(Index).Raw[STAGE_TERRAIN];
 end;
 
 { Load_StageTable @ 0x004669F8. }
@@ -235,8 +241,8 @@ function TStageTable.Load(const ADataDir: string): Integer;
 var
   Lines, Fields: TStringList;
   FileName: string;
-  L, F, Slot: Integer;
-  Rec: TStageRecord;
+  LineIndex, FieldIndex, RecordField: Integer;
+  Stage: TStageRecord;
 begin
   SetLength(FRecords, 0);
   FileName := IncludeTrailingPathDelimiter(ADataDir) + 'data' + PathDelim +
@@ -248,28 +254,28 @@ begin
   Fields := TStringList.Create;
   try
     Lines.LoadFromFile(FileName);
-    for L := 0 to Lines.Count - 1 do
+    for LineIndex := 0 to Lines.Count - 1 do
     begin
-      if Trim(Lines[L]) = '' then
+      if Trim(Lines[LineIndex]) = '' then
         Continue;
-      Fields.CommaText := Lines[L];
+      Fields.CommaText := Lines[LineIndex];
       if Fields.Count < STAGE_FIELDS then
         Continue;
 
-      FillChar(Rec, SizeOf(Rec), 0);
-      for F := 0 to STAGE_FIELDS - 1 do
+      FillChar(Stage, SizeOf(Stage), 0);
+      for FieldIndex := 0 to STAGE_FIELDS - 1 do
       begin
         { The original's gap: columns 8..15 land at 11..18, leaving 8..10 as
           runtime scratch. }
-        if F <= 7 then
-          Slot := F
+        if FieldIndex <= STAGE_FILE_GAP_START - 1 then
+          RecordField := FieldIndex
         else
-          Slot := F + 3;
-        Rec.Raw[Slot] := StrToIntDef(Trim(Fields[F]), 0);
+          RecordField := FieldIndex + STAGE_FILE_GAP_SIZE;
+        Stage.Raw[RecordField] := StrToIntDef(Trim(Fields[FieldIndex]), 0);
       end;
 
       SetLength(FRecords, Length(FRecords) + 1);
-      FRecords[High(FRecords)] := Rec;
+      FRecords[High(FRecords)] := Stage;
     end;
   finally
     Fields.Free;

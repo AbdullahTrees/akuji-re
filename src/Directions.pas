@@ -102,53 +102,53 @@ end;
 
 function AngleBetween(X1, Y1, X2, Y2: Integer): Integer;
 var
-  Dx, Dy, Base, Step, I: Integer;
+  DeltaX, DeltaY, BaseDirection, DirectionStep, SubStep: Integer;
 begin
-  Dx := X2 - X1;
-  Dy := Y2 - Y1;
+  DeltaX := X2 - X1;
+  DeltaY := Y2 - Y1;
 
-  if Dx < 0 then
+  if DeltaX < 0 then
   begin
-    Base := $20;
-    Dx := -Dx;
-    if Dy < 0 then
+    BaseDirection := $20;
+    DeltaX := -DeltaX;
+    if DeltaY < 0 then
     begin
-      Dy := -Dy;
-      Step := -1;
+      DeltaY := -DeltaY;
+      DirectionStep := -1;
     end
     else
-      Step := 1;
+      DirectionStep := 1;
   end
   else
   begin
-    Base := 0;
-    if Dy < 0 then
+    BaseDirection := 0;
+    if DeltaY < 0 then
     begin
-      Dy := -Dy;
-      Step := 1;
+      DeltaY := -DeltaY;
+      DirectionStep := 1;
     end
     else
-      Step := -1;
+      DirectionStep := -1;
   end;
 
   { Fourth quadrant counts down from a full turn rather than up from zero. }
-  if (Base = 0) and (Step = -1) then
-    Base := $40;
+  if (BaseDirection = 0) and (DirectionStep = -1) then
+    BaseDirection := $40;
 
-  I := 0;
-  while I <> $10 do
+  SubStep := 0;
+  while SubStep <> $10 do
   begin
     { (16 - i) * dy < (i + 1) * dx, written as a subtraction so it stays exact
       in integers. This is where dy/dx crosses the sub-step's slope. }
-    if (($10 - I) * Dy) - ((I + 1) * Dx) < 0 then
+    if (($10 - SubStep) * DeltaY) - ((SubStep + 1) * DeltaX) < 0 then
       Break;
-    Inc(Base, Step);
-    Inc(I);
+    Inc(BaseDirection, DirectionStep);
+    Inc(SubStep);
   end;
 
-  if Base > $3F then
-    Dec(Base, $40);
-  Result := Base;
+  if BaseDirection > $3F then
+    Dec(BaseDirection, $40);
+  Result := BaseDirection;
 end;
 
 procedure TurnToward(var Facing: Integer; Target: Integer);

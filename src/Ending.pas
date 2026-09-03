@@ -327,27 +327,27 @@ implementation
 
 function EndingPercent(Counter: Integer): Integer;
 var
-  I: Integer;
+  DeviationIndex: Integer;
 begin
   { Counter div 4 is the arithmetic the expression MEANS. It is not what the
     original computes at two of the 401 counters, so those two are named
     rather than recomputed - doing the division in Double here would land
     somewhere else again, and somewhere else is not the original either. }
   Result := Counter div 4;
-  for I := 0 to High(ENDING_PCT_DEVIATIONS) do
-    if Counter = ENDING_PCT_DEVIATIONS[I] then
+  for DeviationIndex := 0 to High(ENDING_PCT_DEVIATIONS) do
+    if Counter = ENDING_PCT_DEVIATIONS[DeviationIndex] then
       Dec(Result);
 end;
 
 function EndingRank(Counter, ElapsedSec: Integer): Integer;
 var
-  Pct: Integer;
+  CompletionPercent: Integer;
 begin
-  Pct := EndingPercent(Counter);
+  CompletionPercent := EndingPercent(Counter);
   Result := 0;
-  if Pct > RANK_PCT_1 then Result := 1;
-  if Pct > RANK_PCT_2 then Result := 2;
-  if Pct > RANK_PCT_3 then Result := 3;
+  if CompletionPercent > RANK_PCT_1 then Result := 1;
+  if CompletionPercent > RANK_PCT_2 then Result := 2;
+  if CompletionPercent > RANK_PCT_3 then Result := 3;
   { Checked AFTER the percentage gates and overriding them, so a fast run
     ranks top however little it collected. }
   if ElapsedSec <= RANK_TIME then Result := 4;
@@ -355,7 +355,7 @@ end;
 
 procedure EndingApplyUnlocks(var S: TGameSettings; const P: TPlayerState);
 var
-  Rank, I: Integer;
+  Rank, GalleryIndex: Integer;
 begin
   Rank := EndingRank(P.Counter, P.ElapsedSec);
   if Rank >= 3 then
@@ -368,9 +368,9 @@ begin
 
   { One gallery byte per progress flag, in order, and only ever set - a
     previously unlocked entry is never taken away by a worse run. }
-  for I := 0 to GALLERY_COUNT - 1 do
-    if P.Progress[GALLERY_FIRST_FLAG + I] <> 0 then
-      S.GalleryUnlocked[I] := 1;
+  for GalleryIndex := 0 to GALLERY_COUNT - 1 do
+    if P.Progress[GALLERY_FIRST_FLAG + GalleryIndex] <> 0 then
+      S.GalleryUnlocked[GalleryIndex] := 1;
 end;
 
 function EndingTimeText(ElapsedSec: Integer): string;
@@ -387,7 +387,7 @@ end;
 { Credits_Tick @ 0x004515B4, less the drawing. }
 procedure TEndingScreen.CreditsTick;
 var
-  I, Last: Integer;
+  CreditIndex, LastCredit: Integer;
   Advance: Boolean;
 begin
   Advance := False;
@@ -401,20 +401,21 @@ begin
     end;
   end;
 
-  for I := 0 to CREDITS_ENTRIES - 1 do
+  for CreditIndex := 0 to CREDITS_ENTRIES - 1 do
   begin
     if Advance then
-      Dec(CreditY[I], CREDITS_STEP);
+      Dec(CreditY[CreditIndex], CREDITS_STEP);
     { The original re-arms Advance when the LAST entry has gone off the top.
       It cannot: the roll is declared done once that entry reaches the centre,
       far below -Height. Reproduced as unreachable rather than dropped. }
-    if (I = CREDITS_ENTRIES - 1)
-    and (CreditY[I] < -CREDITS_LAYOUT[I][CREDITS_H]) then
+    if (CreditIndex = CREDITS_ENTRIES - 1)
+    and (CreditY[CreditIndex] < -CREDITS_LAYOUT[CreditIndex][CREDITS_H]) then
       Advance := True;
   end;
 
-  Last := CREDITS_ENTRIES - 1;
-  if CreditY[Last] < CREDITS_CENTRE_Y - CREDITS_LAYOUT[Last][CREDITS_H] div 2 then
+  LastCredit := CREDITS_ENTRIES - 1;
+  if CreditY[LastCredit] < CREDITS_CENTRE_Y
+     - CREDITS_LAYOUT[LastCredit][CREDITS_H] div 2 then
     CreditsDone := True;
 end;
 
@@ -442,20 +443,20 @@ end;
 
 function TEndingScreen.SlideLine(N: Integer): string;
 var
-  I: Integer;
+  TextIndex: Integer;
 begin
   Result := '';
   if (Step < 1) or (Step > ENDING_SLIDES) or (N < 0) or (N > 1) then
     Exit;
-  I := ENDING_TEXT_ID[Step - 1] + N;
-  if (I >= 0) and (I <= High(ENDING_TEXT)) then
-    Result := ENDING_TEXT[I];
+  TextIndex := ENDING_TEXT_ID[Step - 1] + N;
+  if (TextIndex >= 0) and (TextIndex <= High(ENDING_TEXT)) then
+    Result := ENDING_TEXT[TextIndex];
 end;
 
 procedure TEndingScreen.Update(var S: TGameSettings; const P: TPlayerState;
                                var AGameState: Integer);
 var
-  I: Integer;
+  CreditIndex: Integer;
 begin
   if ScreenPhase = 0 then
   begin
@@ -534,8 +535,8 @@ begin
       Step := 1;
       if Assigned(FOnPictureNamed) then
         FOnPictureNamed(CREDITS_PICTURE);
-      for I := 0 to CREDITS_ENTRIES - 1 do
-        CreditY[I] := CREDITS_LAYOUT[I][CREDITS_Y];
+      for CreditIndex := 0 to CREDITS_ENTRIES - 1 do
+        CreditY[CreditIndex] := CREDITS_LAYOUT[CreditIndex][CREDITS_Y];
       CreditTicks := 0;
       CreditsDone := False;
       if Assigned(FOnMusic) then
@@ -668,12 +669,12 @@ end;
 
 function TEndingScreen.RankName(Counter, ElapsedSec: Integer): string;
 var
-  R: Integer;
+  Rank: Integer;
 begin
-  R := EndingRank(Counter, ElapsedSec);
-  if (R < 0) or (R > High(RANK_NAMES)) then
-    R := 0;
-  Result := RANK_NAMES[R];
+  Rank := EndingRank(Counter, ElapsedSec);
+  if (Rank < 0) or (Rank > High(RANK_NAMES)) then
+    Rank := 0;
+  Result := RANK_NAMES[Rank];
 end;
 
 end.

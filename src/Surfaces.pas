@@ -81,14 +81,14 @@ end;
 
 procedure TSurfaceSet.Clear;
 var
-  I: Integer;
+  Slot: Integer;
 begin
-  for I := 0 to MAX_SURFACES - 1 do
+  for Slot := 0 to MAX_SURFACES - 1 do
   begin
-    FreeAndNil(FSlots[I].Bitmap);
-    FSlots[I].Name := '';
-    FSlots[I].Width := 0;
-    FSlots[I].Height := 0;
+    FreeAndNil(FSlots[Slot].Bitmap);
+    FSlots[Slot].Name := '';
+    FSlots[Slot].Width := 0;
+    FSlots[Slot].Height := 0;
   end;
   FCount := 0;
 end;
@@ -118,7 +118,7 @@ function TSurfaceSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer
 var
   Lines, Fields: TStringList;
   FileName: string;
-  I: Integer;
+  Slot: Integer;
 begin
   Clear;
   FileName := IncludeTrailingPathDelimiter(ADataDir) + 'data' + PathDelim +
@@ -130,25 +130,25 @@ begin
   Fields := TStringList.Create;
   try
     Lines.LoadFromFile(FileName);
-    for I := 0 to Lines.Count - 1 do
+    for Slot := 0 to Lines.Count - 1 do
     begin
-      if I >= MAX_SURFACES then
+      if Slot >= MAX_SURFACES then
         Break;
-      if Trim(Lines[I]) = '' then
+      if Trim(Lines[Slot]) = '' then
         Continue;
 
       { The original sets .CommaText, which splits on commas AND whitespace -
         the files are comma+tab separated, so both matter. }
-      Fields.CommaText := Lines[I];
+      Fields.CommaText := Lines[Slot];
       if Fields.Count < 3 then
         Continue;
 
-      FSlots[I].Name := Trim(Fields[0]);
-      FSlots[I].Width := StrToIntDef(Trim(Fields[1]), 0);
-      FSlots[I].Height := StrToIntDef(Trim(Fields[2]), 0);
+      FSlots[Slot].Name := Trim(Fields[0]);
+      FSlots[Slot].Width := StrToIntDef(Trim(Fields[1]), 0);
+      FSlots[Slot].Height := StrToIntDef(Trim(Fields[2]), 0);
 
-      if (FArchive <> nil) and (FArchive.IndexOf(FSlots[I].Name) >= 0) then
-        FSlots[I].Bitmap := FArchive.LoadBitmapByName(FSlots[I].Name);
+      if (FArchive <> nil) and (FArchive.IndexOf(FSlots[Slot].Name) >= 0) then
+        FSlots[Slot].Bitmap := FArchive.LoadBitmapByName(FSlots[Slot].Name);
 
       Inc(FCount);
     end;

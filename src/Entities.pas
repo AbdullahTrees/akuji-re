@@ -338,6 +338,7 @@ const
   TYPE_COL_SCREEN_SPACE = 5;  { -> EF_SCREEN_SPACE; 1 = does not scroll }
   TYPE_COL_UNUSED      = 7;   { never copied; zero in all 81 rows }
   TYPE_COL_NO_DROP     = 8;   { -> EF_NO_DROP, first of a run of ten }
+  TYPE_COL_TAIL_COUNT  = 10;  { columns 8..17 -> EF_TYPEF_20..EF_TILE_OFS_Y }
   TYPE_COL_CULL_OFFSCREEN = 10; { -> EF_CULL_OFFSCREEN }
   TYPE_COL_BOX_PCT_X   = 11;  { -> EF_BOX_PCT_X   }
   TYPE_COL_BOX_PCT_Y   = 12;  { -> EF_BOX_PCT_Y   }
@@ -974,7 +975,7 @@ end;
 function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
                        Delta: Integer): Integer;
 var
-  CamPx, TileW, EntPx, Half, World: Integer;
+  LayerOriginPx, TileW, EntityPx, HalfWidth, EdgeWorldPx: Integer;
 begin
   { DIVERGENCE. On a zero delta the original returns the ENTITY POINTER cast
     to an integer - its result starts as that and is only overwritten in the
@@ -990,51 +991,57 @@ begin
     the coordinate by a whole number of tiles and the distance to an edge is
     unchanged. This stops being true for any tile width that does not divide
     2048; every shipped map is 32. }
-  CamPx := OriginPixel(L.OriginX);
+  LayerOriginPx := OriginPixel(L.OriginX);
   TileW := L.TileW;
   if TileW = 0 then
     Exit;
-  EntPx := OriginPixel(E.Raw[EF_POS_X]);
-  Half := HalfExtent(E.Raw[EF_EXTENT_X]);
+  EntityPx := OriginPixel(E.Raw[EF_POS_X]);
+  HalfWidth := HalfExtent(E.Raw[EF_EXTENT_X]);
   if Delta < 0 then
   begin
-    World := (CamPx mod TileW) + (EntPx - Half)
-             + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X];
-    Result := ((World div TileW) * TileW - World) shl POSITION_SHIFT;
+    EdgeWorldPx := (LayerOriginPx mod TileW) + (EntityPx - HalfWidth)
+                   + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X];
+    Result := ((EdgeWorldPx div TileW) * TileW - EdgeWorldPx)
+              shl POSITION_SHIFT;
   end
   else
   begin
-    World := (CamPx mod TileW) + ((EntPx + Half) - E.Raw[EF_BOX_OFS_X])
-             + E.Raw[EF_TILE_OFS_X] - 1;
-    Result := (((World div TileW + 1) * TileW - 1) - World) shl POSITION_SHIFT;
+    EdgeWorldPx := (LayerOriginPx mod TileW)
+                   + ((EntityPx + HalfWidth) - E.Raw[EF_BOX_OFS_X])
+                   + E.Raw[EF_TILE_OFS_X] - 1;
+    Result := (((EdgeWorldPx div TileW + 1) * TileW - 1) - EdgeWorldPx)
+              shl POSITION_SHIFT;
   end;
 end;
 
 function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
                        Delta: Integer): Integer;
 var
-  CamPx, TileH, EntPx, Half, World: Integer;
+  LayerOriginPx, TileH, EntityPx, HalfHeight, EdgeWorldPx: Integer;
 begin
   Result := 0;
   if Delta = 0 then
     Exit;
-  CamPx := OriginPixel(L.OriginY);
+  LayerOriginPx := OriginPixel(L.OriginY);
   TileH := L.TileH;
   if TileH = 0 then
     Exit;
-  EntPx := OriginPixel(E.Raw[EF_POS_Y]);
-  Half := HalfExtent(E.Raw[EF_EXTENT_Y]);
+  EntityPx := OriginPixel(E.Raw[EF_POS_Y]);
+  HalfHeight := HalfExtent(E.Raw[EF_EXTENT_Y]);
   if Delta < 0 then
   begin
-    World := (CamPx mod TileH) + (EntPx - Half)
-             + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y];
-    Result := ((World div TileH) * TileH - World) shl POSITION_SHIFT;
+    EdgeWorldPx := (LayerOriginPx mod TileH) + (EntityPx - HalfHeight)
+                   + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y];
+    Result := ((EdgeWorldPx div TileH) * TileH - EdgeWorldPx)
+              shl POSITION_SHIFT;
   end
   else
   begin
-    World := (CamPx mod TileH) + ((EntPx + Half) - E.Raw[EF_BOX_OFS_Y])
-             + E.Raw[EF_TILE_OFS_Y] - 1;
-    Result := (((World div TileH + 1) * TileH - 1) - World) shl POSITION_SHIFT;
+    EdgeWorldPx := (LayerOriginPx mod TileH)
+                   + ((EntityPx + HalfHeight) - E.Raw[EF_BOX_OFS_Y])
+                   + E.Raw[EF_TILE_OFS_Y] - 1;
+    Result := (((EdgeWorldPx div TileH + 1) * TileH - 1) - EdgeWorldPx)
+              shl POSITION_SHIFT;
   end;
 end;
 
@@ -1059,7 +1066,8 @@ function EntityTileCollideX(const E: TEntity; const L: TLayerInfo;
                             DeltaX, DeltaY: Integer;
                             Scrolling: Boolean): Integer;
 var
-  Edge, MoveLayer, MoveEnt, Cross, Row, LastRow, Col, Tile: Integer;
+  LeadingEdgePx, LayerDeltaX, EntityDeltaX, CrossAxisPx: Integer;
+  Row, LastRow, Column, TileId: Integer;
 begin
   Result := TILE_NONE;
   if (DeltaX = 0) or (L.TileW = 0) or (L.TileH = 0) then
@@ -1069,41 +1077,42 @@ begin
     are not symmetric: the right edge carries a -1 because it is the last pixel
     INSIDE the box, not the first one past it. }
   if DeltaX < 0 then
-    Edge := E.Raw[EF_BOX_OFS_X] - HalfExtent(E.Raw[EF_EXTENT_X])
-            + E.Raw[EF_TILE_OFS_X]
+    LeadingEdgePx := E.Raw[EF_BOX_OFS_X] - HalfExtent(E.Raw[EF_EXTENT_X])
+                     + E.Raw[EF_TILE_OFS_X]
   else
-    Edge := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
-            + E.Raw[EF_TILE_OFS_X] - 1;
+    LeadingEdgePx := HalfExtent(E.Raw[EF_EXTENT_X]) - E.Raw[EF_BOX_OFS_X]
+                     + E.Raw[EF_TILE_OFS_X] - 1;
 
   if Scrolling then
   begin
-    MoveLayer := DeltaX;
-    MoveEnt   := 0;
+    LayerDeltaX  := DeltaX;
+    EntityDeltaX := 0;
   end
   else
   begin
-    MoveLayer := 0;
-    MoveEnt   := DeltaX;
+    LayerDeltaX  := 0;
+    EntityDeltaX := DeltaX;
   end;
 
   { The rows the box spans, with DeltaCross applied. Each term is converted to
     pixels on its own - not summed first - which is what makes Scrolling a
     rounding decision. }
-  Cross := OriginPixel(L.OriginY) + OriginPixel(E.Raw[EF_POS_Y] + DeltaY);
-  Row := (Cross - HalfExtent(E.Raw[EF_EXTENT_Y])
+  CrossAxisPx := OriginPixel(L.OriginY)
+                 + OriginPixel(E.Raw[EF_POS_Y] + DeltaY);
+  Row := (CrossAxisPx - HalfExtent(E.Raw[EF_EXTENT_Y])
           + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y]) div L.TileH;
-  LastRow := (Cross + HalfExtent(E.Raw[EF_EXTENT_Y])
+  LastRow := (CrossAxisPx + HalfExtent(E.Raw[EF_EXTENT_Y])
               - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1) div L.TileH;
 
-  Col := (OriginPixel(L.OriginX + MoveLayer)
-          + OriginPixel(E.Raw[EF_POS_X] + MoveEnt) + Edge) div L.TileW
-         - TILE_BIAS_TILES;
+  Column := (OriginPixel(L.OriginX + LayerDeltaX)
+             + OriginPixel(E.Raw[EF_POS_X] + EntityDeltaX) + LeadingEdgePx)
+            div L.TileW - TILE_BIAS_TILES;
 
   while Row <= LastRow do
   begin
-    Tile := Tiles.TileAt(Col, Row - TILE_BIAS_TILES);
-    if Tile >= SolidThreshold then
-      Exit(Tile);
+    TileId := Tiles.TileAt(Column, Row - TILE_BIAS_TILES);
+    if TileId >= SolidThreshold then
+      Exit(TileId);
     Inc(Row);
   end;
 end;
@@ -1113,46 +1122,49 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
                             DeltaY, DeltaX: Integer;
                             Scrolling: Boolean): Integer;
 var
-  Edge, MoveLayer, MoveEnt, Cross, Col, LastCol, Row, Tile: Integer;
+  LeadingEdgePx, LayerDeltaY, EntityDeltaY, CrossAxisPx: Integer;
+  Column, LastColumn, Row, TileId: Integer;
 begin
   Result := TILE_NONE;
   if (DeltaY = 0) or (L.TileW = 0) or (L.TileH = 0) then
     Exit;
 
   if DeltaY < 0 then
-    Edge := E.Raw[EF_BOX_OFS_Y] - HalfExtent(E.Raw[EF_EXTENT_Y])
-            + E.Raw[EF_TILE_OFS_Y]
+    LeadingEdgePx := E.Raw[EF_BOX_OFS_Y] - HalfExtent(E.Raw[EF_EXTENT_Y])
+                     + E.Raw[EF_TILE_OFS_Y]
   else
-    Edge := HalfExtent(E.Raw[EF_EXTENT_Y]) - E.Raw[EF_BOX_OFS_Y]
-            + E.Raw[EF_TILE_OFS_Y] - 1;
+    LeadingEdgePx := HalfExtent(E.Raw[EF_EXTENT_Y]) - E.Raw[EF_BOX_OFS_Y]
+                     + E.Raw[EF_TILE_OFS_Y] - 1;
 
   if Scrolling then
   begin
-    MoveLayer := DeltaY;
-    MoveEnt   := 0;
+    LayerDeltaY  := DeltaY;
+    EntityDeltaY := 0;
   end
   else
   begin
-    MoveLayer := 0;
-    MoveEnt   := DeltaY;
+    LayerDeltaY  := 0;
+    EntityDeltaY := DeltaY;
   end;
 
-  Cross := OriginPixel(L.OriginX) + OriginPixel(E.Raw[EF_POS_X] + DeltaX);
-  Col := (Cross - HalfExtent(E.Raw[EF_EXTENT_X])
-          + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X]) div L.TileW;
-  LastCol := (Cross + HalfExtent(E.Raw[EF_EXTENT_X])
-              - E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X] - 1) div L.TileW;
+  CrossAxisPx := OriginPixel(L.OriginX)
+                 + OriginPixel(E.Raw[EF_POS_X] + DeltaX);
+  Column := (CrossAxisPx - HalfExtent(E.Raw[EF_EXTENT_X])
+             + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X]) div L.TileW;
+  LastColumn := (CrossAxisPx + HalfExtent(E.Raw[EF_EXTENT_X])
+                 - E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X] - 1) div L.TileW;
 
-  Row := (OriginPixel(L.OriginY + MoveLayer)
-          + OriginPixel(E.Raw[EF_POS_Y] + MoveEnt) + Edge) div L.TileH
+  Row := (OriginPixel(L.OriginY + LayerDeltaY)
+          + OriginPixel(E.Raw[EF_POS_Y] + EntityDeltaY) + LeadingEdgePx)
+         div L.TileH
          - TILE_BIAS_TILES;
 
-  while Col <= LastCol do
+  while Column <= LastColumn do
   begin
-    Tile := Tiles.TileAt(Col - TILE_BIAS_TILES, Row);
-    if Tile >= SolidThreshold then
-      Exit(Tile);
-    Inc(Col);
+    TileId := Tiles.TileAt(Column - TILE_BIAS_TILES, Row);
+    if TileId >= SolidThreshold then
+      Exit(TileId);
+    Inc(Column);
   end;
 end;
 
@@ -1227,41 +1239,41 @@ function TEntityWorld.FindBlockingSolid(const E: TEntity; const Box: TBox;
                                         AgainstPlayer: Boolean;
                                         out Other: TBox): Integer;
 var
-  First, Last, Slot, Mine: Integer;
-  O: PEntity;
+  FirstSlot, LastSlot, Slot, CurrentSlot: Integer;
+  Candidate: PEntity;
 begin
   Result := SLOT_NONE;
   if Pool = nil then
     Exit;
-  Mine := E.Raw[EF_SLOT];
+  CurrentSlot := E.Raw[EF_SLOT];
   if AgainstPlayer then
   begin
-    First := 0;
-    Last := 0;
+    FirstSlot := PLAYER_SLOT;
+    LastSlot := PLAYER_SLOT;
   end
   else
   begin
-    First := SOLID_SCAN_FIRST;
-    Last := SOLID_SCAN_LAST;
+    FirstSlot := SOLID_SCAN_FIRST;
+    LastSlot := SOLID_SCAN_LAST;
   end;
 
-  for Slot := First to Last do
+  for Slot := FirstSlot to LastSlot do
   begin
-    if Slot = Mine then
+    if Slot = CurrentSlot then
       Continue;
-    O := Pool.Entity(Slot);
-    if (O^.Raw[EF_ALIVE] and $FF) = 0 then
+    Candidate := Pool.Entity(Slot);
+    if (Candidate^.Raw[EF_ALIVE] and $FF) = 0 then
       Continue;
-    if O^.Raw[EF_SOLID] = 0 then
+    if Candidate^.Raw[EF_SOLID] = 0 then
       Continue;
     { The air dash goes through a particular kind of solid. }
     if (E.Raw[EF_STATE] = SOLID_STATE_AIRDASH)
-       and (O^.Raw[EF_VULN_KIND] = SOLID_PHASE_VULN) then
+       and (Candidate^.Raw[EF_VULN_KIND] = SOLID_PHASE_VULN) then
       Continue;
-    if (O^.Raw[EF_SOLID] = SoftKind) and SkipSoft then
+    if (Candidate^.Raw[EF_SOLID] = SoftKind) and SkipSoft then
       Continue;
 
-    Other := EntityBox(O^, 1, 1);
+    Other := EntityBox(Candidate^, 1, 1);
     if RectOverlap(Box, Other, 0, 0) then
       Exit(Slot);
   end;
@@ -1287,7 +1299,7 @@ function TEntityWorld.SolidCollideX(const E: TEntity; Delta: Integer;
                                     SkipSoft: Boolean;
                                     AgainstPlayer: Boolean): Boolean;
 var
-  Mine, Other: TBox;
+  MovedBox, BlockingBox: TBox;
   Moved: TEntity;
   Blocker: Integer;
 begin
@@ -1296,20 +1308,20 @@ begin
     Exit;
 
   { The box is built from the entity as it WOULD be after the move on this
-    axis only; the other axis stays where it is. }
+  axis only; the other axis stays where it is. }
   Moved := E;
   Inc(Moved.Raw[EF_POS_X], Delta);
-  Mine := EntityBox(Moved, 1, 1);
+  MovedBox := EntityBox(Moved, 1, 1);
 
-  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_X, SkipSoft,
-                               AgainstPlayer, Other);
+  Blocker := FindBlockingSolid(E, MovedBox, SOLID_SOFT_IN_X, SkipSoft,
+                               AgainstPlayer, BlockingBox);
   if Blocker = SLOT_NONE then
     Exit;
 
-  if Mine.L < Other.L then
-    PushX := -Abs(Mine.R - Other.L) shl POSITION_SHIFT
+  if MovedBox.L < BlockingBox.L then
+    PushX := -Abs(MovedBox.R - BlockingBox.L) shl POSITION_SHIFT
   else
-    PushX := Abs(Mine.L - Other.R) shl POSITION_SHIFT;
+    PushX := Abs(MovedBox.L - BlockingBox.R) shl POSITION_SHIFT;
   Result := True;
 
   MaybePushEvent(E.Raw[EF_SLOT], Blocker, AxisX);
@@ -1320,10 +1332,10 @@ function TEntityWorld.SolidCollideY(const E: TEntity; Delta: Integer;
                                     SkipSoft: Boolean;
                                     AgainstPlayer: Boolean): Boolean;
 var
-  Mine, Other: TBox;
+  MovedBox, BlockingBox: TBox;
   Moved: TEntity;
-  Blocker, Gap: Integer;
-  O: PEntity;
+  Blocker, OverlapPx: Integer;
+  BlockingEntity: PEntity;
 begin
   OnTopOfSolid := False;
   Result := False;
@@ -1334,18 +1346,18 @@ begin
 
   Moved := E;
   Inc(Moved.Raw[EF_POS_Y], Delta);
-  Mine := EntityBox(Moved, 1, 1);
+  MovedBox := EntityBox(Moved, 1, 1);
 
-  Blocker := FindBlockingSolid(E, Mine, SOLID_SOFT_IN_Y, SkipSoft,
-                               AgainstPlayer, Other);
+  Blocker := FindBlockingSolid(E, MovedBox, SOLID_SOFT_IN_Y, SkipSoft,
+                               AgainstPlayer, BlockingBox);
   if Blocker = SLOT_NONE then
     Exit;
 
-  if Mine.T < Other.T then
+  if MovedBox.T < BlockingBox.T then
   begin
     { Coming down onto it. }
-    Gap := Abs(Mine.B - Other.T);
-    if Gap < SOLID_TOP_TOLERANCE then
+    OverlapPx := Abs(MovedBox.B - BlockingBox.T);
+    if OverlapPx < SOLID_TOP_TOLERANCE then
     begin
       OnTopOfSolid := True;
       Pool.SetField(Blocker, EF_RIDDEN, 1);
@@ -1353,16 +1365,16 @@ begin
 
     { Riding: the horizontal offset between the two, WITH this frame's layer
       scroll folded in, so a rider is carried along by a moving platform. }
-    O := Pool.Entity(Blocker);
-    PushX := ((OriginPixel(O^.Raw[EF_POS_X] + Layer.DeltaX)
-               - HalfExtent(O^.Raw[EF_EXTENT_X]))
+    BlockingEntity := Pool.Entity(Blocker);
+    PushX := ((OriginPixel(BlockingEntity^.Raw[EF_POS_X] + Layer.DeltaX)
+               - HalfExtent(BlockingEntity^.Raw[EF_EXTENT_X]))
               - (OriginPixel(E.Raw[EF_POS_X])
                  - HalfExtent(E.Raw[EF_EXTENT_X]))) shl POSITION_SHIFT;
 
-    PushY := -Gap shl POSITION_SHIFT;
+    PushY := -OverlapPx shl POSITION_SHIFT;
   end
   else
-    PushY := Abs(Mine.T - Other.B) shl POSITION_SHIFT;
+    PushY := Abs(MovedBox.T - BlockingBox.B) shl POSITION_SHIFT;
   Result := True;
 
   MaybePushEvent(E.Raw[EF_SLOT], Blocker, AxisY);
@@ -1402,25 +1414,26 @@ end;
 { Entity_Destroy @ 0x00461400. }
 procedure TEntityWorld.DestroyEntity(var E: TEntity; DropLoot: Boolean);
 var
-  Owner, Child, EventId, Op, Flag: Integer;
+  OwnerSlot, ChildSlot, EventId, Opcode, ProgressIndex: Integer;
 begin
   { A dying projectile hands a shot back to whoever fired it. }
   if (E.Raw[EF_CLASS] = DESTROY_CLASS_PROJECTILE) and (Pool <> nil) then
   begin
-    Owner := E.Raw[EF_OWNER];
-    Pool.SetField(Owner, EF_SHOTS, Pool.Field(Owner, EF_SHOTS) - 1);
+    OwnerSlot := E.Raw[EF_OWNER];
+    Pool.SetField(OwnerSlot, EF_SHOTS,
+                  Pool.Field(OwnerSlot, EF_SHOTS) - 1);
   end;
 
   { A parent takes its children with it. Recursive, and deliberately WITHOUT
     loot - the children were never separately earned. }
   if (E.Raw[EF_CLASS] = DESTROY_CLASS_PARENT) and (Pool <> nil) then
   begin
-    Child := E.Raw[EF_CHILD_A];
-    if Child <> 0 then
-      DestroyEntity(Pool.Entity(Child)^, False);
-    Child := E.Raw[EF_CHILD_B];
-    if Child <> 0 then
-      DestroyEntity(Pool.Entity(Child)^, False);
+    ChildSlot := E.Raw[EF_CHILD_A];
+    if ChildSlot <> 0 then
+      DestroyEntity(Pool.Entity(ChildSlot)^, False);
+    ChildSlot := E.Raw[EF_CHILD_B];
+    if ChildSlot <> 0 then
+      DestroyEntity(Pool.Entity(ChildSlot)^, False);
   end;
 
   if DropLoot then
@@ -1434,14 +1447,14 @@ begin
   EventId := E.Raw[EF_EVENT_ID];
   if EventId <> -1 then
   begin
-    Op := EventOpcode(EventId);
-    if (Op = EVENT_OPCODE_DESTROY) and DropLoot then
+    Opcode := EventOpcode(EventId);
+    if (Opcode = EVENT_OPCODE_DESTROY) and DropLoot then
       BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
-    if (Op = EVENT_OPCODE_FLAG) and DropLoot then
+    if (Opcode = EVENT_OPCODE_FLAG) and DropLoot then
     begin
-      Flag := EventProgressIndex(EventId);
-      if Flag >= 0 then
-        SetProgress(Flag);
+      ProgressIndex := EventProgressIndex(EventId);
+      if ProgressIndex >= 0 then
+        SetProgress(ProgressIndex);
     end;
     { Cleared whatever the opcode was, and whether or not loot was dropped,
       so the event can place another entity next time the camera comes near. }
@@ -1473,30 +1486,30 @@ end;
 { Entity_MaybeDropItem @ 0x004617FC. }
 procedure TEntityWorld.MaybeDropItem(const E: TEntity);
 var
-  Roll, Slot: Integer;
+  DropRoll, SpawnedSlot: Integer;
 begin
-  Roll := RandomBelow(DROP_ROLL);
-  if Roll <= DROP_THRESHOLD then
+  DropRoll := RandomBelow(DROP_ROLL);
+  if DropRoll <= DROP_THRESHOLD then
     Exit;
 
   { No layer delta here, unlike Entity_SpawnDebris - the drop is placed at the
     parent's position exactly. Whether that is deliberate or an oversight in
     the original cannot be told from the code; it is reproduced either way. }
-  Slot := Spawn(EKIND_MINOR, DROP_TYPE,
-                E.Raw[EF_POS_X] - POSITION_BIAS,
-                E.Raw[EF_POS_Y] - POSITION_BIAS);
-  if Slot = SLOT_NONE then
+  SpawnedSlot := Spawn(EKIND_MINOR, DROP_TYPE,
+                       E.Raw[EF_POS_X] - POSITION_BIAS,
+                       E.Raw[EF_POS_Y] - POSITION_BIAS);
+  if SpawnedSlot = SLOT_NONE then
     Exit;                        { the original does not check; see SpawnDebris }
 
-  SetSpawnField(Slot, EF_TIMER, DROP_TIMER);
-  SetSpawnField(Slot, EF_VEL_Y, DROP_LIFT);
-  SetSpawnField(Slot, EF_FLAG1C, Ord(Roll > DROP_RARE));
+  SetSpawnField(SpawnedSlot, EF_TIMER, DROP_TIMER);
+  SetSpawnField(SpawnedSlot, EF_VEL_Y, DROP_LIFT);
+  SetSpawnField(SpawnedSlot, EF_FLAG1C, Ord(DropRoll > DROP_RARE));
 end;
 
 { Entity_SpawnDebris @ 0x00461874. }
 procedure TEntityWorld.SpawnDebris(const E: TEntity; Kind: Integer);
 var
-  I, Slot, Dir, Speed: Integer;
+  ParticleIndex, SpawnedSlot, HorizontalDirection, Speed: Integer;
 begin
   { The sound. Only kind 0 consults the terrain, and only two terrains say
     anything - which is what identifies 3 and 4 as the water areas. }
@@ -1512,69 +1525,71 @@ begin
   else if Kind = DEBRIS_SHATTER then
     PlaySound(SND_BOM04);
 
-  for I := 0 to EF_DEBRIS_SPEEDS - 1 do
+  for ParticleIndex := 0 to EF_DEBRIS_SPEEDS - 1 do
   begin
     { The layer delta is SUBTRACTED from the spawn position. The particle is
       created after this frame's scroll has been applied to its parent but
       before Entity_UpdateAll carries it along too, so taking the delta back
       out is what stops it being scrolled twice on its first frame. }
-    Slot := Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
-                  E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
-                  E.Raw[EF_POS_Y] - POSITION_BIAS - Layer.DeltaY);
+    SpawnedSlot := Spawn(EKIND_MINOR, EF_DEBRIS_TYPE,
+                         E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
+                         E.Raw[EF_POS_Y] - POSITION_BIAS - Layer.DeltaY);
 
     { The original does NOT check this. On a full pool Entity_Spawn returns -1
       and it writes the five particles at Entities[-1], i.e. over whatever sits
       before the pool. Not reproduced - there is nothing to reproduce it INTO -
       and the difference only shows on a pool that is already full. }
-    if Slot = SLOT_NONE then
+    if SpawnedSlot = SLOT_NONE then
       Continue;
 
-    SetSpawnField(Slot, EF_STATE, Kind + 1);
+    SetSpawnField(SpawnedSlot, EF_STATE, Kind + 1);
 
-    Dir := HalfExtent(DirVelX(RandomBelow(DIR_COUNT)));
+    HorizontalDirection := HalfExtent(DirVelX(RandomBelow(DIR_COUNT)));
     Speed := RandomBelow(DEBRIS_SPEED_MAX) + 1;
-    SetSpawnField(Slot, EF_VEL_X, Dir * Speed);
-    SetSpawnField(Slot, EF_VEL_Y, (I + 4) * -DEBRIS_LIFT);
+    SetSpawnField(SpawnedSlot, EF_VEL_X, HorizontalDirection * Speed);
+    SetSpawnField(SpawnedSlot, EF_VEL_Y,
+                  (ParticleIndex + 4) * -DEBRIS_LIFT);
 
-    SetSpawnField(Slot, EF_SCREEN_SPACE, 0);
-    SetSpawnField(Slot, EF_DEPTH, DEBRIS_DEPTH);
+    SetSpawnField(SpawnedSlot, EF_SCREEN_SPACE, 0);
+    SetSpawnField(SpawnedSlot, EF_DEPTH, DEBRIS_DEPTH);
 
     { The two effect kinds pick their frame differently: one at random, one
       by position in the burst, so a shatter fans through its frames in order. }
     if Kind = DEBRIS_IMPACT then
-      SetSpawnField(Slot, EF_FLAG1C, RandomBelow(2))
+      SetSpawnField(SpawnedSlot, EF_FLAG1C, RandomBelow(2))
     else if Kind = DEBRIS_SHATTER then
-      SetSpawnField(Slot, EF_FLAG1C, I);
+      SetSpawnField(SpawnedSlot, EF_FLAG1C, ParticleIndex);
   end;
 end;
 
 procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
                                Tiles: TTileSource; KillTile: Integer);
 var
-  Top, Bottom, Left, Right, Row, Col, OX, OY, PX, PY, HX, HY: Integer;
+  TopRow, BottomRow, LeftColumn, RightColumn, Row, Column: Integer;
+  OriginX, OriginY, PositionX, PositionY, HalfWidth, HalfHeight: Integer;
 begin
   if (Tiles = nil) or (L.TileW = 0) or (L.TileH = 0) then
     Exit;
 
-  OX := OriginPixel(L.OriginX);
-  OY := OriginPixel(L.OriginY);
-  PX := OriginPixel(E.Raw[EF_POS_X]);
-  PY := OriginPixel(E.Raw[EF_POS_Y]);
-  HX := HalfExtent(E.Raw[EF_EXTENT_X]);
-  HY := HalfExtent(E.Raw[EF_EXTENT_Y]);
+  OriginX := OriginPixel(L.OriginX);
+  OriginY := OriginPixel(L.OriginY);
+  PositionX := OriginPixel(E.Raw[EF_POS_X]);
+  PositionY := OriginPixel(E.Raw[EF_POS_Y]);
+  HalfWidth := HalfExtent(E.Raw[EF_EXTENT_X]);
+  HalfHeight := HalfExtent(E.Raw[EF_EXTENT_Y]);
 
-  Top    := (OY + PY - HY + E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y])
-            div L.TileH;
-  Bottom := (OY + PY + HY - E.Raw[EF_BOX_OFS_Y] + E.Raw[EF_TILE_OFS_Y] - 1)
-            div L.TileH;
-  Left   := (OX + PX - HX + E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X])
-            div L.TileW;
-  Right  := (OX + PX + HX - E.Raw[EF_BOX_OFS_X] + E.Raw[EF_TILE_OFS_X] - 1)
-            div L.TileW;
+  TopRow := (OriginY + PositionY - HalfHeight + E.Raw[EF_BOX_OFS_Y]
+             + E.Raw[EF_TILE_OFS_Y]) div L.TileH;
+  BottomRow := (OriginY + PositionY + HalfHeight - E.Raw[EF_BOX_OFS_Y]
+                + E.Raw[EF_TILE_OFS_Y] - 1) div L.TileH;
+  LeftColumn := (OriginX + PositionX - HalfWidth + E.Raw[EF_BOX_OFS_X]
+                 + E.Raw[EF_TILE_OFS_X]) div L.TileW;
+  RightColumn := (OriginX + PositionX + HalfWidth - E.Raw[EF_BOX_OFS_X]
+                  + E.Raw[EF_TILE_OFS_X] - 1) div L.TileW;
 
-  for Row := Top to Bottom do
-    for Col := Left to Right do
-      if (Tiles.TileAt(Col - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
+  for Row := TopRow to BottomRow do
+    for Column := LeftColumn to RightColumn do
+      if (Tiles.TileAt(Column - TILE_BIAS_TILES, Row - TILE_BIAS_TILES)
           and $FFFF) = KillTile then
       begin
         E.Raw[EF_STATE] := KILL_TILE_STATE;
@@ -1585,17 +1600,17 @@ end;
 
 function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
 var
-  W, H: Integer;
+  Width, Height: Integer;
 begin
-  W := E.Raw[EF_EXTENT_X] * ScaleX;
-  H := E.Raw[EF_EXTENT_Y] * ScaleY;
+  Width := E.Raw[EF_EXTENT_X] * ScaleX;
+  Height := E.Raw[EF_EXTENT_Y] * ScaleY;
   { OriginPixel, not EntityPixelX - see the header: the bias stays in. }
-  Result.L := OriginPixel(E.Raw[EF_POS_X]) - HalfExtent(W)
+  Result.L := OriginPixel(E.Raw[EF_POS_X]) - HalfExtent(Width)
               + E.Raw[EF_HITBOX_INSET_X];
-  Result.T := OriginPixel(E.Raw[EF_POS_Y]) - HalfExtent(H)
+  Result.T := OriginPixel(E.Raw[EF_POS_Y]) - HalfExtent(Height)
               + E.Raw[EF_HITBOX_INSET_Y];
-  Result.R := Result.L + W - 2 * E.Raw[EF_HITBOX_INSET_X];
-  Result.B := Result.T + H - 2 * E.Raw[EF_HITBOX_INSET_Y];
+  Result.R := Result.L + Width - 2 * E.Raw[EF_HITBOX_INSET_X];
+  Result.B := Result.T + Height - 2 * E.Raw[EF_HITBOX_INSET_Y];
 end;
 
 function EntitiesOverlap(const A, B: TEntity;
@@ -1618,12 +1633,12 @@ end;
 
 function EntityType(Id: Integer): TEntityType;
 var
-  I: Integer;
+  FieldIndex: Integer;
 begin
   if (Id < 0) or (Id >= ENTITY_TYPE_COUNT) then
   begin
-    for I := 0 to ENTITY_TYPE_FIELDS - 1 do
-      Result.Raw[I] := 0;
+    for FieldIndex := 0 to ENTITY_TYPE_FIELDS - 1 do
+      Result.Raw[FieldIndex] := 0;
     Exit;
   end;
   Result := ENTITY_TYPES[Id];
@@ -1681,11 +1696,11 @@ end;
 
 function TEntityPool.LiveCount: Integer;
 var
-  I: Integer;
+  Slot: Integer;
 begin
   Result := 0;
-  for I := 0 to ENTITY_COUNT - 1 do
-    if FSlots[I].Raw[EF_ALIVE] <> 0 then
+  for Slot := 0 to ENTITY_COUNT - 1 do
+    if FSlots[Slot].Raw[EF_ALIVE] <> 0 then
       Inc(Result);
 end;
 
@@ -1696,31 +1711,32 @@ end;
 
 procedure TEntityPool.Steer(Slot, TimerSlot, Reload: Integer);
 var
-  E: PEntity;
-  Facing, Target: Integer;
+  EntityPtr: PEntity;
+  CurrentDirection, TargetDirection: Integer;
 begin
   if (Slot < 0) or (Slot >= ENTITY_COUNT) then
     Exit;
   if (TimerSlot < 0) or (TimerSlot >= EF_TIMER_COUNT) then
     Exit;
-  E := @FSlots[Slot];
+  EntityPtr := @FSlots[Slot];
 
-  Dec(E^.Raw[EF_BLOCK_B + TimerSlot]);
-  if E^.Raw[EF_BLOCK_B + TimerSlot] < 1 then
+  Dec(EntityPtr^.Raw[EF_BLOCK_B + TimerSlot]);
+  if EntityPtr^.Raw[EF_BLOCK_B + TimerSlot] < 1 then
   begin
-    E^.Raw[EF_BLOCK_B + TimerSlot] := Reload;
+    EntityPtr^.Raw[EF_BLOCK_B + TimerSlot] := Reload;
     { Both positions are read in their BIASED form. The bias is identical on
       each, so it cancels in the subtraction inside AngleBetween - which is why
       the original can pass the raw fields straight through. }
-    Target := AngleBetween(E^.Raw[EF_POS_X], E^.Raw[EF_POS_Y],
-                           FSlots[0].Raw[EF_POS_X], FSlots[0].Raw[EF_POS_Y]);
-    Facing := E^.Raw[EF_FACING];
-    TurnToward(Facing, Target);
-    E^.Raw[EF_FACING] := Facing;
+    TargetDirection := AngleBetween(
+      EntityPtr^.Raw[EF_POS_X], EntityPtr^.Raw[EF_POS_Y],
+      FSlots[PLAYER_SLOT].Raw[EF_POS_X], FSlots[PLAYER_SLOT].Raw[EF_POS_Y]);
+    CurrentDirection := EntityPtr^.Raw[EF_FACING];
+    TurnToward(CurrentDirection, TargetDirection);
+    EntityPtr^.Raw[EF_FACING] := CurrentDirection;
   end;
 
-  E^.Raw[EF_VEL_X] := DirVelX(E^.Raw[EF_FACING]);
-  E^.Raw[EF_VEL_Y] := DirVelY(E^.Raw[EF_FACING]);
+  EntityPtr^.Raw[EF_VEL_X] := DirVelX(EntityPtr^.Raw[EF_FACING]);
+  EntityPtr^.Raw[EF_VEL_Y] := DirVelY(EntityPtr^.Raw[EF_FACING]);
 end;
 
 function TEntityPool.Spawn(Kind, TypeId, X, Y: Integer): Integer;
@@ -1744,7 +1760,7 @@ begin
     Exit;
   end;
 
-  Slot := -1;
+  Slot := SLOT_NONE;
   for I := First to Last do
     if FSlots[I].Raw[EF_ALIVE] = 0 then
     begin
@@ -1756,22 +1772,22 @@ begin
 
   E := @FSlots[Slot];
   E^.Raw[EF_SLOT]  := Slot;
-  E^.Raw[1]        := 0;
+  E^.Raw[EF_OWNER] := 0;
   E^.Raw[EF_ALIVE] := 1;
   E^.Raw[EF_TYPE]  := TypeId;
 
   { Two loops of ten in the original, over a contiguous 20-int span - so the
     real record almost certainly has two array[0..9] fields here. }
-  for I := 0 to 9 do
+  for I := 0 to EF_BLOCK_LEN - 1 do
   begin
     E^.Raw[EF_BLOCK_A + I] := 0;
     E^.Raw[EF_BLOCK_B + I] := 0;
   end;
 
-  E^.Raw[5] := 0;
-  E^.Raw[6] := 0;
-  E^.Raw[7] := 0;
-  E^.Raw[EF_SPRITE]    := -1;
+  E^.Raw[EF_ANIM_ID] := 0;
+  E^.Raw[EF_VARIANT] := 0;
+  E^.Raw[EF_FLAG1C]  := 0;
+  E^.Raw[EF_SPRITE]    := SPRITE_NONE;
   E^.Raw[EF_EVENT_ID]  := -1;
   E^.Raw[EF_POS_X]     := X + POSITION_BIAS;
   E^.Raw[EF_POS_Y]     := Y + POSITION_BIAS;
@@ -1782,11 +1798,11 @@ begin
   E^.Raw[EF_FACING]    := 0;
   E^.Raw[EF_BYTE94]    := 1;
   E^.Raw[EF_TIMER]     := 0;
-  E^.Raw[$1D]          := 0;
-  E^.Raw[$2C]          := 0;
+  E^.Raw[EF_DEATH_TIMER] := 0;
+  E^.Raw[EF_PARKED_VEL]  := 0;
   E^.Raw[$2D]          := 0;
-  E^.Raw[$26]          := 0;
-  E^.Raw[$27]          := 0;
+  E^.Raw[EF_EXTENT_X]  := 0;
+  E^.Raw[EF_EXTENT_Y]  := 0;
 
   { Then the type table is copied over those defaults. }
   T := EntityType(TypeId);
@@ -1795,7 +1811,7 @@ begin
   E^.Raw[EF_TYPEF_08] := T.Raw[TYPE_COL_DEPTH];
   for I := 0 to 3 do
     E^.Raw[EF_TYPEF_0C + I] := T.Raw[TYPE_COL_TOUCH_KIND + I];
-  for I := 0 to 9 do
+  for I := 0 to TYPE_COL_TAIL_COUNT - 1 do
     E^.Raw[EF_TYPEF_20 + I] := T.Raw[TYPE_COL_NO_DROP + I];
 
   { An entity's EXTENTS come off its sprite every frame, and every collision
@@ -1839,13 +1855,14 @@ end;
 
 function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
 var
-  X, Y, W, H: Integer;
+  PixelX, PixelY, MarginX, MarginY: Integer;
 begin
-  X := EntityPixelX(E);
-  Y := EntityPixelY(E);
-  W := E.Raw[EF_EXTENT_X] * Margin;
-  H := E.Raw[EF_EXTENT_Y] * Margin;
-  Result := (X < -W) or (X > W + SCREEN_W) or (Y < -H) or (Y > H + SCREEN_H);
+  PixelX := EntityPixelX(E);
+  PixelY := EntityPixelY(E);
+  MarginX := E.Raw[EF_EXTENT_X] * Margin;
+  MarginY := E.Raw[EF_EXTENT_Y] * Margin;
+  Result := (PixelX < -MarginX) or (PixelX > MarginX + SCREEN_W)
+            or (PixelY < -MarginY) or (PixelY > MarginY + SCREEN_H);
 end;
 
 initialization

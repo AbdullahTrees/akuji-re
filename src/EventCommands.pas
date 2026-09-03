@@ -183,120 +183,120 @@ implementation
 
 procedure ParseFields(const S: string; Dest: TStrings);
 var
-  I, Start: Integer;
+  CharacterIndex, FieldStart: Integer;
 begin
   Dest.Clear;
-  I := 1;
-  Start := 1;
-  while I <= Length(S) do
+  CharacterIndex := 1;
+  FieldStart := 1;
+  while CharacterIndex <= Length(S) do
   begin
-    if S[I] = '-' then
+    if S[CharacterIndex] = '-' then
     begin
-      if I > Start then
+      if CharacterIndex > FieldStart then
       begin
         { A '-' with something before it ends the field. }
-        Dest.Add(Copy(S, Start, I - Start));
-        Start := I + 1;
+        Dest.Add(Copy(S, FieldStart, CharacterIndex - FieldStart));
+        FieldStart := CharacterIndex + 1;
       end;
       { Otherwise the '-' IS the field's first character, i.e. a minus sign, and
         Start is left pointing at it so the sign survives into the number. This
         is the whole reason the splitter is hand-written: in '0030-M-0-0128--4'
         the run '--' is a separator followed by a sign, and a plain Split would
         yield an empty field and lose the -4. }
-      Inc(I);
+      Inc(CharacterIndex);
       Continue;
     end;
-    Inc(I);
+    Inc(CharacterIndex);
   end;
-  Dest.Add(Copy(S, Start, Length(S) - Start + 1));
+  Dest.Add(Copy(S, FieldStart, Length(S) - FieldStart + 1));
 end;
 
 function DigitsOnly(const S: string): Boolean;
 var
-  I, First: Integer;
+  CharacterIndex, FirstDigit: Integer;
 begin
   Result := False;
   if S = '' then
     Exit;
-  First := 1;
+  FirstDigit := 1;
   if S[1] = '-' then
   begin
     if Length(S) = 1 then
       Exit;
-    First := 2;
+    FirstDigit := 2;
   end;
-  for I := First to Length(S) do
-    if not (S[I] in ['0'..'9']) then
+  for CharacterIndex := FirstDigit to Length(S) do
+    if not (S[CharacterIndex] in ['0'..'9']) then
       Exit;
   Result := True;
 end;
 
 function ParseSpawn(const ParamA: string): TEventSpawn;
 var
-  F: TStringList;
-  I: Integer;
+  Fields: TStringList;
+  FieldIndex: Integer;
 begin
   Result.TypeId := -1;
   Result.Kind := #0;
   Result.ArgCount := 0;
   Result.Raw := ParamA;
   Result.Valid := False;
-  for I := 0 to MAX_CMD_ARGS - 1 do
-    Result.Args[I] := 0;
+  for FieldIndex := 0 to MAX_CMD_ARGS - 1 do
+    Result.Args[FieldIndex] := 0;
 
-  F := TStringList.Create;
+  Fields := TStringList.Create;
   try
-    ParseFields(ParamA, F);
-    if F.Count < 2 then
+    ParseFields(ParamA, Fields);
+    if Fields.Count < 2 then
       Exit;
-    if (Length(F[0]) <> 4) or not DigitsOnly(F[0]) then
+    if (Length(Fields[0]) <> 4) or not DigitsOnly(Fields[0]) then
       Exit;
-    if Length(F[1]) <> 1 then
+    if Length(Fields[1]) <> 1 then
       Exit;
 
-    Result.TypeId := StrToIntDef(F[0], -1);
-    Result.Kind := F[1][1];
-    for I := 2 to F.Count - 1 do
+    Result.TypeId := StrToIntDef(Fields[0], -1);
+    Result.Kind := Fields[1][1];
+    for FieldIndex := 2 to Fields.Count - 1 do
     begin
       if Result.ArgCount >= MAX_CMD_ARGS then
         Break;
-      Result.Args[Result.ArgCount] := StrToIntDef(F[I], 0);
+      Result.Args[Result.ArgCount] := StrToIntDef(Fields[FieldIndex], 0);
       Inc(Result.ArgCount);
     end;
     Result.Valid := True;
   finally
-    F.Free;
+    Fields.Free;
   end;
 end;
 
 function ParseCommand(const S: string): TEventCommand;
 var
-  F: TStringList;
-  I: Integer;
+  Fields: TStringList;
+  FieldIndex: Integer;
 begin
   Result.Guard := -1;
   Result.SubOp := -1;
   Result.ArgCount := 0;
   Result.Raw := S;
-  for I := 0 to MAX_CMD_ARGS - 1 do
-    Result.Args[I] := 0;
+  for FieldIndex := 0 to MAX_CMD_ARGS - 1 do
+    Result.Args[FieldIndex] := 0;
 
-  F := TStringList.Create;
+  Fields := TStringList.Create;
   try
-    ParseFields(S, F);
-    if F.Count < 2 then
+    ParseFields(S, Fields);
+    if Fields.Count < 2 then
       Exit;
-    Result.Guard := StrToIntDef(F[0], -1);
-    Result.SubOp := StrToIntDef(F[1], -1);
-    for I := 2 to F.Count - 1 do
+    Result.Guard := StrToIntDef(Fields[0], -1);
+    Result.SubOp := StrToIntDef(Fields[1], -1);
+    for FieldIndex := 2 to Fields.Count - 1 do
     begin
       if Result.ArgCount >= MAX_CMD_ARGS then
         Break;
-      Result.Args[Result.ArgCount] := StrToIntDef(F[I], 0);
+      Result.Args[Result.ArgCount] := StrToIntDef(Fields[FieldIndex], 0);
       Inc(Result.ArgCount);
     end;
   finally
-    F.Free;
+    Fields.Free;
   end;
 end;
 
@@ -331,8 +331,8 @@ end;
 
 function ParseProgram(const ParamB: string): TEventProgram;
 var
-  Steps, Cmds: TStringList;
-  S, C: Integer;
+  StepStrings, CommandStrings: TStringList;
+  StepIndex, CommandIndex: Integer;
 begin
   { nil, not SetLength(...,0): the result is a dynamic array, so SetLength would
     read it before it is assigned and FPC rightly warns. }
@@ -340,64 +340,65 @@ begin
   if ClassifyParamB(ParamB) <> pbProgram then
     Exit;
 
-  Steps := TStringList.Create;
-  Cmds := TStringList.Create;
+  StepStrings := TStringList.Create;
+  CommandStrings := TStringList.Create;
   try
-    Steps.Delimiter := '/';
-    Steps.StrictDelimiter := True;
-    Steps.DelimitedText := ParamB;
+    StepStrings.Delimiter := '/';
+    StepStrings.StrictDelimiter := True;
+    StepStrings.DelimitedText := ParamB;
 
-    SetLength(Result, Steps.Count);
-    for S := 0 to Steps.Count - 1 do
+    SetLength(Result, StepStrings.Count);
+    for StepIndex := 0 to StepStrings.Count - 1 do
     begin
-      Cmds.Delimiter := '.';
-      Cmds.StrictDelimiter := True;
-      Cmds.DelimitedText := Steps[S];
+      CommandStrings.Delimiter := '.';
+      CommandStrings.StrictDelimiter := True;
+      CommandStrings.DelimitedText := StepStrings[StepIndex];
 
-      SetLength(Result[S].Alternatives, Cmds.Count);
-      for C := 0 to Cmds.Count - 1 do
-        Result[S].Alternatives[C] := ParseCommand(Cmds[C]);
+      SetLength(Result[StepIndex].Alternatives, CommandStrings.Count);
+      for CommandIndex := 0 to CommandStrings.Count - 1 do
+        Result[StepIndex].Alternatives[CommandIndex] :=
+          ParseCommand(CommandStrings[CommandIndex]);
     end;
   finally
-    Cmds.Free;
-    Steps.Free;
+    CommandStrings.Free;
+    StepStrings.Free;
   end;
 end;
 
 function KindArity(Kind: Char): Integer;
 var
-  I: Integer;
+  KindIndex: Integer;
 begin
-  I := Pos(Kind, KIND_LETTERS);
-  if I = 0 then
+  KindIndex := Pos(Kind, KIND_LETTERS);
+  if KindIndex = 0 then
     Exit(-1);
-  Result := KIND_ARITY[I];
+  Result := KIND_ARITY[KindIndex];
 end;
 
 function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
 var
-  Want: Integer;
+  ExpectedArity: Integer;
 begin
   if not Sp.Valid then
     Exit(False);
-  Want := KindArity(Sp.Kind);
-  if Want < 0 then
+  ExpectedArity := KindArity(Sp.Kind);
+  if ExpectedArity < 0 then
     Exit(False);
-  Result := Sp.ArgCount = Want;
+  Result := Sp.ArgCount = ExpectedArity;
 end;
 
 function CheckArity(const Cmd: TEventCommand): Boolean;
 var
-  Want: Integer;
+  ExpectedArity: Integer;
 begin
   if (Cmd.SubOp < 0) or (Cmd.SubOp > High(SUBOP_ARITY)) then
     Exit(False);
 
-  Want := SUBOP_ARITY[Cmd.SubOp];
-  if Want = ARITY_UNKNOWN then
+  ExpectedArity := SUBOP_ARITY[Cmd.SubOp];
+  if ExpectedArity = ARITY_UNKNOWN then
     Exit(True);
 
-  if Want = ARITY_VARIABLE then
+  if ExpectedArity = ARITY_VARIABLE then
   begin
     { Sub-op 15: args are <id> <count> then <count> items. }
     if Cmd.ArgCount < 2 then
@@ -405,16 +406,16 @@ begin
     Exit(Cmd.Args[1] = Cmd.ArgCount - 2);
   end;
 
-  Result := Cmd.ArgCount = Want;
+  Result := Cmd.ArgCount = ExpectedArity;
 end;
 
 function CommandCount(const Prog: TEventProgram): Integer;
 var
-  S: Integer;
+  StepIndex: Integer;
 begin
   Result := 0;
-  for S := 0 to High(Prog) do
-    Inc(Result, Length(Prog[S].Alternatives));
+  for StepIndex := 0 to High(Prog) do
+    Inc(Result, Length(Prog[StepIndex].Alternatives));
 end;
 
 function ArgPosition(SubOp, Index: Integer; out Start, Len: Integer): Boolean;
@@ -499,15 +500,16 @@ end;
 function SelectAlternative(const Step: TEventStep;
   const Progress: array of Byte): Integer;
 var
-  I, G: Integer;
+  AlternativeIndex, GuardIndex: Integer;
 begin
   { Backwards, first match wins - so of several qualifying alternatives it is
     the LAST one in the file that runs. }
-  for I := High(Step.Alternatives) downto 0 do
+  for AlternativeIndex := High(Step.Alternatives) downto 0 do
   begin
-    G := Step.Alternatives[I].Guard;
-    if (G >= 0) and (G <= High(Progress)) and (Progress[G] <> 0) then
-      Exit(I);
+    GuardIndex := Step.Alternatives[AlternativeIndex].Guard;
+    if (GuardIndex >= 0) and (GuardIndex <= High(Progress))
+       and (Progress[GuardIndex] <> 0) then
+      Exit(AlternativeIndex);
   end;
   Result := -1;
 end;
