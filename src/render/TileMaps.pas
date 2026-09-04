@@ -1,5 +1,4 @@
-{ Level tilemaps loaded by Load_Map @ 0x00466340. Files use this little-endian
-  layout:
+{ Level tilemaps use this little-endian layout:
 
       int32  MapWidth      tiles
       int32  MapHeight     tiles
@@ -23,11 +22,8 @@ uses
 const
   MAP_HEADER_SIZE = 24;
 
-{ Where a tile id's picture sits in its tileset - row-major, from Load_Map
-  @ 0x00466340, which pushes them to TileMap_DefineTile Y first and whose Rect
-  builder takes that pair as (top, left). Here rather than inline because two
-  unrelated things need them: the drawing code below, and Stages.pas's terrain
-  animation table. }
+{ Return a tile's row-major source position in its tileset. These helpers are
+  shared by map drawing and terrain animation. }
 function TileSrcX(TileId, TileW, SheetCols: Integer): Integer;
 function TileSrcY(TileId, TileH, SheetCols: Integer): Integer;
 
@@ -61,27 +57,19 @@ type
     property SheetRows: Integer read FSheetRows;
     property Tiles[X, Y: Integer]: Word read GetTile; default;
 
-    { TileMap_Get @ 0x0044DB5C, which is what the COLLISION code calls and is
-      not the same function as GetTile above. It is one line - the Word at
-      Data[X + Y * MapWidth] - with no bounds check at all, so an X outside
-      0..MapWidth-1 indexes into the neighbouring row and the map wraps
-      horizontally for anything that walks off the side. That is reproduced
-      here because collision can reach it.
+    { Raw collision lookup. Unlike GetTile, the linear index permits an X outside
+      0..MapWidth-1 to index the neighbouring row, so collision wraps
+      horizontally for anything that walks off the side.
 
-      What is NOT reproduced: an index outside the array altogether, which the
-      original reads anyway. This returns 0 there. Drawing keeps GetTile, whose
-      clamp is right for a viewport. }
+      An index outside the allocation returns 0. Drawing uses GetTile because a
+      viewport needs two-dimensional bounds checking. }
     function TileAtRaw(X, Y: Integer): Integer;
-    { Sub-op 14's writer - 0x0044DB3C, the setter beside TileMap_Get. The
-      original stores a WORD, which is what the .map file holds, and it does
-      not bounds-check; refusing out of range here is a guard against a Pascal
-      range error rather than a behaviour, since a bad index in the original
-      would corrupt a neighbouring row. }
+    { Script-facing tile writer. Map entries are stored as unsigned words;
+      invalid coordinates are ignored to protect the tile allocation. }
     procedure SetTileRaw(X, Y, Tile: Integer);
 
-    { 0x0044DAE0, TileMap_DefineTile. Repoints one tile id at a different cell
-      of the tileset. This is how TMYBGANIME animates a background: it changes
-      the TILE, so every instance of it redraws. }
+    { Repoint one tile id at a different tileset cell. Background animation
+      changes this definition so every instance redraws with the new frame. }
     procedure DefineTile(TileId, SrcY, SrcX: Integer);
     function TileDef(TileId: Integer): TRect;
     function TileDefCount: Integer;
@@ -109,7 +97,6 @@ begin
                          PathDelim + Format('%.3d.map', [MapIndex]));
 end;
 
-{ Load_Map @ 0x00466340. }
 function TTileMap.LoadFromFile(const FileName: string): Boolean;
 var
   Stream: TFileStream;
@@ -149,13 +136,6 @@ begin
   end;
 end;
 
-{ Load_Map's registration loop, verbatim in effect:
-
-      TileMap_DefineTile(map, i, surface, 1,
-                         (i / SheetCols) * TileHeight,
-                         (i % SheetCols) * TileWidth)
-
-  for i in 0 .. SheetCols * SheetRows - 1. }
 procedure TTileMap.BuildTileDefs;
 var
   TileId, TileCount, SourceX, SourceY: Integer;
@@ -171,23 +151,9 @@ begin
   end;
 end;
 
-{ 0x0044DAE0. Note the argument order - SrcY before SrcX - which is the
-  original's, and the reason it is kept is that every caller writes them that
-  way round. See the unit header.
-
-  THE ORIGINAL MAKES THREE WRITES per tile, into a 0x18-byte record at
-  Self+4+id*0x18: the surface at +0, the rect at +4, and a byte at +0x14. This
-  writes only the rect, and the rect is exact. Both omissions are safe and the
-  callers are why - FUN_0044E2C0 (the anim tick) and Load_Tile_Data both pass a
-  LITERAL 1 for the byte, and the surface is fixed per tilemap, chosen once by
-  the loader and merely handed back by the animator, which is why BgAnime notes
-  that this map already knows which sheet it draws from.
-
-  THE BOUNDS CHECK IS OURS. The original masks the id with 0xffff and writes
-  regardless, so an id past the 1026 records corrupts memory. Refusing to
-  reproduce that is deliberate, and the guard cannot fire for either caller -
-  both derive the id from the sheet dimensions. DIV-012 corroborates the layout
-  from the other side. }
+{ SrcY precedes SrcX to match the animation data and all callers. A tilemap
+  owns its tileset selection, so redefining a tile only needs to replace its
+  source rectangle. Invalid tile identifiers are ignored. }
 procedure TTileMap.DefineTile(TileId, SrcY, SrcX: Integer);
 begin
   if (TileId < 0) or (TileId >= Length(FTileDefs)) then
@@ -231,9 +197,7 @@ begin
   FTiles[Y * FMapW + X] := Word(Tile);
 end;
 
-{ Positive modulus. Delphi's mod returns a negative answer for a negative
-  operand; TileMap_Draw @ 0x0044D818 spells the negative case out, so this
-  does too. }
+{ Positive modulus for scroll offsets on either side of the origin. }
 function WrapMod(A, Span: Integer): Integer;
 begin
   if Span <= 0 then
@@ -244,13 +208,8 @@ begin
     Result := A mod Span;
 end;
 
-{ TileMap_Draw @ 0x0044D818. The map is a TORUS: the scroll is reduced modulo
-  the map's pixel size and the tile indices wrap at both edges.
-
-  This clamped until 2026-09-01, which agrees with wrapping on every shipped
-  map because the camera never leaves them. It diverges the moment one does -
-  a 448-pixel-tall map with the new game's ScrollY of 448 drew nothing at all.
-  See notes/divergences.md. }
+{ Draw the map as a torus: reduce scrolling by the map's pixel dimensions and
+  wrap tile coordinates at both edges. }
 procedure TTileMap.Draw(Dest: TCanvas; ASurfaces: TSurfaceSet;
   SurfaceIndex, OffsetX, OffsetY, ViewW, ViewH: Integer);
 var
@@ -293,7 +252,7 @@ begin
     PixelX := StartPixelX;
     for ColumnOffset := 0 to ColumnCount - 1 do
     begin
-      { 0xFFFF is the original's "no tile"; it falls out of the range test. }
+      { $FFFF is the empty-tile marker and fails the definition range test. }
       TileId := GetTile(Column, Row);
       if (TileId >= 0) and (TileId < Length(FTileDefs)) then
         Dest.CopyRect(Rect(PixelX, PixelY,

@@ -1,12 +1,5 @@
 { Event-script execution. EventScripts loads stage records and EventCommands
-  parses their mini-language. Runtime behavior maps to:
-
-      0x00454EF4  Event_Begin              start a script
-      0x0045509C  EventScript_AdvanceStep  move to the next step
-      0x00455210  EventScript_Execute      run the current one, per frame
-      0x00454790  Events_SpawnNearCamera   decide what exists at all
-
-  A record's ParamB is a program. Event_Begin splits it on '/' into STEPS and
+  parses their mini-language. A record's ParamB is split on '/' into steps and
   hands the first to AdvanceStep. Each step is split on '.' into ALTERNATIVES,
   and exactly one runs - the LAST one whose guard flag is set, because the scan
   goes backwards. That is why a `0000-` alternative is written first: flag 0 is
@@ -30,20 +23,13 @@ uses
   Entities;
 
 type
-  { What the interpreter needs from the rest of the game.
-
-    Six of the eighteen sub-opcodes do presentation rather than logic - they
-    fade the screen, show a line of dialogue, change the music, load a stage.
-    Those are hooks. The other twelve are self-contained arithmetic on the
-    player state and the event table, and they are implemented outright.
-
-    A no-op host remains valid for logic-only execution and tests. }
+  { Presentation and world operations supplied by the game session. A no-op
+    host remains valid for logic-only execution. }
   TEventHost = class
   public
     { sub-op 3 - a line from the stage's tk file }
     procedure ShowLine(Index: Integer); virtual;
-    { Is a message box already up? 0x00455210's sub-op 3 guards on the MESSAGE
-      MODE at 0x0046CF28, not on ScreenPhase - see the arm below. }
+    { Whether a dialogue box is already active. }
     function MessageBusy: Boolean; virtual;
     { sub-op 9 / 12 }
     procedure PlaySound(Id: Integer); virtual;
@@ -67,14 +53,7 @@ type
     function FadeBusy: Boolean; virtual;
   end;
 
-  { The interpreter's state - six loose globals in the original, gathered so a
-    test can make one without disturbing the game's.
-
-        0x0046D24C  the steps array        0x0046D334  which step
-        0x0046CE7C  which event            0x0046D028  the delay it began with
-        0x0046D218  the cursor within a step
-
-    The step index is seeded to -1 by Event_Begin, so the first increment lands
+  { Interpreter state. The step index is seeded to -1, so the first increment lands
     on 0. There is deliberately NO wait flag here: the interpreter waits on
     GameState.ScreenPhase, the same global the pause menu, the game-over
     screen, the ending and the message box step through, and AdvanceStep
@@ -88,19 +67,18 @@ type
     Arg: Integer;
     Cursor: Integer;
 
-    { 0x00454EF4. Starts the script on an event record, unless one is already
-      running - the guard is the game state itself, not a flag. }
+    { Start a script unless another one is already running. }
     procedure TickDelay(Events: TEventScript; var P: TPlayerState;
                         var AGameState: Integer);
     procedure StartEvent(Events: TEventScript; AEventId, AArg: Integer;
                          var P: TPlayerState; var AGameState: Integer);
 
-    { 0x0045509C. Move to the next step and pick its alternative. Running off
-      the end returns the game to GS_PLAY. }
+    { Move to the next step and select its alternative. Running off the end
+      returns the game to GS_PLAY. }
     procedure AdvanceStep(var P: TPlayerState; var AGameState: Integer);
 
-    { 0x00455210. One frame of the current step. Most sub-opcodes finish in
-      one call and advance; the waiting ones do not. }
+    { Execute one frame of the current step. Most sub-opcodes advance
+      immediately; fades, dialogue, waits, and the ending span frames. }
     procedure Execute(Host: TEventHost; Events: TEventScript;
                       var P: TPlayerState; var AGameState: Integer);
 
@@ -111,12 +89,12 @@ type
     { The sub-opcode of the current step, or -1 when there is none. }
     function CurrentSubOp: Integer;
 
-    { 0x00454790. Walked every frame: spawns what has come near the camera,
+    { Walked every frame: spawns what has come near the camera,
       retires what a flag has closed off, and starts opcode-4 events outright.
       The camera tile is supplied by the session because the event runner does
       not own the display-layer origin. }
-    { World is optional only so the older tests need not all be rewritten; the
-      game always passes it, and without it the disable path can only kill. }
+    { World is optional for logic-only callers; without it the disable path can
+      retire the event but cannot destroy its entity. }
     procedure SpawnNearCamera(Events: TEventScript; Pool: TEntityPool;
                               const L: TLayerInfo;
                               CamTileX, CamTileY: Integer;
@@ -129,9 +107,7 @@ const
     10 x 7.5 tiles and the margin is 2 on every side, so the tests are
         CamTile - 2  <  tile  <  CamTile + 12      (10 + 2)
         CamTile - 2  <  tile  <  CamTile + 9.5     (7.5 + 2)
-    which is where Camera.pas's VIEW_TILES_* came from in the first place -
-    the two functions agree without either having been written from the
-    other. The vertical bound is fractional in the original and is kept so. }
+    matching Camera.pas's viewport dimensions. }
   SPAWN_WINDOW_X = 12;
   SPAWN_WINDOW_Y = 9.5;
 
@@ -145,13 +121,10 @@ const
   SPAWN_FORCED_EXTENT_TYPE = 20;
   SPAWN_FORCED_EXTENT = 32;
 
-{ The guard on an alternative: its first four characters are a progress flag
-  index. Exposed because both AdvanceStep and the tests want it, and because
-  StrToInt on a malformed one would raise where the original would not. }
+{ Parse the four-character progress-flag guard at the start of an alternative. }
 function AlternativeFlag(const Alt: string): Integer;
 
-{ The music sub-op's two flag columns and the literals they are compared
-  against, from 0x004559F1 and 0x00455A5E. }
+{ Fixed columns used by the music sub-opcode. }
 const
   MUSIC_STORE_COLUMN = 15;
   MUSIC_STORE_YES    = '1';
@@ -163,11 +136,8 @@ function StepChar(const Step: string; Position: Integer): Char;
 
 implementation
 
-{ Every argument in a step sits at a fixed position - which is why every
-  number in the shipped data is zero-padded - and EventCommands already
-  carries those positions, checked against 988 arguments with no
-  disagreements. Reusing them here rather than restating the offsets is the
-  point: one table, two readers. }
+{ Every argument occupies a fixed position, so shipped values are zero-padded.
+  EventCommands is the single source for those positions. }
 function StepArg(const Step: string; SubOp, Index: Integer): Integer;
 var
   Start, Len: Integer;
@@ -179,9 +149,8 @@ begin
     Result := 0;
 end;
 
-{ One character at a FIXED COLUMN, which is how the original reads the two
-  music flags - Copy(Step, 13, 1) and Copy(Step, 15, 1), not a dash-separated
-  field. Positions are 1-based, as Copy's are. }
+{ Read one character from a fixed one-based column. Music flags are not parsed
+  as dash-separated fields. }
 function StepChar(const Step: string; Position: Integer): Char;
 begin
   if (Position >= 1) and (Position <= Length(Step)) then
@@ -209,9 +178,8 @@ function TEventHost.FadeBusy: Boolean; begin Result := False; end;
 
 function AlternativeFlag(const Alt: string): Integer;
 begin
-  { The original does StrToInt(Copy(alt, 1, 4)) and would raise on anything
-    that is not four digits. Every shipped alternative is zero-padded, so this
-    only differs on data the game would itself have crashed on. }
+  { Shipped alternatives use a zero-padded four-digit guard. Malformed input
+    is rejected instead of raising a conversion exception. }
   Result := -1;
   if Length(Alt) < 4 then
     Exit;
@@ -264,8 +232,8 @@ begin
   Arg := AArg;
   Cursor := 0;
   AGameState := GS_STATE_140;
-  { 0x00454EF4 clears the shared sub-phase here, and it has to: the message
-    box's \k and \w arms both open with `if ScreenPhase = 0 then` one-shots
+  { Clear the shared sub-phase because the message box's \k and \w arms both
+    open with `if ScreenPhase = 0 then` one-shots
     that reset their animation, and the game-over screen and the ending step
     through the same counter. Starting a script without clearing it leaves
     whatever the last screen left behind. }
@@ -274,19 +242,12 @@ begin
   AdvanceStep(P, AGameState);
 end;
 
-{ The delay 0x0046D028 holds, counted down once a frame by 0x00464D30:
-
-      if ((d028 != 0) && (--d028 == 0) && (DynArrayHigh(EventTable) >= 0))
-          for i := 0 to high:
-              if (EventTable[i].opcode == 4) Event_Begin(i, 0);
-
-  So the argument Event_Begin is called with is a DELAY, and when it runs out
-  every opcode-4 event fires again. Events_SpawnNearCamera starts each puzzle
+{ Arg is a frame delay. When it expires, every opcode-4 event may run again.
+  SpawnNearCamera starts each puzzle
   checker with Event_Begin(i, 4), so a checker re-runs four frames later - which
   is how a puzzle that is not yet solved keeps testing itself.
 
-  Re-entry is safe because StartEvent refuses while the state is 140, exactly
-  as Event_Begin's own guard does, so at most one of them takes. }
+  Re-entry is safe because StartEvent permits only one active script. }
 procedure TEventRunner.TickDelay(Events: TEventScript; var P: TPlayerState;
                                  var AGameState: Integer);
 var
@@ -322,7 +283,7 @@ begin
   try
     List.CommaText := StringReplace(Steps[StepIndex], '.', ',', [rfReplaceAll]);
 
-    { BACKWARDS. The last alternative whose flag is set wins, which is why the
+    { Scan backwards. The last alternative whose flag is set wins, so the
       always-true `0000-` default is written first - the scan reaches it last.
       If none matches the step is left empty and does nothing. }
     for I := List.Count - 1 downto 0 do
@@ -414,8 +375,8 @@ begin
       end;
 
     SUBOP_DIALOGUE:
-      { RAISE IT ONCE, and the one-shot guard must be the MESSAGE MODE at
-        0x0046CF28 - never ScreenPhase. Execute runs every frame in state 140,
+      { Raise the dialogue once, guarded by message state rather than
+        ScreenPhase. Execute runs every frame in state 140,
         and the message box's own \k page turn clears ScreenPhase, so a guard
         on that re-raises page 1 forever and the rest of the message is
         unreachable. The box decides when it is done and calls AdvanceStep. }
@@ -565,12 +526,8 @@ begin
       end;
 
     SUBOP_SOUL_GET:
-      { NO AdvanceStep, and DO NOT ADD ONE. Every other opcode hands the script
-        on; this one TAKES OVER. The arm at 0x00455E5A..0x00455FC6 contains no
-        call to EventScript_AdvanceStep @ 0x0045509C - the two nearest calls
-        bracket it without entering.
-
-        Because the step index never moves, Execute re-enters this arm every
+      { Do not advance: this opcode takes over the script. Because the step
+        index never moves, Execute re-enters this arm every
         frame in GS_STATE_140, and Host.SoulGet walks itself through three
         phases into GS_ENDING. There is nothing to advance TO. Advance here and
         SoulGet runs phase 0 once - fanfare, orb destroyed - and is never called
@@ -587,10 +544,8 @@ begin
   end;
 end;
 
-{ ParamA's letter decides which fields the placement carries, and where each
-  one sits. The positions come from EventCommands.SpawnArgPosition, which was
-  read out of this same function - so this applies them rather than restating
-  them. }
+{ ParamA's kind letter selects its fields. SpawnArgPosition centralizes their
+  fixed-column locations. }
 procedure ApplySpawnArgs(Pool: TEntityPool; Slot: Integer;
                          const ParamA: string; var P: TPlayerState);
 var
@@ -656,11 +611,7 @@ begin
       end;
 
   else
-    { The original has a seventh form here, reading seven fields at 6, 11, 16, 21,
-      26, 31 and 36 - variant, both extents and all four box percentages. No
-      shipped placement reaches it: every one of the 692 records carries one of
-      the six letters above. Left unimplemented deliberately, and this comment
-      is the record of why rather than an oversight. }
+    { Shipped placements use only the six kinds above; ignore unknown kinds. }
     ;
   end;
 end;

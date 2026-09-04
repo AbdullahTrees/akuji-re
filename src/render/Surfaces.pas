@@ -1,5 +1,5 @@
-{ Surface-table loader (Load_Surface_Textures @ 0x00465E9C). Each row in
-  data\surfNNN.dat supplies a bitmap name and target dimensions. Bitmaps are
+{ Each row in data\surfNNN.dat supplies a bitmap name and target dimensions.
+  Bitmaps are
   loaded from bmp.qda when available or from the loose bmp directory. }
 
 unit Surfaces;
@@ -12,7 +12,7 @@ uses
   Classes, SysUtils, Graphics, QdaArchive;
 
 const
-  MAX_SURFACES = 32;   { the original frees exactly 0x20 slots }
+  MAX_SURFACES = 32;
 
 type
   TSurfaceSlot = record
@@ -92,7 +92,6 @@ begin
   Result := FSlots[Index];
 end;
 
-{ Load_Surface_Textures @ 0x00465E9C. }
 function TSurfaceSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer;
 var
   Lines, Fields: TStringList;
@@ -116,8 +115,7 @@ begin
       if Trim(Lines[Slot]) = '' then
         Continue;
 
-      { The original sets .CommaText, which splits on commas AND whitespace -
-        the files are comma+tab separated, so both matter. }
+      { CommaText handles the files' comma-and-tab separators. }
       Fields.CommaText := Lines[Slot];
       if Fields.Count < 3 then
         Continue;

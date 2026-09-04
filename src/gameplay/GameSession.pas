@@ -15,9 +15,8 @@ uses
   Sprites, SpritePool, BgAnime;
 
 type
-  { A TTileSource over a loaded map. The map may be nil - a session with no
-    terrain answers TILE_NONE everywhere, which is what the flat-room tests
-    want. }
+  { A TTileSource over a loaded map. A session with no map reports empty
+    terrain everywhere. }
   TMapTileSource = class(TTileSource)
   public
     Map: TTileMap;
@@ -115,8 +114,8 @@ type
     { Runs BeginFrame, TickPre, and TickEntities in order. }
     procedure Frame(var AGameState: Integer);
 
-    { 0x0044E2C0, once a frame. Deliberately NOT part of Frame: AppIdle ticks
-      the animator outside the state dispatch, so a background keeps moving
+    { Deliberately outside Frame: the application ticks background animation
+      outside state dispatch, so a background keeps moving
       through a dialogue box and a pause, where no game logic steps at all.
       Putting it in Frame would have frozen the walls whenever anything
       interrupted play. }
@@ -131,12 +130,7 @@ type
       Layer property. }
     procedure SetCamera(PixelX, PixelY: Integer);
 
-    { THE layer, not a copy. TEntityWorld owns the storage because that is
-      what every collision query reads, and the session hands the same field to
-      EntityUpdateAll as its var parameter - so a scroll applied during a frame
-      is applied to the thing the next query reads. Keeping a second copy in
-      sync here cannot work: whichever end is written back last discards the
-      other's scroll. }
+    { Read-only view of the world layer used by collision and scrolling. }
     property Layer: TLayerInfo read GetLayer;
 
     { The sprite pool. Not presentation: an entity's extents are read off its
@@ -146,9 +140,7 @@ type
       terrains 5..9, which is a configuration and not a missing piece -
       Terrain_Configure builds one only for 1..4. }
     property BgAnim: TBgAnime read FBgAnime;
-    { Stage_Begin's first two statements are the fader's, and the component
-      belongs to the form - so the session asks rather than reaching for it.
-      Bound to DDDD1.StartFade(0, False). }
+    { Bound by the form to start the stage fade-in. }
     property OnStartFade: TSessionNotify read FOnStartFade write FOnStartFade;
     { GameState_Reset also clears the message box and the overlay, which the
       form owns. }
@@ -157,20 +149,16 @@ type
     property Sprites: TSpritePool read FSprites;
     procedure SetFrames(AFrames: TSpriteSet);
 
-    { 0x004653C8, GameState_Reset. Called before a new game, before a
-      continue, and by the game-over screen. Its second argument is a MODE
-      and only two things read it:
+    { Reset shared runtime state before a new game, continue, or game-over
+      restart. Mode has two special values:
 
         mode 0   also zeroes Settings.CurrentStage, so the run restarts at
                  the first stage. Every other mode leaves the stage alone.
         mode 2   SKIPS the camera reset, so a caller that has already placed
                  the view keeps it.
 
-      It clears the layers' origin and delta but NOT their tile geometry, and
-      only the last 501 progress flags - so 4000..4500 are per-run scratch and
-      everything below is the save. Nine further globals and two objects that
-      the original clears have no counterpart here yet; they are listed in the
-      body rather than silently skipped. }
+      It clears layer origins and deltas but retains tile geometry. Progress
+      flags 4000..4500 are per-run scratch; lower flags belong to the save. }
     procedure ResetState(Mode: Integer);
 
     property World: TGameWorld read FWorld;
@@ -220,10 +208,7 @@ end;
 
 procedure TGameWorld.SetSpawnField(Slot, IntIndex, Value: Integer);
 begin
-  { Entity_Spawn's callers write straight through to the new slot, and a
-    failed spawn returns SLOT_NONE - which the original then writes to
-    anyway. Refusing is the one divergence, because reproducing it means
-    writing outside the array. }
+  { A failed spawn has no slot to receive initialization fields. }
   if (FSession.Pool = nil) or (Slot = SLOT_NONE) then
     Exit;
   FSession.Pool.SetField(Slot, IntIndex, Value);
@@ -264,8 +249,8 @@ var
 begin
   if (FSession.Runner = nil) or (FSession.Events = nil) then
     Exit;
-  { Entity_Destroy reaches this in the middle of a frame and the game state is
-    what Event_Begin locks on, so it has to be the real one. }
+  { Entity destruction can start an event mid-frame, so update the shared game
+    state around the runner call. }
   CurrentGameState := GameStateValue;
   FSession.Runner.StartEvent(FSession.Events, EventId, Arg, FSession.Player,
     CurrentGameState);
@@ -277,8 +262,7 @@ begin
   if (FSession.Events = nil) or (EventId < 0)
      or (EventId >= FSession.Events.Count) then
     Exit;
-  { The has-entity mark goes down; the in-window mark stays up, which is what
-    stops an immediate replacement. See Events_SpawnNearCamera. }
+  { Keep the in-window mark set to prevent an immediate replacement spawn. }
   FSession.Events.SetActive(EventId, False);
 end;
 
@@ -313,8 +297,7 @@ end;
 
 function TGameWorld.ConfirmPressed: Boolean;
 begin
-  { Was Button[0] as a LEVEL. Input_ConfirmPressed is an edge, and takes
-    either of the first two buttons - see GameState.pas. }
+  { ConfirmPressed accepts either action button on its press edge. }
   Result := GameState.ConfirmPressed(FSession.Input);
 end;
 
@@ -415,10 +398,8 @@ begin
       FEvents.SetActive(I, False);
     end;
 
-  { The interpreter's own four, in the original's order: EventId 0x0046CE7C,
-    StepIndex 0x0046D334, Arg 0x0046D028 - the delay that re-fires the
-    opcode-4 checkers - and Cursor 0x0046D218. Arg matters most: a countdown
-    armed in one room would otherwise fire in the next. }
+  { Clear all interpreter state, including the opcode-4 retry delay, so work
+    armed in one room cannot fire in the next. }
   if FRunner <> nil then
   begin
     FRunner.EventId := 0;
@@ -427,17 +408,10 @@ begin
     FRunner.Cursor := 0;
   end;
 
-  { The message box and the overlay - 0x0046CC98 and 0x0046CF24 (the page
-    start and the reveal cursor), 0x0046CF28 (the mode), 0x0046CD00 and
-    0x0046CDA0 (the overlay's flag and mode). They live on the form, so it is
-    asked rather than reached for. }
+  { Message-box and overlay state belong to the form. }
   if Assigned(FOnResetHost) then
     FOnResetHost;
 
-  { Four things the original clears here have no counterpart, each because it
-    is unobservable rather than forgotten - a global nothing ever reads, two
-    layers no shipped stage populates, and two surfaces this build does not
-    allocate. notes/game_state_reset.md has the case for each. }
 end;
 
 procedure TGameSession.SetFrames(AFrames: TSpriteSet);
@@ -456,14 +430,8 @@ begin
   FWorld.Layer.OriginY := (PixelY shl POSITION_SHIFT) + POSITION_BIAS;
 end;
 
-{ DIVERGENCE DIV-012. The original divides the TILE COMPONENT's own scroll,
-  not the layer origin:
-
-      camTileX = *(TileMaps + 0x6034) / *(LayerInfo + 0x10)
-
-  and that field is written during the draw, a step AFTER the spawn walk that
-  reads it. The two agree in the steady state and differ by a frame at the
-  edges. There is no component to ask yet - see the ledger. }
+{ DIVERGENCE DIV-012: derive spawn tiles from the live layer origin. }
+{ Return the camera tile derived from the current layer origin. }
 function TGameSession.CamTileX: Integer;
 begin
   if FWorld.Layer.TileW = 0 then
@@ -485,15 +453,11 @@ var
   KillTile: Integer;
   TerrainAnim: TTerrainAnim;
 begin
-  { Load_Stage_Assets' session work: select the stage, configure terrain, and
-    load its event script. BeginStage handles runtime placement separately. }
+  { Select the stage, configure terrain, and load its event script. BeginStage
+    handles runtime placement separately. }
   FStageIndex := StageIndex;
 
-  { Terrain_Configure. The threshold and the kill tile are what every collision
-    query and every vertical move read, so they are set before anything spawns.
-    Both globals are written together - 0x00484EF4 and 0x00484EF8, adjacent -
-    and the kill tile was being computed here and thrown away, which is why
-    water was not lethal. }
+  { Configure collision thresholds before anything spawns. }
   TerrainId := 0;
   if (FStages <> nil) and (StageIndex >= 0) and (StageIndex < FStages.Count) then
     TerrainId := FStages.TerrainId[StageIndex];
@@ -504,8 +468,7 @@ begin
   FWorld.KillTile := KillTile;
   FWorld.TerrainId := TerrainId;
 
-  { Terrain_Configure builds the animator for terrains 1..4 and nothing for
-    5..9. Rebuilt per stage because its tracks are the terrain's. }
+  { Animation tracks belong to the terrain and are rebuilt per stage. }
   FreeAndNil(FBgAnime);
   if TerrainAnim.TrackCount > 0 then
     FBgAnime := TBgAnime.Create(Map, TerrainAnim);
@@ -522,35 +485,25 @@ begin
   end;
 end;
 
-{ --- Stage_Begin @ 0x00462210, and NOTHING ELSE -------------------------
-  Thirteen statements, and after the backward pass, thirteen statements here.
-  What was removed rather than added: the terrain configuration, the
-  background animator, the event load and the tilemap wiring, all of which are
-  Load_Stage_Assets' and now live in LoadStageAssets above; and the pool,
-  sprite and layer-delta clears, which ResetState(1) - statement 3 - already
-  does, so they were redundant rather than misplaced.
-
-  Statements 7-9 (Load_Stage_Assets, Font_Define, the box sheet) are the
-  form's and run before this, which is the original's order. }
 procedure TGameSession.BeginStage(StageIndex: Integer;
                                   var AGameState: Integer);
 var
   Slot: Integer;
 begin
   if Assigned(FOnStartFade) then
-    FOnStartFade;                       { 1-2  fader step 4, StartFade in }
-  ResetState(1);                        { 3    GameState_Reset(form, 1) }
-  ScreenPhase := 0;                     { 4 }
-  AGameState := GS_PLAY;                { 5    0x3C }
-  TitleSubMode := 0;                    { 6 }
+    FOnStartFade;
+  ResetState(1);
+  ScreenPhase := 0;
+  AGameState := GS_PLAY;
+  TitleSubMode := 0;
 
-  SetCamera(Player.ScrollX, Player.ScrollY);            { 10, 11 }
+  SetCamera(Player.ScrollX, Player.ScrollY);
 
-  Slot := FPool.Spawn(PLAYER_SPAWN_KIND, PLAYER_SPAWN_TYPE,   { 12 }
+  Slot := FPool.Spawn(PLAYER_SPAWN_KIND, PLAYER_SPAWN_TYPE,
                       Player.SpawnX shl POSITION_SHIFT,
                       Player.SpawnY shl POSITION_SHIFT);
   if Slot <> SLOT_NONE then
-    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);      { 13 }
+    FPool.SetField(Slot, EF_FACING, Player.SpawnFacing);
 end;
 
 procedure TGameSession.TickBackground;
@@ -561,16 +514,8 @@ end;
 
 procedure TGameSession.BeginFrame;
 begin
-  { That matters because Entity_UpdateAll adds the delta to every non
-    screen-space entity's position, which is how the world carries things
-    along when the view scrolls. Leave it set and the carry never stops: one
-    scroll and every entity drifts in that direction forever. Two mana stones
-    flying steadily upward off the top of the screen is exactly what it looks
-    like.
-
-    FWorld.Layer is passed straight through as the var parameter below, so a
-    scroll applied inside the frame is applied to the same storage the
-    collision queries read. There is no second copy to keep in step. }
+  { Deltas carry world-space entities with a scrolling view for one frame only.
+    Clear them before the next frame so that motion does not repeat. }
   FWorld.Layer.DeltaX := 0;
   FWorld.Layer.DeltaY := 0;
 end;

@@ -1,5 +1,5 @@
-{ Bitmap-font rendering from Font_Define @ 0x004511A0 and Game_DrawText @
-  0x004511EC. The sheet contains three colour variants of the $20..$5F glyph
+{ Bitmap-font rendering. The sheet contains three colour variants of the
+  $20..$5F glyph
   range in 32-column rows. Each 9x9 glyph advances by eight pixels.
 
   Glyph coordinates are calculated as follows:
@@ -22,7 +22,7 @@ uses
   Classes, SysUtils, Graphics;
 
 const
-  { Font name used by Game_DrawTextOutlined @ 0x00451004. }
+  { Font used for outlined narrative text. }
   OUTLINED_FONT_NAME = 'MS Sans Serif';
   OUTLINED_FONT_SIZE = 10;
 
@@ -58,8 +58,8 @@ type
     property Variants: Integer read FVariants;
   end;
 
-{ Game_DrawTextOutlined @ 0x00451004. Narrative text uses a Windows font with
-  a four-direction, one-pixel outline; diagonal outline pixels are omitted. }
+{ Draw narrative text with a four-direction, one-pixel outline. Diagonal
+  outline pixels are omitted. }
 procedure Game_DrawTextOutlined(X, Y: Integer; const S: string;
                                 Outline, Fill: TColor; Size: Integer;
                                 Dest: TCanvas);

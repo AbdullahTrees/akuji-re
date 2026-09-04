@@ -1,9 +1,5 @@
-{ Camera movement and its asymmetric scrolling dead zone:
-
-      0x00459C1C  Camera_ShouldScrollX    0x00459D9C  Camera_ApplyMoveX
-      0x00459CD8  Camera_ShouldScrollY    0x00459E08  Camera_ApplyMoveY
-
-  Movement outside the dead zone updates the layer origin instead of the
+{ Camera movement and its asymmetric scrolling dead zone. Movement outside
+  the dead zone updates the layer origin instead of the
   entity position. Entity positions therefore remain in world coordinates and
   can stay unchanged while the view scrolls. }
 
@@ -17,18 +13,14 @@ uses
   SysUtils, Entities;
 
 const
-  { The dead zone, read out of the two ShouldScroll functions. The comparisons
-    there are >= LEFT / <= RIGHT on the pixel position, so these are the first
-    pixel INSIDE the zone on each side. }
+  { The first pixels inside each edge of the scrolling dead zone. }
   DEADZONE_LEFT   = $90;   { 144; the test is  Pixel <  LEFT   and moving left }
   DEADZONE_RIGHT  = $B1;   { 177; the test is  Pixel >= RIGHT  and moving right }
   DEADZONE_TOP    = $68;   { 104 }
   DEADZONE_BOTTOM = $89;   { 137 }
 
-  { The screen in tiles. VIEW_TILES_Y is a 4-byte float at 0x00459D98 - the
-    only FPU code in the game layer - because 240 is not a whole number of
-    32-pixel tiles, and rounding it would leave a black strip or cut the bottom
-    row. --selftest-camera checks both against all 65 shipped maps. }
+  { The 320x240 viewport expressed in 32-pixel tiles. The fractional height
+    keeps the partly visible bottom row in the scroll calculation. }
   VIEW_TILES_X: Single = 10.0;
   VIEW_TILES_Y: Single = 7.5;
 
@@ -60,14 +52,12 @@ end;
 
 function MaxScrollY(const L: TLayerInfo): Integer;
 begin
-  { Trunc, not Round: FCOMPP against the integer pixel value is a plain
-    ordered compare, so the fractional half is simply carried through. With
-    TileH = 32 the product is exact anyway. }
+  { Tile heights are integral, but the viewport height may include half a
+    tile. Truncation converts the resulting limit to a pixel coordinate. }
   Result := Trunc((L.MapTilesY - VIEW_TILES_Y) * L.TileH);
 end;
 
-{ Camera_ShouldScrollX @ 0x00459C1C. Convert the biased destination with
-  PixelOf before comparing it with map bounds. }
+{ Convert the biased destination before comparing it with map bounds. }
 function ShouldScrollX(const L: TLayerInfo; PixelX, Vel: Integer): Boolean;
 var
   DestinationPixel: Integer;
@@ -84,7 +74,6 @@ begin
   Result := True;
 end;
 
-{ Camera_ShouldScrollY @ 0x00459CD8. }
 function ShouldScrollY(const L: TLayerInfo; PixelY, Vel: Integer): Boolean;
 var
   DestinationPixel: Integer;
@@ -101,7 +90,6 @@ begin
   Result := True;
 end;
 
-{ Camera_ApplyMoveX @ 0x00459D9C. }
 procedure ApplyMoveX(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean);
 var
@@ -120,7 +108,6 @@ begin
     Vel := 0;
 end;
 
-{ Camera_ApplyMoveY @ 0x00459E08. }
 procedure ApplyMoveY(var L: TLayerInfo; var Pos, Vel: Integer;
                      Scroll, Blocked: Boolean;
                      E: PEntity; World: TEntityWorld);

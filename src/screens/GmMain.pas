@@ -1,6 +1,5 @@
 { Main form and frame loop. Published component field names must match
-  GmMain.lfm because resource streaming binds them by name. AppIdle implements
-  TFrm_main_AppIdle @ 0x00464D30. }
+  GmMain.lfm because resource streaming binds them by name. }
 
 unit GmMain;
 
@@ -51,7 +50,7 @@ type
     procedure DDDD1Init(Sender: TObject);
     procedure TitleSound(Index: Integer);
   private
-    FLastFrame: DWord;     // p_LastFrameTime 0x0046D1E0
+    FLastFrame: DWord;
     FShakeOffset: Integer; // this frame's Random(0x10) - 8
     FArchive: TQdaArchive;
     FTitle: TBitmap;
@@ -72,15 +71,14 @@ type
     FGameOver: TGameOverScreen;
     FPause: TPauseMenu;
     FOpening: TOpeningScreen;
-    FTitleSlept: Boolean;     { the once-only flag at 0x0046CFE8 }
+    FTitleSlept: Boolean;
     FEnding: TEndingScreen;
-    { 0x00466888's three pieces of state. The stamp and the running count are
-      locals of the original's own once-a-second sample. }
+    { Once-per-second debug frame-rate sample. }
     FDebugStamp: DWord;
     FDebugFrames: Integer;
     FDebugFps: Integer;
-    FUseArchive: Boolean;     { p_UseArchive 0x0046CCB4 }
-    FEndingBmp: TBitmap;      { the surface at 0x0046D1F0 }
+    FUseArchive: Boolean;
+    FEndingBmp: TBitmap;
     FOpeningBmp: TBitmap;     { bmp\op%.3d.bmp, one slide at a time }
     FConfirmLatch: Boolean;
     { Owns the active player, entity pool, camera, and event state. }
@@ -115,17 +113,14 @@ type
     procedure OpeningPicture(Id: Integer);
     procedure PlayMusicTrack(Track: Integer; Loop: Boolean;
                              FadeSeconds: Integer);
-    { The callback shape the opening and the power-up panel want. Both go
-      through 0x00450F14, which stops dead - fade 0 - so this is not a
-      convenience default, it is the value those two call sites use. }
+    { Starts a track immediately for cutscenes and power-up panels. }
     procedure PlayMusicCut(Track: Integer; Loop: Boolean);
-    { 0x00450F74 - stop with a two-second fade, then play. }
+    { Stops with a two-second fade before playing the next track. }
     procedure PlayMusicFading(Track: Integer; Loop: Boolean);
-    { 0x00450EDC / 0x00450EF0 - see KbgmPlayer.pas. }
+    { Save and restore the current music track. }
     procedure RememberMusicTrack;
     procedure ResumeMusicTrack;
-    { The screen fade lives on the display component - 0x0044DC48 and the
-      object at 0x0046CB6C. }
+    { Dialogue fade adapter for the display component. }
     procedure DialogueStartFade(FadeOut: Boolean);
     function DialogueFadeBusy: Boolean;
     function DialogueMusicBusy: Boolean;
@@ -166,14 +161,7 @@ implementation
 
 {$R *.lfm}
 
-{ ---------------------------------------------------------------------------
-  DDDD1Init - TFrm_main_DDDD1Init @ 0x00465584
-
-  Startup loads data\system.dat over defaults, applies system.ini, initializes
-  subsystems, and finally installs the idle handler.
-  --------------------------------------------------------------------------- }
-{ The original ran from the game directory, so its paths were relative. The
-  rebuild lives in src/, so look in the obvious places rather than assuming. }
+{ Finds game data beside the executable or in the packaged data directory. }
 function TFrm_main.FindGameData: string;
 const
   Candidates: array[0..2] of string = (
@@ -194,9 +182,7 @@ begin
   Result := '';
 end;
 
-{ TFrm_main_DDDD1Init @ 0x00465584. The whole boot, in the original's order:
-  defaults into the settings record, system.dat over the top, system.ini over
-  THAT for two fields, then every global the frame loop reads.
+{ Loads settings, assets, audio, screens, and frame-loop state.
 
   Two things worth knowing about the settings record:
 
@@ -206,8 +192,7 @@ end;
       does not persist across a run even though it sits inside the 56 bytes
       written back.
 
-  The last thing it does before installing the idle handler is clear the flag
-  at 0x0046CFE8, which is what arms Title_Init's one-off 360 ms sleep. }
+  The title's one-time startup delay is armed after initialization. }
 procedure TFrm_main.DDDD1Init(Sender: TObject);
 var
   DataDir: string;
@@ -220,31 +205,18 @@ begin
   begin
     FDataDir := DataDir;
 
-    { The original writes its defaults into p_Settings and then lets
-      FileRead(h, p_Settings, 0x38) overwrite them, so a missing or short
-      system.dat simply leaves the defaults standing. Same here: the record's
-      initial value is the default and LoadSettings only reports whether the
-      file was actually applied. }
+    { Missing or short settings data leaves the initialized defaults intact. }
     LoadSettings(DataDir);
 
-    { system.ini carries [disp] fullscreen and [device] input, and both
-      overwrite what system.dat just supplied. Two deliberate exactnesses:
+    { system.ini overrides fullscreen and input-device settings. Compatibility
+      requires two parsing details:
 
-        * the fullscreen compare is case-SENSITIVE (@LStrCmp at 0x004656D8),
+        * the fullscreen comparison is case-sensitive,
           so 'ON', 'On' and ' on ' all mean WINDOWED.
-        * input goes through the one-argument StrToInt at 0x00465708, which
-          RAISES on anything it cannot parse - including the empty string a
-          missing key returns. A malformed [device] input takes the original
-          down at start-up, so it takes this down too.
+        * input uses StrToInt and raises for missing or malformed values.
 
       The shipped file parses the same either way. }
-    { DataDir, not ExtractFilePath(ParamStr(0)). In the original the two are
-      the SAME directory - akuji.exe ships beside system.ini - but this build
-      lives in src/ and finds the data with FindGameData, so every other path
-      here goes through DataDir and this one must too.
-
-      It matters because StrToInt below is faithful and RAISES on the empty
-      string a missing key returns. }
+    { Use the resolved data directory consistently for packaged builds. }
     Ini := TIniFile.Create(DataDir + 'system.ini');
     try
       Settings.FullScreenFlag :=
@@ -267,15 +239,13 @@ begin
     { p_UseArchive, set by DDDD1Init the same way. }
     FUseArchive := True;
 
-    { Original: Title_Init calls Load_Stage_Assets(MainForm, 0), which pulls
-      surface set 0, then registers slot 0 as font 0. }
+    { Load title surfaces, sprites, and font assets. }
     FSurfaces := TSurfaceSet.Create(FArchive);
     FSurfaces.LoadSet(DataDir, 0);
     FSprites := TSpriteSet.Create;
     FSprites.LoadSet(DataDir, 0);
 
-    { Original: Load_StageTable reads data\stage.dat once at startup, and
-      Load_Stage_Assets then indexes it per stage. }
+    { Load the stage table once; stage assets are selected from it later. }
     FStages := TStageTable.Create;
     FStages.Load(DataDir);
     FMap := TTileMap.Create;
@@ -300,12 +270,8 @@ begin
 
     FTitle := FSurfaces[1];   { menu background - owned by FSurfaces }
 
-    { Audio. The original opened DirectSound in the component's own init and
-      loaded all 57 effects up front; nothing streams. Volume comes from
-      system.dat +0x24 and defaults to 10 until that struct is read.
-
-      A machine with no sound device must still play, so a failure here is
-      recorded and ignored rather than raised. }
+    { Effects are loaded up front. Audio initialization failures remain
+      non-fatal so the game can run without a sound device. }
     DDSD1.Open(DataDir);
     DDSD1.Volume := Settings.Volume;
     KbgmPlayer1.Open(DataDir);
@@ -319,8 +285,7 @@ begin
   OnPaint := FormPaint;
   DoubleBuffered := True;
 
-  { DDDD1Init @ 0x00465584 calls the fullscreen toggle at 0x0046572C with
-    the flag it has just loaded out of system.dat. It is not a key binding. }
+  { Apply the fullscreen setting after display initialization. }
   SetFullScreen(FullScreenOn);
 
   FTitleScreen := TTitleScreen.Create;
@@ -361,8 +326,7 @@ begin
   { Player_Update's soft-landing guard reads the fader. Wired here rather
     than copied into the world each frame - see TEntityWorld.Fading. }
   FSession.World.OnFading := EntityWorldFading;
-  { The original calls MainForm.DDSD1.Play straight from the title function;
-    routing it through a callback keeps Title.pas off the component layer. }
+  { Keep Title.pas independent of the component layer through callbacks. }
   FTitleScreen.OnSound := TitleSound;
   FTitleScreen.OnResetState := TitleResetState;
   FTitleScreen.OnResetOpening := TitleResetOpening;
@@ -375,45 +339,31 @@ begin
   BeginFrameClock;
   FLastFrame := FrameClockMs;
 
-  { The rest of the original's global reset, in its order. }
+  { Initialize global frame-loop state. }
   Randomize;
   FillChar(FSession.Input, SizeOf(FSession.Input), 0);
   EntitiesLive := 0;
   EntitiesDrawn := 0;
   GameStateValue := GS_TITLE_INIT;
   SavedGameState := 0;
-  { 0x0046CFE8 - armed here, spent once by Title_Init. }
+  { Arm TitleInit's one-time delay. }
   FTitleSlept := False;
 
-  { The original: Application.FOnIdle := TFrm_main_AppIdle (+0xD8/+0xDC). }
   Application.OnIdle := AppIdle;
 end;
 
-{ ---------------------------------------------------------------------------
-  AppIdle - TFrm_main_AppIdle @ 0x00464D30, the frame loop.
-
-  DIVERGENCE DIV-001: the original set Done := False unconditionally and then
-  spin-waited on timeGetTime until >15 ms had elapsed, which pegs a CPU core at
-  100%. Here the frame is paced with a real sleep and Done is left True when
-  there is time to spare, so the process idles properly between frames. Same
-  ~60 FPS target, none of the burn.
-  --------------------------------------------------------------------------- }
+{ DIVERGENCE DIV-001: frame pacing yields between updates instead of spinning. }
+{ Runs one frame when the frame clock reaches the target interval. Returning
+  Done=True before then lets the application sleep between frames. }
 procedure TFrm_main.AppIdle(Sender: TObject; var Done: Boolean);
 var
   Now_, Elapsed: DWord;
 begin
-  { FrameClockMs is timeGetTime. Reading the other one stepped 15-16 ms and
-    held the game to 40 fps against the original's 62 - see GameState.pas.
-    DWord arithmetic on purpose: the clock wraps every 49 days and the
-    subtraction wraps with it, exactly as the original's does. }
+  { DWord subtraction intentionally handles the multimedia clock's wraparound. }
   Now_ := FrameClockMs;
   Elapsed := Now_ - FLastFrame;
 
-  { SoftwareVsync, the global at 0x0046CE60 - not a field of this form. The
-    options screen toggles that global (Title_MainMenu's case 6 does
-    `*p_SoftwareVsync ^= 1`) and DDDD1Init loads it from system.dat +0x18, so a
-    private copy set to True once made the option inert: every frame was
-    limited whatever the setting said. }
+  { SoftwareVsync is shared with the options screen and loaded from settings. }
   if SoftwareVsync and (Elapsed < FRAME_MS) then
   begin
     Sleep(1);        { yield instead of spinning }
@@ -423,23 +373,17 @@ begin
   FLastFrame := Now_;
 
   PollInput;              { step 2-3 }
-  DDDD1.Clear;            { step 4  - TDDDD_Clear    0x00449E78 }
+  DDDD1.Clear;
   { The animated background tiles, once a frame and OUTSIDE the state
     dispatch - which is where AppIdle ticks them, so a wall keeps moving
     behind a dialogue box or a pause. }
   FSession.TickBackground;
 
-  { TWO DISPATCHES WITH THE ENTITY UPDATE BETWEEN THEM, because Title_Init
-    changes the state before the second dispatch reads it - frame 1 of a
-    real session runs Title_Init, Entity_UpdateAll, then Title_MainMenu.
-    Which arm goes where is from the trace, not from reading: see
-    notes/trace_findings.md. }
+  { State handling is split around entity updates so transitions made by the
+    pre-dispatch are visible to the post-dispatch in the same frame. }
   FSession.BeginFrame;
   DispatchPre;
-  { 0x00464D30 counts the event delay down HERE - between the state-60/140
-    spawn-and-script block and the state-10/30 one. Those are separate `if`s on
-    the same state value in the original and mutually exclusive arms of one
-    case here, so no frame runs both and the position is equivalent. }
+  { Event delays tick after script setup and before entity updates. }
   FSession.Runner.TickDelay(FSession.Events, FSession.Player, GameStateValue);
   { Player_Update's SOFT landing sound is suppressed while the screen fades.
     That matters at every door: the transition fades, the player is placed
@@ -461,58 +405,31 @@ begin
     FSession.Sprites.ShiftY(-FShakeOffset);
   end;
   DispatchPost;
-  { The fade advances once a frame, which is what lets FadeBusy fall to False
-    after thirty of them and the interpreter's wait finish.
-
-    NOT WHILE PAUSED - the original guards this with the same state test it
-    just used for PauseMenu_Update, so a room transition caught mid-fade
-    holds where it is until you unpause instead of running to completion
-    behind the menu. }
+  { Fades pause with the game instead of completing behind the pause menu. }
   if GameStateValue <> GS_PAUSE then
     DDDD1.TickFade;
 
-  { The frame loop's own way into the pause menu, at 0x00464D30, beside
-    FormKeyDown's VK_ESCAPE - both write the same four globals, so both call
-    EnterPause. The guards are the original's: not while already paused, and
-    not on the title screen's OPTIONS page, where this button is that screen's
-    back key instead. }
+  { The cancel button enters pause except while paused or editing options. }
   if (GameStateValue <> GS_PAUSE)
      and not ((GameStateValue = GS_TITLE_MENU) and (TitleSubMode = TSM_OPTIONS))
      and FSession.Input.Button[PAUSE_CANCEL_BUTTON]
      and not FSession.Input.ButtonLatch[PAUSE_CANCEL_BUTTON] then
     EnterPause;
 
-  { DIVERGENCE DIV-002. These stand in for the Joy poll the original runs at
-    the top of every frame, which overwrites the previous frame's values
-    unconditionally - so they must live exactly one frame and be cleared HERE,
-    for every state, not inside whichever arm happens to consume them. A state
-    that does not clear them hands them to whatever runs next, and screen
-    changes make that a different screen's input.
-
-    The frame boundary rather than the top: these are fed by WM_KEYDOWN between
-    frames, so this is where a key event stops being this frame's input. That
-    placement belongs to the stand-in and goes when DIV-002 does. }
+  { Clear one-frame keyboard fallback input after every state has consumed it. }
   FMoveY := 0;
   FMoveX := 0;
   FConfirm := False;
 
-  { Step 7. Must come after the dispatch: the handlers read Moving and the
-    button latches expecting the PREVIOUS frame's values. The original's
-    equivalent block sits here too - after the pause check, before the
-    present. }
+  { Update latches after dispatch so handlers see the previous frame's state. }
   InputStep7;
-  DrawDebugOverlay;       { 0x00466888, and off unless system.dat +0x1B is set }
-  DDDD1.Present;          { step 8  - TDDDD_Present  0x00449D00 }
+  DrawDebugOverlay;
+  DDDD1.Present;
 
   Done := False;          { keep the loop running }
 end;
 
-{ Step 2-3: the original polled Joy through one of three device paths chosen by
-  Settings+0x34, then read 4 buttons through p_KeyMap into p_InputState+0x1C.
-
-  The axes are the two-key form the original's are: left and right both held
-  cancel to zero rather than one winning, which is what a real d-pad does and
-  what the controller's double-tap window assumes. }
+{ Polls the configured controls. Opposing directions cancel to zero. }
 { POLLING ONLY. Everything else about the input belongs to the END of the
   frame, in InputEndOfFrame.
 
@@ -537,15 +454,7 @@ begin
   FSession.Input.Button[2] := Joy.IsDown(abAction3);
   FSession.Input.Button[3] := Joy.IsDown(abAux1);
 
-  { p_InputState[0x34], computed here in 0x00464D30 immediately after the same
-    four-button poll and never anywhere else:
-
-        p_InputState[0x34] = 0;
-        if ((btn0 && !latch0) || (btn1 && !latch1) || (btn2 && !latch2))
-            p_InputState[0x34] = 1;
-
-    THREE buttons, not the two Input_ConfirmPressed tests - the pause/cancel
-    button counts here as well. }
+  { AnyPressed includes the first three action buttons. }
   FSession.Input.AnyPressed :=
        (FSession.Input.Button[0] and not FSession.Input.ButtonLatch[0])
     or (FSession.Input.Button[1] and not FSession.Input.ButtonLatch[1])
@@ -565,17 +474,10 @@ begin
   InputEndOfFrame(FSession.Input, Down);
 end;
 
-{ The map, then the sprites, then the HUD. The camera is the session's layer
-  origin, not the player state's ScrollX/Y - those are only the value the
-  stage STARTED at, and reading them here is why the view never scrolled. }
+{ Draws the map, sprites, HUD, dialogue, and top sprite layer in order. }
 procedure TFrm_main.DrawScene;
 begin
-  { The TILESET, rec[5 + layer], not the surface SET, rec[0]. The two are
-    different numbers - a set is a file to load, a tileset is a slot inside
-    the set once it is loaded - and passing rec[0] here drew surface slot 1,
-    which is the menu background, so the map came out black. Terrain_Configure
-    settles it: the original hands TMYBGANIME p_Surfaces[rec[5]] for exactly
-    this layer. Stage 1 is set 1, tileset slot 6. }
+  { Draw with the layer's tileset slot, not the stage's surface-set id. }
   if (FMap <> nil) and (FStages <> nil) then
     FMap.Draw(DDDD1.Canvas, FSurfaces,
               FStages.Tileset[Settings.CurrentStage, 0],
@@ -597,15 +499,12 @@ begin
   DrawHud;
   FDialogue.Draw(DDDD1.Canvas, FFont,
                  PixelOf(FSession.Pool.Field(0, EF_POS_Y)));
-  { Sprite bucket 8, which 0x00464D30 draws after the HUD and the message box
-    rather than with the rest. Nothing shipped reaches it - see DrawTop. }
+  { Bucket 8 is reserved for sprites drawn above the HUD and dialogue. }
   FSession.Sprites.DrawTop(DDDD1.Canvas, FSurfaces);
 end;
 
-{ Load_Stage_Assets @ 0x00465A1C. The record's rec[0] selects the surface set,
-  rec[1] the sprite set, and rec[2..4] up to three map layers with -1 meaning
-  none. The original skips a reload when the set is already current; the same
-  guard is kept here via FStageLoaded. }
+{ Loads the surface set, sprite set, and primary map named by a stage record.
+  Repeated requests for the active stage are ignored. }
 procedure TFrm_main.LoadStage(StageIndex: Integer);
 var
   SurfaceSetId, SpriteSetId, MapId: Integer;
@@ -634,9 +533,8 @@ begin
   FStageLoaded := StageIndex;
 end;
 
-{ 0x00466888. The debug overlay, and the only reader of the two counters
-  Entity_UpdateAll maintains. All of it is behind the DebugLog flag from
-  system.dat +0x1B, which is off in the shipped settings.
+{ Draws entity counts and a once-per-second frame-rate sample when DebugLog is
+  enabled.
 
   The FPS line is a once-a-second SAMPLE, not an average: the frame count is
   latched and zeroed when a second has elapsed, so what is on screen is the
@@ -651,8 +549,7 @@ begin
   { DWord, not Int64. Widening the subtraction defeats the wrap: the clock
     rolls over every 49 days and 32-bit arithmetic carries through it,
     where a 64-bit difference goes hugely negative and the counter stops
-    updating. The original subtracts in 32 bits because it has nothing
-    else. }
+    updating. }
   if Now - FDebugStamp > 1000 then
   begin
     FDebugFps := FDebugFrames;
@@ -667,14 +564,8 @@ begin
   FFont.TextOut(DDDD1.Canvas, 0, 16, 'S P:' + IntToStr(EntitiesDrawn));
 end;
 
-{ 0x00466C78. The fullscreen toggle, called from FormKeyDown. Either
-  direction can fail - no 320x240 at 16 bits going in, a desktop under 16-bit
-  colour coming out - and the original's answer to both is a Shift-JIS message
-  box and then Close. Restoring the border style only when NOT running from
-  bmp.qda is a quirk of the original, not a rule.
-
-  The mode change belongs to the DirectDraw component this replaces wholesale,
-  so what is reproducible here is the decision and the window geometry. }
+{ Applies fullscreen or restores the fixed-size centered window. Archive mode
+  intentionally leaves the border style unchanged when returning to a window. }
 procedure TFrm_main.SetFullScreen(Enable: Boolean);
 begin
   if Enable then
@@ -690,7 +581,7 @@ begin
     WindowState := wsNormal;
     ClientWidth := SCREEN_W;
     ClientHeight := SCREEN_H;
-    { The original only restores the border when p_UseArchive is clear. }
+    { Archive mode keeps the current border style. }
     if not FUseArchive then
       BorderStyle := bsSingle;
     Position := poScreenCenter;
@@ -745,11 +636,8 @@ end;
 
 procedure TFrm_main.DialogueStartFade(FadeOut: Boolean);
 begin
-  { Every caller writes the step to self+0x10 first and passes Mode 0 - and it
-    has to be written, not assumed: the field persists, and the ending's
-    results screen leaves 2 in it. Every event-script site writes 4
-    (0x00455331, 0x0045536E, 0x004554FD, 0x0045553A, 0x00455712, 0x00455E8C,
-    0x00455F41). }
+  { Restore the normal fade step because the ending results screen uses a
+    different persistent value. }
   DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, FadeOut);
 end;
@@ -783,9 +671,7 @@ end;
 
 procedure TFrm_main.OpeningFade(FadeIn: Boolean);
 begin
-  { Opening_Update makes the same pair of calls every other screen does -
-    self+0x10 := 4, then 0x0044DC48 with the direction. The argument here is
-    named FadeIn and StartFade takes FadeOut, so it inverts. }
+  { StartFade takes the inverse FadeOut direction. }
   DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, not FadeIn);
 end;
@@ -809,7 +695,7 @@ end;
 
 procedure TFormAudio.StopMusic;
 begin
-  { FUN_00450CBC with a fade of 0 - a hard stop. }
+  { Stop immediately without fading. }
   FForm.StopMusicTrack;
 end;
 
@@ -830,24 +716,15 @@ begin
   FForm.PlayMusicTrack(Track, Loop, FadeSeconds);
 end;
 
-{ 0x00464484. One ending picture at a time: free whatever surface is up,
-  build a 320x240 one, and load `ed%.3d.bmp` into it - from bmp.qda when the
-  archive is in use and from bmp\ loose otherwise, which is the same pair of
-  format strings every other loader here uses.
-
-  The original keeps the surface in a global at 0x0046D1F0 and frees it on
-  the next call; holding one TBitmap is the same lifetime. }
+{ Replaces the current numbered ending slide. A negative index clears it. }
 procedure TFrm_main.EndingPicture(Index: Integer);
 begin
   FreeAndNil(FEndingBmp);
-  { The original frees the surface unconditionally and only creates a new one
-    when the slide has an image, so a -1 leaves the screen without one. }
   if (Index >= 0) and (FArchive <> nil) then
     FEndingBmp := FArchive.LoadBitmapByName(Format(ENDING_PICTURE_FMT, [Index]));
 end;
 
-{ Ending_ShowPicture @ 0x00464484. Phases 2 and 5 name their picture instead
-  of numbering it, and it is full screen rather than the slide's panel. }
+{ Replaces the ending image with a named full-screen asset. }
 procedure TFrm_main.EndingPictureNamed(const Name: string);
 begin
   FreeAndNil(FEndingBmp);
@@ -969,7 +846,6 @@ begin
   Result := ConfirmPressed(FSession.Input);
 end;
 
-{ The original writes the step to the fader's +0x10 and then starts it. }
 procedure TFrm_main.EndingFade(Step: Integer; FadeOut: Boolean);
 begin
   DDDD1.FadeStep := Step;
@@ -1018,8 +894,7 @@ begin
   KbgmPlayer1.StopOrFade(FadeSeconds);
 end;
 
-{ Title_Init @ 0x0046214C, in the order the original does it. It does NOT
-  draw - Title_MainMenu paints the background every frame. }
+{ Resets title state and assets; the menu renderer draws the background. }
 procedure TFrm_main.TitleInit;
 begin
   FSession.ResetState(0);
@@ -1028,8 +903,7 @@ begin
   FStageLoaded := -1;
   LoadStage(0);
 
-  { Track 0 is init.mid: a GM Reset and two Roland GS writes, not music. The
-    original passes 0 as the repeat flag - a one-shot reset would not loop. }
+  { Track 0 initializes the MIDI device and runs once. }
   KbgmPlayer1.Play(0, False);
 
   { ScreenPhase is shared with the game-over screen, the opening and the
@@ -1038,9 +912,7 @@ begin
   TitleSubMode := 0;
   GameStateValue := GS_TITLE_MENU;
 
-  { 360 ms of nothing, once per run, guarded by a flag at 0x0046CFE8.
-    Reproduced rather than dropped: a pause just after the audio device was
-    opened is more likely load-bearing than decorative. }
+  { Allow the audio device to settle once after startup. }
   if not FTitleSlept then
   begin
     FTitleSlept := True;
@@ -1054,8 +926,7 @@ end;
 
 { What Title_MainMenu reaches out for on NEW GAME / CONTINUE, and for the
   gallery. Callbacks so Title.pas stays off the session and the archive. }
-{ The options screen's volume row, which the original follows with the same
-  57-channel sweep Title_Init ends on. }
+{ The options volume row reapplies volume to all effect buffers. }
 { Stage_Begin's first two statements: the fader's step is 4 - which FADE_STEP
   already is - and then FUN_0044DC48(fader, 0, 0), a fade IN. }
 { GameState_Reset also clears the message box and the overlay, which live
@@ -1067,7 +938,6 @@ end;
 
 procedure TFrm_main.StageBeginFade;
 begin
-  { Stage_Begin @ 0x00462229 writes 4 like the rest. }
   DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, False);
 end;
@@ -1087,7 +957,7 @@ begin
   FOpening.Reset;
 end;
 
-{ 0x00462BE9: 'omake%.02d.bmp' through the same loader the ending uses. }
+{ Loads the selected gallery image. }
 procedure TFrm_main.TitleGallery(Slot: Integer);
 begin
   FreeAndNil(FEndingBmp);
@@ -1095,9 +965,7 @@ begin
     FEndingBmp := FArchive.LoadBitmapByName(Format('omake%.2d.bmp', [Slot]));
 end;
 
-{ The three things GameOver_Update needs from the form. Callbacks rather
-  than direct calls so Title.pas stays clear of the component layer, exactly
-  as the title screen's sound already is. }
+{ Form adapters used by the game-over screen. }
 procedure TFrm_main.GameOverRestart;
 begin
   FSession.ResetState(0);
@@ -1107,14 +975,11 @@ begin
   LoadStage(0);
 end;
 
-{ The fader's +0x0D, which Player_Update dereferences at the point of use. }
 function TFrm_main.EntityWorldFading: Boolean;
 begin
   Result := DDDD1.FadeBusy;
 end;
 
-{ FUN_00450FD0, which GameOver_Update calls from inside its phase-2 block
-  rather than being handed the answer. }
 function TFrm_main.GameOverMusicPlaying: Boolean;
 begin
   Result := KbgmPlayer1.IsPlaying;
@@ -1122,8 +987,6 @@ end;
 
 procedure TFrm_main.GameOverFade(FadeIn: Boolean);
 begin
-  { The original sets +0x10 on the object at 0x0046CB6C and calls 0x0044DC48
-    with FadeIn as its third argument - 0x00461A7E and 0x00461B2D, both 4. }
   DDDD1.FadeStep := FADE_STEP;
   DDDD1.StartFade(0, not FadeIn);
 end;
@@ -1140,17 +1003,9 @@ begin
     DDDD1.Canvas.Draw(0, 0, FSurfaces[GAMEOVER_SURFACE]);
 end;
 
-{ HUD_Draw @ 0x00461BA8: a "%3d/%-3d" counter, an h:mm:ss timer, and a row of
-  life icons filled through Lives and empty through MaxLives. }
-{ ---------------------------------------------------------------------------
-  DrawHud - HUD_Draw @ 0x00461BA8.
-
-  The counter begins at (8, 32), the TIME label precedes the timer, and lives
-  are animated sprite icons across the top of the screen.
-  --------------------------------------------------------------------------- }
+{ HUD counter, elapsed time, and animated life icons. }
 const
-  { Source x offsets of the life icon's animation frames, from the 4-int table
-    at 0x0046CB44. Three distinct frames played as a ping-pong. }
+  { Life-icon ping-pong animation. }
   LIFE_ANIM_X: array[0..3] of Integer = (19, 38, 57, 38);
   LIFE_ANIM_TICKS = 8;      { advances once the timer passes 8 }
   LIFE_ICON_W = $12;        { 0x86 - 0x74 }
@@ -1159,29 +1014,19 @@ const
   LIFE_ICON_Y = 8;          { on screen }
   LIFE_ICON_STEP = $10;
 
-  { The right-hand value of the '%3d/%-3d' counter is NOT a player-state field.
-    Game_DrawText is handed PTR_DAT_0046D2B4[PlayerState+0x11DC], a 12-int
-    table of goals at 0x00468EC4 that ends exactly where the ability-name array
-    at 0x00468EF4 begins. So +0x11DC is an INDEX into this, not the target. }
+  { Counter goals selected by Player.TargetIndex. }
   COUNTER_TARGETS: array[0..11] of Integer =
     (20, 50, 70, 130, 160, 400, 999, 30, 90, 270, 999, 0);
 
-{ HUD_Draw @ 0x00461BA8. The address is repeated here, immediately above the
-  declaration, because that is the only place tools/implemented.py looks - and
-  with the const block above sitting between this routine and its write-up, a
-  finished translation was being filed as unread prose. Fourth time that has
-  happened; see the note in implemented.py. }
 procedure TFrm_main.DrawHud;
 var
   Secs, I, Target: Integer;
   Sheet: TBitmap;
 begin
   if FFont = nil then Exit;
-  Sheet := FSurfaces[1];    { *(p_Surfaces + 4) - slot 1 }
+  Sheet := FSurfaces[1];
 
-  { The counter icon, then '@ ' + the count. The '@' is a real glyph in the
-    9x9 sheet, not punctuation - the original concatenates the literal '@ '
-    at 0x00461EB8 in front of the formatted number. }
+  { Draw the counter icon followed by its '@ ' glyph and values. }
   if Sheet <> nil then
     DDDD1.DrawSprite(Sheet, 7, $12, Rect($60, 0, $74, 10));
 
@@ -1189,25 +1034,18 @@ begin
   if (FSession.Player.TargetIndex >= 0) and
      (FSession.Player.TargetIndex <= High(COUNTER_TARGETS)) then
     Target := COUNTER_TARGETS[FSession.Player.TargetIndex];
-  { TRIMMED, and the format is padded on purpose so that it has something to
-    trim. 0x00461BA8 runs the result of Format through 0x00407D44 - which is
-    Trim: skip bytes < 0x21 from the front, drop them from the back, Copy what
-    is left - and only then concatenates the '@ ' in front of it. '%3d' right
-    aligns the count in three columns and '%-3d' left aligns the goal, so the
-    untrimmed string is '  0/2  '; without the Trim the '@ ' is followed by two
-    spaces and the number sits two glyphs right of where it belongs. }
+  { The padded format aligns both values; Trim removes its outer padding before
+    the '@ ' prefix is added. }
   FFont.TextOut(DDDD1.Canvas, 8, $20,
     '@ ' + Trim(Format('%3d/%-3d', [FSession.Player.Counter, Target])), 0);
 
-  { Variant 2 for the label, 0 for the digits - the original passes exactly
-    these as Game_DrawText's fifth argument. }
+  { Labels and digits use separate font variants. }
   FFont.TextOut(DDDD1.Canvas, $D0, $E0, 'TIME', 2);
   Secs := FSession.Player.ElapsedSec;
   FFont.TextOut(DDDD1.Canvas, $F8, $E0,
     Format('%.2d:%.2d:%.2d', [Secs div 3600, (Secs div 60) mod 60, Secs mod 60]), 0);
 
-  { Advance the icon animation. The original ticks this inside HUD_Draw, so its
-    speed is tied to the HUD being drawn rather than to the frame loop. }
+  { Life-icon animation advances only while the HUD is drawn. }
   Inc(FLifeAnimTimer);
   if FLifeAnimTimer > LIFE_ANIM_TICKS then
   begin
@@ -1216,8 +1054,7 @@ begin
     FLifeAnimX := LIFE_ANIM_X[FLifeAnimIndex];
   end;
 
-  { The original clamps the stored lives here rather than at the point of
-    damage, so a corrupt save is corrected by drawing the HUD. }
+  { Normalize invalid life counts loaded from save data. }
   if FSession.Player.Lives < 0 then
     FSession.Player.Lives := 0;
   if FSession.Player.MaxLives < FSession.Player.Lives then
@@ -1241,33 +1078,26 @@ begin
   DDSD1.Play(Index);
 end;
 
-{ Step 5: the state machine. Values and handler addresses in GameState.pas. }
+{ Step 5: the state machine. }
 { The arms that run BEFORE the entity update. }
 procedure TFrm_main.DispatchPre;
 begin
   case GameStateValue of
     GS_TITLE_INIT:
-      { Title_Init @ 0x0046214C. The asset load and the font definition
-        already happen in DDDD1Init, so what this adds is the music and the
-        volume sweep over all 57 effect buffers. }
+      { Initialize title state, music, and effect volume. }
       TitleInit;
     GS_STAGE_BEGIN:
       begin
-        { Stage_Begin @ 0x00462210. The ASSETS are the form's - it owns the
-          surfaces and the sprite sheets - and everything after them is the
-          session's: terrain, events, camera, and the player entity. The
-          order is the original's and it matters, because the session reads
-          the map and the frames the load has just replaced. }
+        { Load form-owned assets before session terrain, events, camera, and
+          player setup consume them. }
         LoadStage(Settings.CurrentStage);
         FSession.SetFrames(FSprites);
-        { The rest of Load_Stage_Assets - terrain, the background animator and
-          the event scripts. Both are its callers in the original; neither is
-          Stage_Begin's. }
+        { Configure terrain, background animation, and event scripts. }
         FSession.LoadStageAssets(Settings.CurrentStage);
         FSession.BeginStage(Settings.CurrentStage, GameStateValue);
         FDialogue.Bind(FSession.Events, FSession.Runner, @FSession.Player,
                        FSession.Pool, FSession.World);
-        { Sub-op 14 writes a tile, and the original writes to p_TileMaps[0]. }
+        { Sub-op 14 modifies the primary tile map. }
         FDialogue.Map := FMap;
         { Stage_Begin hands the box drawer p_Surfaces[1] with its origin
           at (0,0) - FUN_0044DE18. }
@@ -1313,8 +1143,7 @@ begin
       end;
     GS_PLAYER_INIT:
       begin
-        { Game_StartOrLoad @ 0x00462F40 handles save/new-game state, unlocks,
-          music, session flags, and the opening cutscene. }
+        { Apply new-game or saved state, music, unlocks, and opening flow. }
         if FTitleScreen.SubMode = 1 then
           Mode := smContinue
         else
@@ -1323,15 +1152,10 @@ begin
                         FDataDir + 'data' + PathDelim + 'save.dat',
                         GameStateValue);
       end;
-    { 0x00461A44. State 100 is GAME OVER, and it was running the play frame -
-      the dispatch grouped it with 60 and 140 because all three call
-      HUD_Draw, which is the one thing they do share. }
+    { GS_PLAY_ALT hosts the game-over phase machine. }
     GS_PLAY_ALT:
       begin
-        { GameOver_Update @ 0x00461A44 waits on the FADER between its
-          phases, so FadeBusy has to be the live one. Hard-code it False and
-          phase 0 falls straight into phase 1 in the same frame, and BOTH
-          dissolves are invisible. }
+        { Query live fade state so phase transitions wait for each dissolve. }
         if FGameOver.Update(DDDD1.FadeBusy,
                             ConfirmPressed(FSession.Input), GameStateValue) then
           DrawGameOver;
@@ -1339,15 +1163,11 @@ begin
     GS_PLAY,
     GS_STATE_140:
       begin
-        { While the box is up it - not the interpreter - drives the script,
-          and no game logic steps. That is the original's shape: sub-op 3
-          waits, and FUN_004568D0 is what calls EventScript_AdvanceStep. }
+        { While an overlay is active it drives script advancement. }
         if FDialogue.Active then
         begin
-          { The three-line box is dismissed by the player; the full-screen
-            panel is dismissed by its own fanfare finishing. One call, two
-            sources of done, because the original is one function with two
-            modes.
+          { Dialogue is dismissed by input; the power-up panel closes when its
+            fanfare ends.
 
             The session does NOT stop while the box is up - entities keep
             updating through a conversation. What stops is
@@ -1381,7 +1201,6 @@ begin
       end;
     GS_QUIT:
       begin
-        { Original nils FOnIdle then terminates - same shape. }
         Application.OnIdle := nil;
         Application.Terminate;
       end;
@@ -1393,8 +1212,7 @@ begin
   DDDD1.Present;
 end;
 
-{ FormKeyDown @ 0x004665C8. The original's first test is VK_ESCAPE. }
-{ FormKeyDown @ 0x004665C8. Two things that read as bugs and are not:
+{ Two intentional input details:
   Escape while ALREADY paused quits rather than resuming - resuming is the
   pause menu's own PAUSE_CONTINUE entry - and Ctrl+R compares Shift for
   EQUALITY with $04, so Ctrl+Shift+R deliberately does not fire, which is
@@ -1415,17 +1233,16 @@ begin
   if (Key = Ord('R')) and (Shift = [ssCtrl]) then
     GameStateValue := GS_TITLE_INIT;
 
-  { DIVERGENCE DIV-002, not part of the original handler. The original reads movement
-    and buttons from the Joy component in the frame loop, through one of three
-    DirectInput paths; none of that is implemented yet, so the menus are driven
-    from the keyboard here instead. Delete this block once Joy polls for real. }
+  { DIVERGENCE DIV-002: menus also accept virtual-key input here. }
+  { Keyboard fallback for menu navigation. Remove when all input-device paths
+    provide equivalent polling. }
   case Key of
     VK_UP:                 FMoveY := -1;
     VK_DOWN:               FMoveY := 1;
     VK_LEFT:               FMoveX := -1;
     VK_RIGHT:              FMoveX := 1;
     VK_RETURN, VK_SPACE,
-    VK_Z:                  FConfirm := True;   { Z is the original's confirm }
+    VK_Z:                  FConfirm := True;
   end;
   Joy.KeyDown(Key);
 end;
@@ -1436,10 +1253,7 @@ begin
   Joy.KeyUp(Key);
 end;
 
-{ FormDestroy @ 0x00466644 - really the settings writer: the loose runtime
-  globals go back into the record, all 56 bytes over data\system.dat, and the
-  fullscreen flag is mirrored into system.ini. The original also dumps
-  'debug.log' first when the debug flag is set; that is not reproduced. }
+{ Saves runtime settings and releases form-owned resources. }
 procedure TFrm_main.FormDestroy(Sender: TObject);
 begin
   { Give the multimedia timer period back - raising it is process-wide. }

@@ -48,8 +48,7 @@ type
     FFadeBusy: Boolean;       { +0x0D }
     function GetSurfaceCanvas: TCanvas;
   protected
-    { Streaming calls this once the .lfm has been applied - the original's
-      component fired its OnInit at the equivalent point. }
+    { Streaming calls this after the .lfm properties have been applied. }
     procedure Loaded; override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -61,32 +60,14 @@ type
     procedure Clear;
     procedure Present;
 
-    { THE SCREEN FADE, from the object at 0x0046CB6C. It belongs to the display
-      layer in the original too, which is why it is here rather than in the
-      game units.
-
-      0x0044DC48 is the whole of starting one:
-
-          self+0x08 := 0            the counter
-          self+0x04 := Mode         0 at every call site
-          self+0x0C := Direction    1 fades OUT, 0 fades IN
-          self+0x0D := 1            busy
-          if Mode = 0 and Direction = 0 then self+0x08 := 0x78
-
-      so a fade-in starts the counter at 120 and runs down, a fade-out starts
-      at 0 and runs up. Every caller sets self+0x10 := 4 first, which is the
-      step, so a fade is 120/4 = THIRTY FRAMES - half a second at the
-      original's 62 fps.
-
-      FadeBusy is self+0x0D, and the event interpreter's stage-load and warp
-      both wait on it: fade out, wait, then load. With it stuck at False the
-      wait passed on the frame it started and transitions happened instantly. }
+    { Fade-in counts from black to clear; fade-out counts from clear to black.
+      Stage changes wait for FadeBusy to clear before loading the destination. }
     procedure StartFade(Mode: Integer; FadeOut: Boolean);
     { Applied by Present; exposed for tests. }
     procedure ApplyFade;
     procedure TickFade;
     function FadeBusy: Boolean;
-    { How far the level moves per frame. The original's +0x10. }
+    { How far the fade level moves per frame. }
     property FadeStep: Integer read FFadeStep write FFadeStep;
 
     { 0 = clear, FADE_FULL = black. What a real fader would draw. }
@@ -118,9 +99,7 @@ begin
   FInitialScreenWidth := 320;
   FInitialScreenHeight := 240;
   FBackColor := 0;
-  { Nothing zeroes this on the original's side either - the callers that care
-    write it, and the rest inherit whatever the last one set. Seeded with the
-    step the slide show and every ordinary transition use. }
+  { Callers may replace this; ordinary transitions use the default step. }
   FFadeStep := FADE_STEP;
   FSurface := TBitmap.Create;
 end;
@@ -144,8 +123,7 @@ end;
 
 procedure TDDDD.Initialize;
 begin
-  { Property values arrive from the .lfm before this runs, so the size is the
-    original's 320x240. }
+  { Property values arrive from the .lfm before this runs. }
   FSurface.SetSize(FInitialScreenWidth, FInitialScreenHeight);
   FSurface.Canvas.Brush.Color := FBackColor;
   FSurface.Canvas.FillRect(0, 0, FInitialScreenWidth, FInitialScreenHeight);
@@ -166,22 +144,15 @@ end;
 
 procedure TDDDD.TickFade;
 begin
-  { DRAW, THEN ADVANCE - Fader_Tick @ 0x0044DC70 does both, in that order,
-    inside one `busy` test.
-
-    Advancing first loses the last frame of the fade. On the step that crosses
-    the end the flag clears and nothing is painted, so the frame shows the
-    scene UN-FADED - and whatever was waiting on the fade only reacts on the
-    frame after that, which is long enough to see the old room before a
-    transition completes. }
+  { Draw before advancing so the terminal fade frame remains visible while
+    clients are still waiting for FadeBusy to clear. }
   if not FFadeBusy then
     Exit;
   if FFadeMode <> 0 then
     Exit;
   ApplyFade;
-  { The bounds are STRICT and the level is not clamped - 0x0044DC70 tests
-    `> 0x78` and `< 0`, so the counter runs one step past the end before the
-    fade stops being busy. Clamping it would end the fade a frame early. }
+  { Strict bounds keep the fade busy through its endpoint; it finishes after
+    the counter steps outside the visible range. }
   if FFadeOut then
   begin
     Inc(FFadeLevel, FFadeStep);
@@ -207,34 +178,19 @@ begin
   FSurface.Canvas.FillRect(0, 0, FSurface.Width, FSurface.Height);
 end;
 
-{ THE FADE IS A BOX WIPE, not a dissolve. 0x0044DC70 is the per-frame half and
-  it draws four black rectangles closing in from the edges:
+{ The fade is a box wipe: four black rectangles close in from the edges.
 
       Rect(0,   0,   level,       240)          the left band
       Rect(320, 0,   320 - level, 240)          the right band
       Rect(0,   0,   320,         level)        the top band
       Rect(0,   240, 320,         240 - level)  the bottom band
 
-  so as the counter runs 0 to 0x78 the picture is squeezed shut from all four
-  sides at once, and at 120 the top and bottom bands meet exactly - 240 is
-  twice 120. The horizontal pair never meets, which does not matter because
-  the vertical pair has already covered the screen.
-
-  This was implemented as a brightness ramp first, which reached the same black
-  by a route the original does not take and looked nothing like it on the way.
-  The mistake was inferring the picture from the counter instead of reading the
-  function that draws it.
-
-  The BUSY flag clears on `level > 0x78` and `level < 0` - strictly outside -
-  so the counter overshoots by one step before the fade is declared finished.
-  Reproduced. }
+  At level 120 the vertical bands meet and cover the 240-pixel display. }
 procedure TDDDD.ApplyFade;
 var
   Level, Width, Height: Integer;
 begin
-  { The painter alone. TickFade owns the guards, because the original's
-    single Fader_Tick draws and advances inside one `busy` and mode-0 test -
-    an idle fader paints nothing whatever its level says. }
+  { TickFade owns the state guards; this routine only paints the current level. }
   { Nothing to paint on until the surface has been sized - the fade self-test
     drives a bare component with no screen behind it. }
   if (FSurface = nil) or (FSurface.Width = 0) or (FSurface.Height = 0) then
@@ -253,19 +209,8 @@ end;
 
 procedure TDDDD.Present;
 begin
-  { The original branches on a fullscreen flag at +0x3C: DirectDraw Flip when
-    set, otherwise Blt. Windowed is the shipped configuration (system.ini
-    fullscreen=off), so that is the path to build.
-
-    IT BLITS TO THE CLIENT RECT, NOT TO THE ORIGIN. TDDDD_Present @ 0x00449D00
-    takes the form's rect, translates it to screen coordinates with
-    ClientToScreen, and hands DirectDraw that as the destination against a
-    source of the whole surface - and a Blt whose rects differ in size
-    STRETCHES. So the picture fills whatever the window has become, which is
-    why maximising the original scales it (and distorts it - there is no
-    aspect correction anywhere in the call).
-
-    At the shipped 320x240 the two are the same blit. }
+  { Stretch the fixed-size back buffer over the entire client area. Aspect
+    ratio is not preserved when the window is resized. }
   if (Owner is TCustomForm) and TCustomForm(Owner).HandleAllocated then
     TCustomForm(Owner).Canvas.StretchDraw(
       TCustomForm(Owner).ClientRect, FSurface);

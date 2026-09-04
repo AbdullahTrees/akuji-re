@@ -1,9 +1,9 @@
-{ Opening cutscene (Opening_Update @ 0x00463154), run by GameStartOrLoad before
-  stage initialization. Ten one-based slides use these tables:
+{ Opening cutscene, run before stage initialization. Ten one-based slides use
+  these tables:
 
-      0x00468F14  picture   1 1 2 3 4 5 5 -1 6 6
-      0x00468F64  seconds   8 8 8 8 8 8 8  2 8 8
-      0x00468F3C  text      0 2 4 6 8 10 12 14 16 18
+      picture   1 1 2 3 4 5 5 -1 6 6
+      seconds   8 8 8 8 8 8 8  2 8 8
+      text      0 2 4 6 8 10 12 14 16 18
 
   Picture ids may repeat and -1 produces a text-only slide. Each slide selects
   two consecutive text lines.
@@ -24,22 +24,19 @@ uses
 const
   OPENING_SLIDES = 10;
 
-  { 0x00468F14. -1 means no picture at all. }
-  OPENING_PICTURE_ADDR = $00468F14;
+  { -1 means a text-only slide. }
   OPENING_PICTURE: array[0..OPENING_SLIDES - 1] of Integer =
     (1, 1, 2, 3, 4, 5, 5, -1, 6, 6);
 
-  { 0x00468F64, in SECONDS - the handler multiplies by 60. }
-  OPENING_SECONDS_ADDR = $00468F64;
+  { Slide durations in seconds. }
   OPENING_SECONDS: array[0..OPENING_SLIDES - 1] of Integer =
     (8, 8, 8, 8, 8, 8, 8, 2, 8, 8);
 
-  { 0x00468F3C, and it is exactly slide * 2. }
-  OPENING_TEXT_ADDR = $00468F3C;
+  { Each slide begins at an even index and consumes two lines. }
   OPENING_TEXT_INDEX: array[0..OPENING_SLIDES - 1] of Integer =
     (0, 2, 4, 6, 8, 10, 12, 14, 16, 18);
 
-  { Twenty display lines at 0x00468F8C. Trailing spaces are significant. }
+  { Trailing spaces are significant to the rendered line width. }
   OPENING_LINES: array[0..19] of string = (
     'A demon named "Akuji" once  ',
     'terrorized this land. ',
@@ -102,15 +99,14 @@ type
     FOnFade: TOpeningFade;
     procedure EnterSlide(SlideNumber: Integer);
   public
-    { 0x0046D298 and 0x0046D174, shared with the ending screen. }
+    { One-based slide number and its remaining frame count. }
     Slide: Integer;
     Timer: Integer;
 
     procedure Reset;
 
-    { 0x00463154. One frame. Returns False once the sequence is over, which
-      is when the timer has reached its sentinel AND the fader has gone idle.
-      MusicPlaying is asked every frame because slide 10 waits on it. }
+    { Advance one frame. Returns False after the terminal fade completes.
+      MusicPlaying is checked because the final slide waits for its track. }
     function Update(Confirm, MusicPlaying, FadeBusy: Boolean): Boolean;
 
     procedure Draw(C: TCanvas; F: TGameFont; Picture: TBitmap);
@@ -122,16 +118,15 @@ type
     property OnFade: TOpeningFade read FOnFade write FOnFade;
   end;
 
-{ The picture id for a slide, and -1 when it has none. Indexes the table the
-  way the original does - slide - 1 - and returns -1 rather than reading past
-  the end, which the original does not check. DIVERGENCE DIV-004; Update clamps
-  Slide to 1..10 first, so the guard never fires. }
+{ Return the picture id for a one-based slide, or -1 for a text-only or invalid
+  slide. }
 function OpeningPictureFor(ASlide: Integer): Integer;
 
 implementation
 
 function OpeningPictureFor(ASlide: Integer): Integer;
 begin
+  { DIVERGENCE DIV-004: guard the fixed slide table against invalid indexes. }
   if (ASlide < 1) or (ASlide > OPENING_SLIDES) then
     Exit(-1);
   Result := OPENING_PICTURE[ASlide - 1];

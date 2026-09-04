@@ -14,7 +14,7 @@ uses
 const
   { KBGMFadeOut's own arithmetic: twenty volume steps, one every arg*50 ms. }
   KBGM_FADE_MS_PER_SECOND = 1000;
-  { 0x00450CBC's two callers. }
+  { Stop modes used when changing or resuming the game. }
   KBGM_STOP_HARD = 0;
   KBGM_STOP_FADE_NEWGAME = 2;
 
@@ -34,7 +34,7 @@ type
     FThread: TKbgmThread;
     FCurrent: Integer;
     FVolume: Integer;
-    { 0x0046EAA4 - the track to come back to after an interruption. }
+    { Track to restart after an interruption such as a power-up fanfare. }
     FRemembered: string;
     FOpened: Boolean;
     procedure SetAutoLoadMidis(Value: TStrings);
@@ -54,35 +54,16 @@ type
       index. Playing the active track is ignored rather than restarted -
       restarting the area theme every time the stage loader re-asserts it would
       be audible. }
-    { THE SECOND ARGUMENT IS A FADE LENGTH IN SECONDS, not a mode.
-
-      The game stops the current track through 0x00450CBC, which takes it in
-      EDX and branches: below 1 it calls KBGMStop and reinitialises, otherwise
-      it calls KBGMFadeOut and passes the value straight through. Two callers,
-      two values - a CONTINUE stops hard with 0, a NEW GAME fades with 2.
-
-      The unit comes out of Kbgm32.dll itself, which is shipped beside the exe.
-      KBGMFadeOut (ordinal 3, RVA 0x2095) sets up a volume ramp from 100 down
-      in steps of 5 - twenty steps - and computes its timer interval as
-      arg * 125 * 8 / 20, which is arg * 50 milliseconds. Twenty steps of
-      arg * 50 ms is arg * 1000 ms, so the argument is SECONDS and the new
-      game's 2 is a two-second fade. }
+    { FadeSeconds is a duration: zero stops immediately and positive values
+      fade for that many seconds before the requested track starts. }
     procedure PlayName(const Name: string; Loop: Boolean = True);
     procedure Play(Index: Integer; Loop: Boolean = True;
                    FadeSeconds: Integer = 0);
-    { 0x00450CBC. Zero stops dead, anything else fades over that many seconds. }
+    { Zero stops immediately; positive values fade for that many seconds. }
     procedure StopOrFade(FadeSeconds: Integer);
 
-    { 0x00450EDC and 0x00450EF0 - the pair that survives an interruption.
-
-      PowerUp_Show calls the first before starting its fanfare: it copies the
-      current track's NAME into a global at 0x0046EAA4, nothing more. It is not
-      a stop, which is what it looked like until it was read.
-
-      Overlay_Update calls the second when the fanfare finishes - a hard stop,
-      then the remembered name again, LOOPING. That is how the stage music
-      comes back after a power-up. Without it the fanfare simply replaces the
-      music and the stage stays silent for good. }
+    { RememberCurrent stores the track name, not its playback position.
+      ResumeRemembered restarts that track from the beginning and loops it. }
     procedure RememberCurrent;
     procedure ResumeRemembered;
     procedure Stop;
@@ -96,10 +77,7 @@ type
     property Current: Integer read FCurrent;
     property Opened: Boolean read FOpened;
 
-    { 0..10. The settings struct holds one volume byte at +0x24 which is known
-      to drive the sound effects; whether the options screen drives music from
-      the same byte or a second one has not been traced yet, so this is kept on
-      the same scale and left for the caller to decide. }
+    { Component gain on the same 0..10 scale used by the options screen. }
     property Volume: Integer read FVolume write SetVolumeProp;
   published
     property AutoLoadMidis: TStrings read FAutoLoadMidis write SetAutoLoadMidis;
@@ -490,8 +468,7 @@ begin
 {$IFNDEF WINDOWS}
   RelativePath := StringReplace(RelativePath, '\', PathDelim, [rfReplaceAll]);
 {$ENDIF}
-  { The playlist stores no extension - the original appended it, and the
-    literal '.mid' is still in the binary at file offset 0x0004F700. }
+  { Playlist entries are extensionless. }
   if ExtractFileExt(RelativePath) = '' then
     RelativePath := RelativePath + '.mid';
   Result := IncludeTrailingPathDelimiter(FGameDir) + RelativePath;
@@ -535,8 +512,7 @@ end;
 
 procedure TKbgmPlayer.RememberCurrent;
 begin
-  { DAT_0046EAA4 := self.CurrentTrackName. A name, not a position: the track
-    restarts from the top when it comes back, which is what the original does. }
+  { Remember the name rather than a playback position, so resume restarts it. }
   if (FCurrent >= 0) and (FCurrent < FAutoLoadMidis.Count) then
     FRemembered := FAutoLoadMidis[FCurrent]
   else
@@ -548,7 +524,6 @@ begin
   if FRemembered = '' then
     Exit;
   StopOrFade(KBGM_STOP_HARD);
-  { Looping - the third argument at 0x00450EF0 is 1. }
   PlayName(FRemembered, True);
 end;
 
@@ -581,9 +556,7 @@ procedure TKbgmPlayer.Play(Index: Integer; Loop: Boolean;
 begin
   if (Index < 0) or (Index >= FAutoLoadMidis.Count) then
     Exit;
-  { Stop first, then play - the shape of both 0x00450F14 (fade 0) and
-    0x00450F74 (fade 2). The default is 0 because that is what every caller
-    except the new game uses. }
+  { The default is an immediate stop; a new game requests a two-second fade. }
   StopOrFade(FadeSeconds);
   PlayName(FAutoLoadMidis[Index], Loop);
 end;

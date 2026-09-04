@@ -2,8 +2,8 @@
   header, checksum, or version, so field layout is a strict file contract.
 
   Offsets 10..0x119F are per-world progress flags, ONE BYTE each - not bits -
-  indexed by the first four characters of an event's ParamB. Entity_Destroy
-  @ 0x00461400 sets them for an opcode-5 event:
+  indexed by the first four characters of an event's ParamB. Destroying an
+  opcode-5 event sets its corresponding progress byte:
 
       Progress[StrToInt(Copy(event.ParamB, 1, 4))] := 1
 
@@ -19,22 +19,7 @@ uses
   KbgmPlayer,
   Classes, SysUtils, GameState;
 
-{ Player_Update @ 0x004585A8 lives in Player.pas; these are the constants and
-  save fields it reads. Detail and derivation: notes/player_controller.md }
-
-const
-  { EF_STATE, block A[0], selects the player's behaviour. }
-  PSTATE_GROUND    = 0;
-  PSTATE_DASH      = 1;    { gated by ABILITY_DASH }
-  PSTATE_AIR       = 2;
-  PSTATE_LANDING   = 3;    { landing recovery }
-  PSTATE_WALLKICK  = 4;    { gated by ABILITY_WALLKICK }
-  PSTATE_ATTACK    = 5;
-  PSTATE_GLIDE     = 6;    { gated by ABILITY_GLIDE;   Player_UpdateGlide      }
-  PSTATE_AIRDASH   = 7;    { gated by ABILITY_AIRDASH; Player_UpdateAirDash    }
-  PSTATE_KNOCKBACK = 8;    {                           Player_UpdateKnockback  }
-  PSTATE_DYING     = 9;
-  PSTATE_DYING_FALL = 10;  { both dying states end at GameState 100 }
+{ Constants and save fields used by the player controller in Player.pas. }
 
 const
   { The player uses lower gravity than loose objects in Entities. }
@@ -69,8 +54,6 @@ const
   PS_DYING    = 9;
   PS_FELL     = 10;
 
-  WEAPON_RECORD_BYTES = $10;    { the table at 0x00468E84 }
-
   { --- The three delegated states ----------------------------------------- }
   GLIDE_GRAVITY     = 2;        { against PLAYER_GRAVITY = 4 }
   GLIDE_LIFT        = $20;      { subtracted from vy on a fresh jump press }
@@ -87,22 +70,16 @@ const
   DEATH_SOULS       = 3;        { spawned at headings 0, 0x14, 0x28 }
   DEATH_SOUL_STEP   = $14;
 
-  { --- Ability flags, in Head. Zeroed by Game_StartOrLoad on a new game. --- }
-  { Head[4..7]. PowerUp_Show @ 0x00456698 is what sets them, one per pickup
-    variant, and it also names them for the screen it shows - the table at
-    0x00468EF4, reached through the pointer at 0x0046D1EC:
+  { Ability flags in Head[4..7], indexed by pickup variant:
 
         variant 4  'Dash    '     -> Head[4]
         variant 5  'Jump++      ' -> Head[5]
         variant 6  'Cloud   '     -> Head[6]
         variant 7  'Bat   '       -> Head[7]
 
-    CAUTION: WALLKICK, AIRDASH and GLIDE are named for what Player.pas does
-    with each flag, not for the game's own words, and the two do not obviously
-    agree - 'Jump++' reads like a second jump, 'Bat' like a form. The INDICES
-    are certain; the labels are a reading. }
-  { PowerUp_Show's pickup variants - the value ParamA's 'A' letter carries.
-    4..7 are the Head abilities below. }
+    Functional names describe Player.pas behavior even where the displayed
+    pickup label differs. }
+  { Pickup variants carried by ParamA kind 'A'. }
   PICKUP_FIRE       = 0;
   PICKUP_FIRE_PLUS  = 1;
   PICKUP_CHARGE     = 2;
@@ -119,35 +96,20 @@ const
   ABILITY_AIRDASH   = 6;
   ABILITY_GLIDE     = 7;
 
-  POWERUP_JUMP_STRENGTH = $84;   { variant 3, up from DEFAULT_FIELD11D0 }
+  POWERUP_JUMP_STRENGTH = $84;   { variant 3 }
   POWERUP_COUNT = 8;
   POWERUP_NAMES: array[0..POWERUP_COUNT - 1] of string = (
     'Fire    ', 'Fire+     ', 'Charge  ', 'Jump+     ',
     'Dash    ', 'Jump++      ', 'Cloud   ', 'Bat   ');
-  { The two literals the name is concatenated between, at 0x004568B0 and
-    0x004568BC. The padding above is what puts the gap in the finished
-    sentence. }
-  { PowerUp_Show @ 0x00456698 plays effect 0x10, STOPS the music, and starts
-    playlist entry 4 without looping. Overlay_Update then ends the panel when
-    that track finishes - which is the only thing that dismisses it.
-
-    Missing all three was a softlock. The panel's dismiss condition is "the
-    music has stopped", and with no fanfare ever started it was being asked of
-    the LOOPING stage BGM, which never stops. Collecting the dash orb put the
-    game in a state nothing could leave. }
+  { Power-up presentation stops stage music, plays this sound and one-shot MIDI,
+    then closes when the fanfare ends. }
   POWERUP_SOUND = $10;
   POWERUP_MIDI  = 4;      { AutoLoadMidis[4] }
 
   POWERUP_PREFIX = '  ';
   POWERUP_SUFFIX = ' was recovered! ';
 
-  { --- Sprite tables, 0x0046BB9C..0x0046BC2C, right-facing then left -------
-
-    To read one of these out of akuji.exe, subtract DATA_VA_BIAS from the
-    address: the DATA section is mapped at 0x00401A00 above its file offset.
-    (CODE is 0x00400C00 - the two differ, which has caught me out.) }
-  DATA_VA_BIAS       = $00401A00;
-  PLAYER_SPRITE_BASE = $0046BB9C;
+  { Player sprite tables, right-facing then left-facing. }
   SPR_GROUND: array[0..1, 0..4] of Integer =
     ((10, 11, 12, 57, 58), (0, 1, 2, 55, 56));
   SPR_AIR: array[0..1, 0..4] of Integer =
@@ -156,8 +118,7 @@ const
     ((47, 48, 49, 48), (44, 45, 46, 45));
   SPR_AIRDASH: array[0..1, 0..1] of Integer =
     ((116, 117), (114, 115));
-  { 0x0046D180, indexed by facing shr 5 - Player_UpdateKnockback's only
-    sprite choice; the state has no animation at all. }
+  { Knockback has one static sprite per facing. }
   SPR_KNOCKBACK: array[0..1] of Integer = (13, 3);
   SPR_DEATH: array[0..1] of Integer = (18, 8);
 
@@ -182,36 +143,23 @@ const
     it is deliberate. The camera's scroll takes no offset on either axis. }
   SPAWN_CENTRE_X  = 16;
   SPAWN_FOOT_Y    = 19;
-  DEFAULT_FIELD11C8 = 300;
-  DEFAULT_FIELD11D0 = $68;     { 104 }
+  DEFAULT_EVENT_COUNTER = 300;
+  DEFAULT_JUMP_STRENGTH = $68;     { 104 }
 
 const
-  { --- The Mana Stone goals, at 0x00468EC4 through the pointer 0x0046D2B4 ---
-
-    Twelve ints, and exactly TWO readers in the whole binary:
-    Entity_TouchPickup, which compares Counter against MANA_TARGETS[TargetIndex]
-    to decide whether this stone finishes a level, and HUD_Draw, which shows the
-    same value as the right-hand half of its "%3d/%-3d". That second reader is
-    what confirms TargetIndex indexes this table and not something else.
-
+  { Mana Stone goals used by pickup progression and the HUD.
     The progression is 20, 50, 70, 130, 160, 400 and then 999 - which no counter
     reaches - so index 6 is in effect a cap at six life upgrades.
 
-    What the remaining five are for is NOT settled. 30, 90, 270, 999, 0 reads
-    like a second, shorter progression, but nothing found so far selects it, and
-    the table's extent is confirmed at twelve by the next pointer along. Kept as
-    data rather than explained away. }
+    The remaining five entries have no known selector and are retained as game
+    data. }
   MANA_TARGET_COUNT = 12;
-  MANA_TARGET_ADDR  = $00468EC4;
-  MANA_TARGET_PTR   = $0046D2B4;
   MANA_TARGETS: array[0..MANA_TARGET_COUNT - 1] of Integer =
     (20, 50, 70, 130, 160, 400, 999, 30, 90, 270, 999, 0);
 
 type
-  { Laid out to match the original exactly; the file is a raw image of it.
-    Named fields are those whose meaning is established from Game_StartOrLoad,
-    HUD_Draw and Stage_Begin. Everything else is kept as raw bytes rather than
-    given speculative names. }
+  { Raw save-file layout. Unknown bytes remain unnamed rather than being given
+    speculative meanings. }
   TPlayerState = packed record
     Head:        array[0..PROGRESS_START - 1] of Byte;   // +0x0000
     Progress:    array[0..PROGRESS_LENGTH - 1] of Byte;  // +0x000A  world flags
@@ -236,20 +184,17 @@ type
                             //          sub-ops are implemented and NEITHER is
                             //          used by any shipped event - a cut
                             //          feature, kept because the code is there.
-    Weapon:      Integer;   // +0x11CC  index into the weapon table at 0x468E84
+    Weapon:      Integer;   // +0x11CC  index into Player.WEAPONS
     JumpStrength: Integer;  // +0x11D0  init 0x68; negated into vy on jump
     MusicTrack:  Integer;   // +0x11D4  index into the KbgmPlayer playlist
     SpawnFacing: Integer;   // +0x11D8  Player_Update copies EF_FACING here
                             //          every frame; Event sub-op 1 gives a
                             //          freshly spawned player facing 0x10
-    TargetIndex: Integer;   // +0x11DC  index into HUD_Draw's 12-int goal
-                            //          table at 0x00468EC4, NOT the goal itself
+    TargetIndex: Integer;   // +0x11DC  index into MANA_TARGETS
     Difficulty:  Integer;   // +0x11E0  copy of Settings.GameLevel
   end;
 
-  { The one player state, by reference. The original has a single global at
-    0x0046CFF0 reached through a pointer; anything that needs to write it -
-    the message box answering a prompt, for one - takes this. }
+  { Mutable player-state reference used by systems such as dialogue prompts. }
   PPlayerState = ^TPlayerState;
 
 procedure InitNewGame(var P: TPlayerState; GameLevel: Integer);
@@ -257,15 +202,10 @@ procedure ApplySessionFlags(var P: TPlayerState; GameLevel: Integer);
 function LoadSave(var P: TPlayerState; const FileName: string): Boolean;
 function SaveTo(const P: TPlayerState; const FileName: string): Boolean;
 
-{ MANA_TARGETS[Index]. The original indexes it unchecked; this returns
-  something unreachable past the end instead of reading whatever follows the
-  table. Reachable only if TargetIndex ever passes 11, which needs the counter
-  to have passed 999 first. }
+{ Return MANA_TARGETS[Index], or an unreachable target for an invalid index. }
 function ManaTarget(Index: Integer): Integer;
 
-{ 0x00456698. The ability pickup - what sub-op 10 reaches, and what the
-  full-screen "... was recovered!" panel announces. It grants by the event
-  entity's variant; see PICKUP_* above.
+{ Grant the power-up selected by an event entity's variant.
 
   The two weapon guards are why this is a chain of independent ifs and not a
   case: picking up Fire after Charge must not demote you. They are not the
@@ -276,7 +216,7 @@ function ManaTarget(Index: Integer): Integer;
   caller's. This is only the state change. }
 procedure PowerUpGrant(var P: TPlayerState; Variant: Integer);
 
-{ The pickup's display name, from the table at 0x00468EF4. }
+{ Return the pickup's padded display name. }
 function PowerUpName(Variant: Integer): string;
 
 type
@@ -286,15 +226,8 @@ type
   TStartHost = class
   public
     function Opening: Boolean; virtual;
-    { The flag is LOOP, not restart - it is the third argument of the
-      original's play call, which the opening passes 1 for `open01` and 0 for
-      `open02`. Both callers here pass True because stage music loops.
-
-      FadeSeconds is how the PREVIOUS track is stopped, and the two branches
-      below genuinely differ: a new game goes through 0x00450F74 and fades over
-      two seconds, a continue goes through 0x00450F14 and stops dead. The
-      value is passed to KBGMFadeOut, which ramps the volume down over that
-      many seconds - see KbgmPlayer.pas for where the unit comes from. }
+    { Loop controls the new track. FadeSeconds controls how the previous track
+      stops: new games fade for two seconds, while continue stops immediately. }
     procedure PlayMusic(Track: Integer; Loop: Boolean; FadeSeconds: Integer); virtual;
   end;
 
@@ -315,20 +248,16 @@ const
   PROGRESS_NEWGAME_FIRST = 7;
   PROGRESS_NEWGAME_LAST  = 9;
 
-{ 0x00462F40. NEW GAME and CONTINUE are one function, separated only by the
-  title's sub-mode: 0 runs the opening first and returns every frame until it
-  ends; 1 does everything below and THEN reads data\save.dat over the top.
+{ Start a new game or continue from data\save.dat. A new game waits for the
+  opening; continue overlays saved state on initialized defaults.
 
   Order carries the meaning. Defaults are written before the load, so an
-  unreadable save leaves a good new game - the original checks the open and
-  not the read. Session flags are applied after it, which is what makes
+  unreadable save leaves valid defaults. Session flags are applied after it,
+  which makes
   difficulty a session fact rather than a saved one.
 
-  ANOMALY, reproduced: difficulty is copied from the settings twice, the
-  second guarded by `not UseArchive`. On CONTINUE the load has replaced it in
-  between, so the flag silently decides whether a loaded game keeps its saved
-  difficulty. DDDD1Init sets UseArchive, so the second write is dead in the
-  shipped game.
+  Compatibility behavior: when archives are disabled, settings difficulty is
+  copied a second time after loading and replaces the saved difficulty.
 
   Presentation - Opening, PlayMusic - is the caller's. }
 function GameStartOrLoad(var P: TPlayerState; var ASettings: TGameSettings;
@@ -339,7 +268,7 @@ function GameStartOrLoad(var P: TPlayerState; var ASettings: TGameSettings;
 
 implementation
 
-{ Game_StartOrLoad runs these AFTER the optional save load, so they apply to a
+{ Apply these after the optional save load, so they affect a
   continued game as well as a new one - they are session facts, not saved ones.
 
   Progress[0] is forced to 1 unconditionally, which is why every event
@@ -372,11 +301,9 @@ begin
   P.SpawnY := DEFAULT_SPAWN_Y;
   P.ScrollX    := 0;
   P.ScrollY    := DEFAULT_SCROLL_Y;
-  P.EventCounter := DEFAULT_FIELD11C8;
-  P.JumpStrength := DEFAULT_FIELD11D0;
-  { Game_StartOrLoad writes these four zeroes explicitly rather than relying on
-    the clear, which is the whole reason they could be identified: all four
-    abilities start LOCKED. }
+  P.EventCounter := DEFAULT_EVENT_COUNTER;
+  P.JumpStrength := DEFAULT_JUMP_STRENGTH;
+  { All movement abilities start locked. }
   P.Head[ABILITY_DASH]     := 0;
   P.Head[ABILITY_WALLKICK] := 0;
   P.Head[ABILITY_AIRDASH]  := 0;
@@ -395,8 +322,7 @@ begin
     Exit;
   Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
-    { The original reads 0x11E4 unconditionally. Refuse a short file rather
-      than leaving the tail of the struct holding whatever was there before. }
+    { Refuse a short file rather than leaving part of the state uninitialized. }
     if Stream.Size < PLAYER_STATE_SIZE then
       Exit;
     Stream.ReadBuffer(P, PLAYER_STATE_SIZE);
@@ -436,8 +362,8 @@ end;
 
 procedure PowerUpGrant(var P: TPlayerState; Variant: Integer);
 begin
-  { The original's chain of independent ifs, not a case - two of them carry
-    conditions a case would invite tidying away. }
+  { Independent conditions prevent weaker weapon pickups from demoting a
+    stronger weapon. }
   if (Variant = PICKUP_FIRE) and (P.Weapon = WEAPON_NONE) then
     P.Weapon := WEAPON_FIRE;
   if (Variant = PICKUP_FIRE_PLUS) and (P.Weapon <> WEAPON_CHARGE) then
@@ -473,13 +399,7 @@ begin
     Exit(False);
 
   Result := True;
-  { Statement 2, and it sits between the opening gate and the state write:
-      00462f5f  MOV EAX,[0x0046cc14]     ; ScreenPhase
-      00462f66  MOV dword ptr [EAX],EDX  ; := 0
-      00462f68  MOV EAX,[0x0046d06c]
-      00462f6d  MOV dword ptr [EAX],0x1e ; GameState := 30
-    Stage_Begin clears it again a frame later, so nothing observable read the
-    stale value - but it was a missing statement in a row marked MATCHES. }
+  { Start from a clean screen phase and enter stage initialization. }
   ScreenPhase := 0;
   AGameState := GS_STAGE_BEGIN;
 
@@ -496,17 +416,14 @@ begin
 
   ASettings.CurrentStage := START_STAGE;
 
-  { The new game's music starts before the track number is even stored - the
-    original hard-codes playlist entry 1 here and only then writes it down. }
+  { Start and remember the initial stage track. }
   if Mode = smNewGame then
     Host.PlayMusic(START_MUSIC_TRACK, True, KBGM_STOP_FADE_NEWGAME);
   P.MusicTrack := START_MUSIC_TRACK;
 
   if Mode = smContinue then
   begin
-    { A save that will not open leaves the new game standing. The original
-      ignores the READ's result too, which would leave a partly-overwritten
-      record on a short file; LoadSave refuses one instead, and says so. }
+    { A missing or invalid save leaves the initialized defaults intact. }
     if LoadSave(P, SaveFileName) then
       ASettings.CurrentStage := P.SavedStage;
     Host.PlayMusic(P.MusicTrack, True, KBGM_STOP_HARD);
@@ -515,9 +432,7 @@ begin
   { After the load, so difficulty is a session fact and not a saved one. }
   ApplySessionFlags(P, P.Difficulty);
 
-  { The second difficulty write. See the header - it is unreachable in the
-    shipped game because DDDD1Init sets UseArchive, and it is here because
-    removing it would be a change rather than a translation. }
+  { Loose-file mode takes difficulty from current settings after loading. }
   if not UseArchive then
   begin
     P.Difficulty := ASettings.GameLevel;
@@ -526,13 +441,7 @@ begin
 end;
 
 initialization
-  { A layout error here silently corrupts every save, so fail loudly at start
-    rather than quietly writing a wrong-sized file.
-
-    This was an Assert, and an Assert is NOT a check: FPC compiles assertions
-    out unless -Sa is passed, so it never ran once, and the record sat a byte
-    short through several commits. Written as a plain test that is always
-    compiled in. }
+  { Keep this runtime check active even when compiler assertions are disabled. }
   if SizeOf(TPlayerState) <> PLAYER_STATE_SIZE then
     raise Exception.CreateFmt(
       'TPlayerState is %d bytes; save.dat is %d and the layout must match',

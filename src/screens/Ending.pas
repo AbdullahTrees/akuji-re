@@ -16,12 +16,10 @@ uses
   SysUtils, GameState, PlayerState;
 
 const
-  { 0x00464420 and 0x00464424, the two floats the percentage is built from.
-    So 400 is the game's collectible total, which also settles the right-hand
-    side of HUD_Draw's "%3d/%-3d". }
+  { Total number of collectible mana stones. }
   ENDING_TOTAL = 400;
 
-  { The three percentage gates and the time gate, from 0x00463E39. }
+  { Completion and time thresholds used to calculate rank. }
   RANK_PCT_1 = 50;
   RANK_PCT_2 = 70;
   RANK_PCT_3 = 90;
@@ -35,25 +33,18 @@ const
   { AutoLoadMidis[14] is midi\end05, which the sequence plays under itself. }
   ENDING_MIDI = 14;
 
-  { --- Phase 1, the slide show. Six slides, indexed 1..6, so entry 0 is slide
-    one. Both extents are pinned from outside: ENDING_SECONDS' seventh int
-    reads as a string pointer, and ENDING_TEXT's twelfth entry is 'EASY',
-    which Title.pas already records at 0x00452308 as the level names. }
+  { Phase 1: six one-based slides. }
   ENDING_SLIDES = 6;
 
-  ENDING_IMAGE_ADDR = $00468FDC;
   { bmp\ed%.3d.bmp, or -1 for a slide that is text only. }
   ENDING_IMAGE: array[0..ENDING_SLIDES - 1] of Integer = (1, 2, 3, 3, -1, 4);
 
-  ENDING_TEXT_ID_ADDR = $00468FF4;
   { Indexes ENDING_TEXT; the slide's second line is the entry after it. }
   ENDING_TEXT_ID: array[0..ENDING_SLIDES - 1] of Integer = (0, 2, 4, 6, 8, 10);
 
-  ENDING_SECONDS_ADDR = $0046900C;
   ENDING_SECONDS: array[0..ENDING_SLIDES - 1] of Integer = (8, 8, 2, 8, 4, 8);
   ENDING_SECONDS_SCALE = $3C;   { the table is in seconds; Timer is in frames }
 
-  ENDING_TEXT_ADDR = $00469024;
   ENDING_TEXT: array[0..11] of string = (
     '    Light covered Akuji as',
     '    he broke the last seal... ',
@@ -73,9 +64,7 @@ const
   ENDING_MIDI_SLIDE_6 = 13;
   ENDING_SLIDE_STOP_AT = 3;   { the slide that stops midi 10 }
 
-  { Timer holds this instead of a count while the last slide waits on its fade
-    out. 999 is a sentinel in the original too, in both the slide and the
-    timer, and means "waiting on a fade" rather than a number of frames. }
+  { Timer sentinel used while the final slide waits for its fade-out. }
   ENDING_WAIT_FADE = 999;
 
   { --- Phase 2, the staff roll. Ending_ShowPicture(0x140, 0xF0, 'ed005.bmp')
@@ -161,8 +150,7 @@ const
   GALLERY_DARK_X = $120;
   GALLERY_SURFACE = 4;
 
-  { p_RankNames @ 0x00469088. Five, and the sixth pointer is nil - which is
-    what bounds the table. EndingRank returns the index. }
+  { EndingRank returns an index into these five labels. }
   RANK_NAMES: array[0..4] of string =
     ('RANK C', 'RANK B', 'RANK A', 'RANK S', 'RANK SS');
   RANK_X = $88;  RANK_Y = $A8;
@@ -190,41 +178,30 @@ const
   { Game_RGB(0xFF, 0xDF, 0xA3) over Game_RGB(0x7E, 0x5B, 0x35). }
   ENDING_TEXT_FILL    = $A3DFFF;
   ENDING_TEXT_OUTLINE = $355B7E;
-  { bmp\ed%.3d.bmp - 0x00464450 loose, 0x00464468 inside the archive. }
+  { Numbered ending pictures share this filename pattern. }
   ENDING_PICTURE_FMT = 'ed%.3d.bmp';
-  { 0x00464410 and 0x00464440. The second one is a trap for anyone reading it
-    as C: Delphi's Format has no zero-pad flag, so '%03d' is a WIDTH of three
-    padded with SPACES. The percentage prints as ' 52%', not '052%'. }
+  { Delphi treats the zero in '%03d' as part of the width, not a zero-padding
+    flag, so percentages are padded with spaces. }
   ENDING_TIME_FMT    = '%.2d:%.2d:%.2d';
   ENDING_PERCENT_FMT = '%03d%%';
 
 type
-  { What the host has to supply. Each is one call the original makes into the
-    component layer, named for what it means rather than for the component. }
+  { Presentation callbacks supplied by the host form. }
   TEndingPicture = procedure(Index: Integer) of object;
   TEndingMusic = procedure(Track: Integer; Loop: Boolean) of object;
 
-{ The completion percentage, INCLUDING the two places the original's x87
-  route comes out a point low - see the header. }
+{ Completion percentage including the two x87 rounding edge cases below. }
 function EndingPercent(Counter: Integer): Integer;
 
 const
-  { The only two counters at which the original disagrees with Counter div 4.
-    It divides, rounds to 64 bits, multiplies and rounds again, and at these
-    two the result lands one ulp below the integer - then 0x00402948 loads
-    control word 0x1D6C, rounding toward zero, so it truncates rather than
-    rounding back up and 53% prints as 52%. Delphi's Round would not have.
-
-    Neither crosses a rank gate, so only the printed number is affected. Found
-    with exact rationals, as tools/x87_sim.py does for ScaleByPercent; the
-    self-test walks all 401 counters against that model. }
+  { Extended-precision intermediate rounding makes these two counters display
+    one percentage point low. Neither edge case crosses a rank threshold. }
   ENDING_PCT_DEVIATIONS: array[0..1] of Integer = (212, 236);
 
-{ 0x00463E39. The rank, and the only thing the door unlocks depend on. }
+{ Calculate the rank used by the results display and door unlocks. }
 function EndingRank(Counter, ElapsedSec: Integer): Integer;
 
-{ 0x00463E5C and 0x00463D88. Both sets of persistent flags, in one place
-  because they are earned on one screen and written to one file. }
+{ Apply the persistent door and gallery rewards earned by the results screen. }
 procedure EndingApplyUnlocks(var S: TGameSettings; const P: TPlayerState);
 
 { The two strings the screen prints beside the rank. }
@@ -232,20 +209,8 @@ function EndingTimeText(ElapsedSec: Integer): string;
 function EndingPercentText(Counter: Integer): string;
 
 type
-  { 0x00463624. The sequence itself, reduced to what is not presentation.
-
-    Its phases run on GameState.ScreenPhase, the counter it shares with the
-    game-over screen and the message box, and its step within a phase on a
-    second global at 0x0046D298.
-
-    PHASE 1 IS THE SLIDE SHOW, and it is easy to miss: the original tests the
-    phase 0, 2, 3, 4, 5, else, so phase 1 is the unlabelled `else` at the
-    BOTTOM of the function rather than where you would look for it. Step is
-    the slide there and Timer counts its frames down.
-
-    Phases 2, 3 and 4 - the credits, the four stills and the hold - are
-    presentation over the component this project replaces, so only their
-    bookkeeping is here. notes/ending_sequence.md has all six. }
+  { Six-phase ending state machine. ScreenPhase selects the phase; Step and
+    Timer track progress within it. }
   { Asked, not handed in - the same reason the game-over screen asks. Phase 1
     starts a track and then waits for it in a later frame of the same run. }
   TEndingQuery = function: Boolean of object;
@@ -275,9 +240,9 @@ type
     FOnFadeBusy: TEndingQuery;
 
   public
-    { 0x0046D298, the step inside a phase. }
+    { Step within the current phase. }
     Step: Integer;
-    { 0x0046D174, the frame timer the staff roll and the rank line read. }
+    { Frame timer shared by the timed ending phases. }
     Timer: Integer;
 
     { The staff roll's live Y for each entry; everything else about an entry
@@ -326,10 +291,8 @@ function EndingPercent(Counter: Integer): Integer;
 var
   DeviationIndex: Integer;
 begin
-  { Counter div 4 is the arithmetic the expression MEANS. It is not what the
-    original computes at two of the 401 counters, so those two are named
-    rather than recomputed - doing the division in Double here would land
-    somewhere else again, and somewhere else is not the original either. }
+  { Name the two platform-rounding exceptions rather than relying on the host
+    floating-point implementation. }
   Result := Counter div 4;
   for DeviationIndex := 0 to High(ENDING_PCT_DEVIATIONS) do
     if Counter = ENDING_PCT_DEVIATIONS[DeviationIndex] then
@@ -381,7 +344,6 @@ begin
   Result := Format(ENDING_PERCENT_FMT, [EndingPercent(Counter)]);
 end;
 
-{ Credits_Tick @ 0x004515B4, less the drawing. }
 procedure TEndingScreen.CreditsTick;
 var
   CreditIndex, LastCredit: Integer;
@@ -402,9 +364,8 @@ begin
   begin
     if Advance then
       Dec(CreditY[CreditIndex], CREDITS_STEP);
-    { The original re-arms Advance when the LAST entry has gone off the top.
-      It cannot: the roll is declared done once that entry reaches the centre,
-      far below -Height. Reproduced as unreachable rather than dropped. }
+    { This compatibility branch is unreachable because the roll completes when
+      the final entry reaches the center, before it moves above the screen. }
     if (CreditIndex = CREDITS_ENTRIES - 1)
     and (CreditY[CreditIndex] < -CREDITS_LAYOUT[CreditIndex][CREDITS_H]) then
       Advance := True;
@@ -492,10 +453,7 @@ begin
         and ((Step = ENDING_SLIDE_WAIT_A) or (Step = ENDING_SLIDE_WAIT_B))) then
     begin
       Inc(Step);
-      { The original reads ENDING_SECONDS[Step - 1] here even when Step has
-        reached 7, one past the table - and then overwrites Timer with the
-        sentinel in the branch below, so the overrun value is never used.
-        Guarded rather than reproduced; DIV-011's class. }
+      { Do not read a duration after advancing past the final slide. }
       if Step <= ENDING_SLIDES then
         Timer := ENDING_SECONDS[Step - 1] * ENDING_SECONDS_SCALE;
 
@@ -600,10 +558,8 @@ begin
     Exit;
   end;
 
-  { Phase 5, the results - and the only place the persistent unlocks are
-    written. Banked once as the screen appears rather than in the two draw
-    arms the original writes them from; the outcome is the same and neither
-    arm can be skipped. }
+  { Phase 5: results and persistent unlocks. Rewards are banked once when the
+    screen appears. }
   if ScreenPhase = 5 then
   begin
     if Step = 0 then

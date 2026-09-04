@@ -25,7 +25,7 @@ const
   DIR_LEFT  = 32;
   DIR_DOWN  = 48;
 
-  { Direction cosine table at 0x00468B14. }
+  { Fixed-point cosine values for one full turn. }
   DIR_COS: array[0..DIR_COUNT - 1] of Integer = (
       32,   31,   31,   30,   29,   28,   26,   24,
       22,   20,   17,   15,   12,    9,    6,    3,
@@ -40,13 +40,12 @@ const
 function DirVelX(Dir: Integer): Integer;
 function DirVelY(Dir: Integer): Integer;
 
-{ Angle_Between @ 0x004513E0. Integer atan2 in 64ths, with no division and no
-  floating point: it walks the sixteen sub-steps of a quadrant and stops where
-  the cross product changes sign. }
+{ Integer atan2 in 64ths, with no division or floating point. It walks the
+  sixteen sub-steps of a quadrant and stops where the cross product changes
+  sign. }
 function AngleBetween(X1, Y1, X2, Y2: Integer): Integer;
 
-{ One steering step, from 0x00461738: turn Facing one unit toward Target,
-  taking the shorter way round.
+{ Turn Facing one unit toward Target by the shorter direction.
 
   The asymmetric 33/32 thresholds give a stable turn direction when Facing and
   Target are exactly opposite. }
@@ -144,8 +143,7 @@ begin
       Dec(Facing);
   end;
 
-  { The original adds or subtracts a full turn once, rather than masking - the
-    delta can never push Facing more than one step outside the range. }
+  { Delta can move Facing only one step outside the valid range. }
   if Facing < 0 then
     Inc(Facing, DIR_COUNT);
   if Facing > DIR_COUNT - 1 then

@@ -30,7 +30,7 @@ type
     { The map whose tile-definition table is rewritten. }
     constructor Create(AMap: TTileMap; const Anim: TTerrainAnim);
 
-    { 0x0044E2C0. One frame. }
+    { Advance every configured background-animation track by one frame. }
     procedure Tick;
 
     { Puts every track back on frame 0 with a spent timer, which is the state
@@ -108,10 +108,7 @@ begin
     if (FrameIndex < 0) or (FrameIndex >= TERRAIN_ANIM_FRAMES) then
       FrameIndex := 0;
 
-    { The frame's picture is another tile's cell. Stages.pas stores the frames
-      as tile IDS because that is what the data means; the original stores the
-      coordinates it computed from them, and --selftest-stages checks the two
-      agree over all thirty frames. }
+    { A frame selects another tile's source cell. }
     SourceTile := FTracks[TrackIndex].Frames[FrameIndex];
     FMap.DefineTile(FTracks[TrackIndex].TileId,
                     TileSrcY(SourceTile, FMap.TileHeight, FMap.SheetCols),

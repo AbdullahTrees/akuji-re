@@ -1,6 +1,4 @@
-{ Title menu, options, gallery, pause menu, and game-over screen. TitleSubMode
-  selects the main menu, the ten-row options screen, or the gallery viewer.
-  DIVERGENCE DIV-009 tracks the remaining key-rebinding limitation. }
+{ Title menu, options, gallery, pause menu, and game-over screen. }
 
 unit Title;
 
@@ -12,7 +10,7 @@ uses
   Classes, SysUtils, Graphics, GameState, GameFont, SoundTable;
 
 const
-  { Sub-modes, p_TitleSubMode @ 0x0046CEF8 }
+  { Title-screen sub-modes. }
   TSM_MENU    = 0;
   TSM_OPTIONS = 1;
   TSM_OMAKE   = 2;
@@ -29,12 +27,12 @@ const
   { The cursor is a BRACKET PAIR around the row, not a single mark: eight
     spaces wide, so starting eight pixels left of MENU_X puts the '<' before
     the row's first glyph and the '>' after its last. }
-  MENU_CURSOR = '<        >';               { 0x00462DE4 }
+  MENU_CURSOR = '<        >';
 
   { Game_DrawText's fourth argument is the CENTRED flag, and this is the one
     line on the screen that passes 1 - the menu rows centre themselves inside
     their eight characters instead. }
-  CREDIT_TEXT = 'CREATED BY E.HASHIMOTO';   { 0x00462DC4, centred at y 0xD8 }
+  CREDIT_TEXT = 'CREATED BY E.HASHIMOTO';
   CREDIT_Y = $D8;
   TITLE_SCREEN_W = $140;
 
@@ -44,11 +42,11 @@ const
   OPT_VALUE_X  = $E8;
   OPT_CURSOR_X = $E0;
   OPT_ROW_EXIT = 9;
-  OPT_TITLE    = '- OPTION -';   { 0x00462DF8, centred at y 0x20 }
+  OPT_TITLE    = '- OPTION -';
   OPT_TITLE_Y  = $20;
   OPT_CURSOR   = '<       >';    { brackets the value column }
 
-  { Row labels, verbatim from 0x00462E0C onward. }
+  { Labels in cursor order. }
   OPT_LABELS: array[0..9] of string = (
     'GAME LEVEL',
     'FULL SCREEN',
@@ -65,36 +63,23 @@ const
   TEXT_OFF  = 'OFF';
   KEY_SUFFIX = ' KEY';
 
-  { The three BUTTON ASSIGN rows draw a key NAME, not the index. 0x00462330
-    indexes the table at 0x00468E44 through the cell at 0x0046D214 by
-    KeyMap[n], and appends ' KEY'. Twelve entries, and they are the keys
-    DirectInput_Init binds. }
+  { Names shown for the twelve bindable keys. }
   KEY_NAMES: array[0..11] of string =
     ('Z', 'X', 'C', 'A', 'S', 'D', '1', '2', '3', '4', '5', '6');
 
-  { The GALLERY row draws a name from the table at 0x0046906C - through the
-    cell at 0x0046D010, indexed by Settings+0x28 - in variant 2, and then a
-    SECOND string at x 0x108 saying whether that slot is unlocked:
-
-        if (p_Settings[sel + 0x2C] == 1)  DrawText(0x108, 0xB8, variant 0, 'ON')
-        else                              DrawText(0x108, 0xB8, variant 2, 'OFF')
-
-    so the marker's colour carries the state as much as the word does. }
+  { Gallery slot names; the ON/OFF marker uses a distinct colour variant. }
   OMAKE_NAMES: array[0..6] of string =
     ('NO1', 'NO2', 'NO3', 'NO4', 'NO5', 'NO6', 'NO7');
   OMAKE_MARK_X = $108;
 
-  { The POINTER CELLS the four tables are reached through - see the test that
-    diffs the constants above against the image. }
+  { Reference addresses used by table-validation self-tests. }
   OPT_LEVEL_NAME_CELL    = $0046D1A0;
   OPT_LEVEL_VARIANT_CELL = $0046D348;
   OPT_KEY_NAME_CELL      = $0046D214;
   OPT_OMAKE_NAME_CELL    = $0046D010;
 
   { Editable option ranges. }
-  { The GAME LEVEL row draws a NAME, not a number, and 0x00462330 indexes both
-    tables by Settings+4 - so HARD is drawn in a different colour from the
-    other two. Strings at 0x00469054, variants at 0x00469060. }
+  { HARD uses a distinct colour variant. }
   LEVEL_NAMES: array[0..2] of string = ('EASY', 'NORMAL', 'HARD');
   LEVEL_VARIANTS: array[0..2] of Integer = (0, 0, 1);
 
@@ -110,7 +95,7 @@ type
   { Callbacks keep this unit independent of the component layer. }
   TSoundEvent = procedure(Index: Integer) of object;
   TNotifyProc = procedure of object;
-  { 0x00462BE9 builds 'omake%.02d.bmp' and hands it to Ending_ShowPicture. }
+  { Opens the selected gallery image. }
   TGalleryEvent = procedure(Slot: Integer) of object;
 
   TTitleScreen = class
@@ -128,21 +113,17 @@ type
   public
     constructor Create;
     procedure Reset;
-    { 0x00462330, Title_MainMenu. Three sub-modes in one function: the menu,
-      the options screen, and the gallery viewer. Returns True when the caller
-      should leave the title screen; the new GameStateValue has already been
-      set. }
+    { Returns True when the caller should leave the title screen. }
     function Update(MoveY, MoveX: Integer; Confirm: Boolean): Boolean;
     procedure Draw(C: TCanvas; F: TGameFont;
                    BgMenu, BgOptions, Gallery: TBitmap);
 
     function GetIndex: Integer;
     function GetSubMode: Integer;
-    { p_TitleSubMode @ 0x0046CEF8 - ONE variable, and this property is now a
-      window onto it rather than a second copy. See GameState.pas. }
+    { Exposes the shared title sub-mode from GameState. }
     property SubMode: Integer read GetSubMode;
   public
-    { p_MenuIndex, the shared global - see GameState.pas. }
+    { Exposes the shared menu cursor from GameState. }
     property Index: Integer read GetIndex;
     property OnSound: TSoundEvent read FOnSound write FOnSound;
     { GameState_Reset(mode 0), and the opening's two counters. Callbacks
@@ -156,14 +137,11 @@ type
     property OnVolume: TNotifyProc read FOnVolume write FOnVolume;
   end;
 
-  { GameOver_Update @ 0x00461A44 - the shortest of the three screens that step
-    through GameState.ScreenPhase. What it needs from outside is callbacks, so
-    the unit stays clear of the component layer. }
+  { External operations used by the game-over screen. }
   TFadeEvent = procedure(FadeIn: Boolean) of object;
   TMusicEvent = procedure(Track: Integer) of object;
   TRestartEvent = procedure of object;
-  { Asked, not told. GameOver_Update calls FUN_00450FD0 for the answer at the
-    point it uses it, so this has to be a query and not a value handed in. }
+  { Queries music state at the point it is needed. }
   TQueryEvent = function: Boolean of object;
 
 const
@@ -178,16 +156,8 @@ type
     FOnRestart: TRestartEvent;
     FOnMusicPlaying: TQueryEvent;
   public
-    { Returns True while the screen should be drawn, which is phase 2 only.
-
-      MUSIC IS NOT A PARAMETER but a callback, because phase 1 starts the
-      game-over midi in the SAME call that phase 2 asks whether music is
-      playing. An answer handed in is from before that midi started, and a
-      death that silenced the stage track first then leaves phase 2 at once
-      and never shows the screen.
-
-      Confirm and FadeBusy stay parameters: both are pure reads of state
-      nothing in this call changes. }
+    { Returns True while phase 2 should be drawn. Music state is queried after
+      phase 1 has started the game-over track. }
     function Update(FadeBusy, Confirm: Boolean;
                     var AGameState: Integer): Boolean;
 
@@ -200,21 +170,9 @@ type
 
 
 const
-  { --- PauseMenu_Update @ 0x00461EE4 --------------------------------------
-
-    Three choices, and it BLACKS THE SCREEN OUT first - colour 0 over the whole
-    320x240 - so the paused game is not visible behind the menu. Six lines, all
-    centred.
-
-    Button 2 resumes, restoring the menu index FormKeyDown stashed on the way
-    in rather than leaving the pause cursor where it was. The original also
-    writes the input record's own latches to swallow the press so the resumed
-    game does not see it; that side effect is why Update takes the input var.
-
-    The cursor moves only when Inp.Moving is FALSE. That is not "while
-    standing still": InputEndOfFrame runs AFTER the state handlers, so during
-    one Moving still holds the PREVIOUS frame's value, and testing it clear
-    is a D-pad edge - one step per press, no auto-repeat. }
+  { The pause menu covers the game with black. Update receives mutable input
+    so it can consume the button used to leave the menu. Moving still contains
+    the previous frame's value, providing one cursor step per press. }
   PAUSE_ITEMS = 3;
   PAUSE_ROW_Y: array[0..PAUSE_ITEMS - 1] of Integer = ($50, $60, $70);
   PAUSE_CURSOR_MUL = 2;     { (index * 2 + 10) * 8 lands on the rows above }
@@ -228,10 +186,7 @@ const
 type
   TPauseMenu = class
   public
-    { 0x00461EE4, PauseMenu_Update. Returns True if the menu is still up.
-      Inp is var because the original writes its latches. The write-up is in
-      the const block above; the address is repeated here because that is
-      where tools/implemented.py looks. }
+    { Returns True while the pause menu remains active. }
     function Update(var Inp: TInputState; var AGameState: Integer): Boolean;
     procedure Draw(C: TCanvas; F: TGameFont; ScreenW, ScreenH: Integer);
   end;
@@ -243,8 +198,7 @@ implementation
 
 { --- TPauseMenu ---------------------------------------------------------- }
 
-{ The original calls MainForm.DDSD1.Play straight; this is the same hook the
-  title screen uses so the unit stays off the component layer. }
+{ Shared sound hook for pause-menu feedback. }
 var
   PauseSound: TSoundEvent = nil;
 
@@ -280,16 +234,8 @@ begin
       PAUSE_QUIT:     AGameState := GS_QUIT;
     end;
     Result := False;
-    { NO EXIT HERE. Every arm of the original's confirm ends in
-      `JMP 0x00462024`, which is the CANCEL test - not the epilogue at
-      0x004620C7 - so a confirm falls through to the cancel test and then to
-      the movement block. Two consequences, both the original's: a confirm and
-      a cancel in the same frame let the cancel win and put the state back,
-      and the cursor still moves on that frame.
-
-      The cancel arm below DOES leave, and that is not an inconsistency:
-      0x00462061 jumps to the epilogue, because the movement block is its
-      `else`. }
+    { Confirm deliberately falls through: cancel may override it in the same
+      frame, and cursor movement still runs. }
   end;
 
   if Inp.Button[PAUSE_CANCEL_BUTTON]
@@ -358,10 +304,8 @@ begin
   end
   else if (ScreenPhase = 1) and not FadeBusy then
   begin
-    { GameState_Reset(mode 0) plus the asset reload and the font rebuild - one
-      callback, because the host owns all three. The font rebuild is not
-      redundant: the asset reload replaces surface slot 0, which IS the font
-      sheet, so the glyph table has to be built again on top of it. }
+    { Restart also rebuilds the font because reloading assets replaces its
+      source surface. }
     if Assigned(FOnRestart) then
       FOnRestart;
     ScreenPhase := 2;
@@ -422,17 +366,8 @@ begin
   case MenuIndex of
     0, 1:
       begin
-        { THE INDEX IS READ INTO A TEMPORARY BEFORE THE RESET, because
-          GameState_Reset ZEROES MenuIndex - read it afterwards and it is
-          always 0, which is NEW GAME whichever row the cursor was on.
-
-              uVar3 = *p_MenuIndex;       <- before
-              GameState_Reset(form, 0);
-              *p_TitleSubMode = uVar3;    <- the saved copy, not a reload
-
-          The reset also zeroes the opening's slide and timer, which is what
-          makes the cutscene start from its first slide rather than wherever
-          a previous run left it. }
+        { Preserve the selection because resetting game state clears MenuIndex.
+          Resetting the opening also restarts its cutscene. }
         PlaySound(SND_OK);
         Chosen := MenuIndex;
         if Assigned(FOnResetState) then
@@ -451,7 +386,7 @@ begin
         TitleSubMode := TSM_OPTIONS;
       end;
     3:
-      { No sound. EXIT is the one choice the original does not acknowledge. }
+      { Exit is intentionally silent. }
       GameStateValue := GS_QUIT;
   end;
 end;
@@ -460,10 +395,7 @@ procedure TTitleScreen.OptionsConfirm;
 var
   Sel: Integer;
 begin
-  { Row 8 shows a gallery image if that slot is unlocked, and REFUSES with
-    SND_NG if it is not - which is the only place in the menus that says no.
-    The unlock bytes are system.dat +0x2C..+0x32, and Ending.pas is what
-    fills them in. }
+  { Row 8 opens an unlocked gallery slot and plays a rejection sound otherwise. }
   if MenuIndex = Ord(orOmake) then
   begin
     Sel := Settings.GallerySel;
@@ -480,8 +412,7 @@ begin
     Exit;
   end;
 
-  { Row 9 leaves, and the original returns to the menu with the cursor on
-    OPTION - index 2, not 0. }
+  { Return to the main menu with OPTION selected. }
   if MenuIndex = OPT_ROW_EXIT then
   begin
     PlaySound(SND_OK);
@@ -534,21 +465,12 @@ begin
   end;
 end;
 
-{ 0x004629A0, the options arm's switch.
-
-  Every row acknowledges a change, and not with the same sound - SND_PI on
-  the gallery row, SND_OK on the rest. It sounds only when the value actually
-  MOVED: the clamp zeroes the delta first and then tests it, so a press
-  against either end of a range is silent. The toggles have no range, so they
-  always sound.
-
-  The volume write is followed by the same 57-channel sweep Title_Init does,
-  so the next sound you hear is already at the new level. }
+{ Adjusts the selected option. Bounded values are silent at their limits;
+  gallery selection uses SND_PI and other changes use SND_OK. }
 procedure TTitleScreen.AdjustValue(Delta: Integer);
 begin
   if Delta = 0 then Exit;
-  { Each row clamps to the range the original enforces; out-of-range moves are
-    swallowed rather than clipped, matching its "if out of range then delta:=0". }
+  { Out-of-range adjustments are ignored rather than clipped. }
   case TOptionRow(MenuIndex) of
     orLevel:
       if (Settings.GameLevel + Delta >= LEVEL_MIN) and
@@ -604,9 +526,7 @@ begin
       begin
         if MoveY <> 0 then
         begin
-          { 0x0046245A: the cursor blip fires on any non-zero vertical input,
-            BEFORE the index is wrapped, so it sounds even on the move that
-            wraps around the ends. }
+          { Cursor movement sounds before wrapping at either end. }
           PlaySound(SND_PI);
           MenuIndex := MenuIndex + MoveY;
           if MenuIndex < 0 then MenuIndex := High(MENU_ITEMS);
@@ -614,9 +534,7 @@ begin
         end;
         if Confirm then
         begin
-          { The sound belongs to the BRANCH, not to the confirm. EXIT is
-            silent in the original - only NEW GAME, CONTINUE and OPTION play
-            SND_OK - and playing it here made all four alike. }
+          { Each branch chooses its own confirmation sound; exit stays silent. }
           MenuConfirm;
           Result := GameStateValue <> GS_TITLE_MENU;
         end;
@@ -625,14 +543,11 @@ begin
     TSM_OPTIONS:
       begin
         AdjustValue(MoveX);
-        { Key rebinding on rows 2..4 still needs raw button polling rather than
-          an axis - the original scans 16 buttons and swaps if already bound. }
+        { DIVERGENCE DIV-009: key rebinding is unavailable. }
+        { Key rebinding still requires raw button polling and is not handled by
+          this directional-input interface. }
         if MoveY <> 0 then
         begin
-          { INFERRED, not individually traced: the options screen has its own
-            call sites using the same two indices in the same roles
-            (0x0046290F, 0x00462B1A for SND_PI; 0x00462996 onward for SND_OK),
-            but which branch each sits on has not been read out. }
           PlaySound(SND_PI);
           Limit := Ord(High(TOptionRow));
           MenuIndex := MenuIndex + MoveY;
@@ -660,13 +575,7 @@ procedure TTitleScreen.Draw(C: TCanvas; F: TGameFont;
 var
   ItemIndex: Integer;
 begin
-  { The original blits p_Surfaces[1] for the menu and p_Surfaces[2] for options
-    full-screen first. Colour variants match the original's param_5: 2 for menu
-    items, 1 for the cursor, 0 for the credit line. }
-  { The gallery draws ONE sprite and no text, so it is handled before the font
-    guard - the original's third arm is a Rect and a single TDDDD_DrawSprite,
-    with no Game_DrawText anywhere in it. Sitting below the guard meant it
-    never ran when the font had not been built. }
+  { The gallery has no text, so it can draw without an initialized font. }
   if TitleSubMode = TSM_OMAKE then
   begin
     if Gallery <> nil then
@@ -692,12 +601,10 @@ begin
       begin
         if BgOptions <> nil then
           C.Draw(0, 0, BgOptions);
-        { Centred, like the credit line - Game_DrawText's fourth argument is
-          1 here. }
+        { The heading is centered like the credit line. }
         F.TextOutCentered(C, OPT_TITLE_Y, OPT_TITLE, TITLE_SCREEN_W, 2);
         for ItemIndex := Low(OPT_LABELS) to High(OPT_LABELS) do
-          { EXIT is drawn on the right at (0xE8, 200) in the original, not in
-            the label column with the rest. }
+          { EXIT occupies the value column rather than the label column. }
           if ItemIndex = OPT_ROW_EXIT then
             F.TextOut(C, OPT_VALUE_X, 200, OPT_LABELS[ItemIndex], 2)
           else

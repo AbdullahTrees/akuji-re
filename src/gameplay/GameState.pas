@@ -1,5 +1,4 @@
-{ Shared game state, input state, settings, and frame timing. Address comments
-  identify layout-sensitive globals used by the verification tools. }
+{ Shared game state, input state, settings, and frame timing. }
 
 unit GameState;
 
@@ -8,22 +7,19 @@ unit GameState;
 interface
 
 const
-  { p_GameState @ 0x0046D06C. The frame loop dispatches on this; values step
-    by 10. Handlers are named where identified. }
-  GS_TITLE_INIT  = 10;    // Title_Init            0x0046214C  boot into title
-  GS_TITLE_MENU  = 20;    // Title_MainMenu        0x00462330  NEW GAME/CONTINUE/OPTION/EXIT
-  GS_STAGE_BEGIN = 30;    // Stage_Begin           0x00462210 -> sets GS_PLAY
-  GS_PLAYER_INIT = 40;    // Game_Init_PlayerState 0x00462F40
-  GS_PLAY        = 60;    // FUN_00454790 + HUD_Draw
-  GS_PLAY_ALT    = 100;   // FUN_00461A44 + HUD_Draw
-  GS_PAUSE       = 130;   // PauseMenu_Update      0x00461EE4
-  GS_STATE_140   = 140;   // FUN_00454790, FUN_00455210, HUD_Draw
-  GS_ENDING      = 150;   // Ending_Update         0x00463624  results screen
+  { The frame loop dispatches on these numeric states. }
+  GS_TITLE_INIT  = 10;
+  GS_TITLE_MENU  = 20;
+  GS_STAGE_BEGIN = 30;
+  GS_PLAYER_INIT = 40;
+  GS_PLAY        = 60;
+  GS_PLAY_ALT    = 100;
+  GS_PAUSE       = 130;
+  GS_STATE_140   = 140;
+  GS_ENDING      = 150;
   GS_QUIT        = 999;   // clears OnIdle, terminates
 
-  { PauseMenu_Update selection, p_PauseMenuIndex @ 0x0046CF88 }
-  { 0x00464D30's shake: Random(0x10) - 8, so -8..+7 inclusive, recomputed on
-    every frame the shake is on. }
+  { Screen shake uses Random(16) - 8, producing -8..+7 each frame. }
   SHAKE_RANGE  = $10;
   SHAKE_CENTRE = 8;
 
@@ -31,8 +27,7 @@ const
   PAUSE_RESTART  = 1;     // -> GS_TITLE_INIT
   PAUSE_QUIT     = 2;     // -> GS_QUIT
 
-  { Title_Init sleeps this long the first time it runs and never again -
-    0x0046CFE8 is the flag that remembers. }
+  { One-time delay before the title screen first appears. }
   TITLE_INIT_SLEEP_MS = $168;   { 360 ms }
 
   SCREEN_W = 320;
@@ -40,13 +35,11 @@ const
 
   { The frame loop advances when at least 16 ms have elapsed. }
   FRAME_MS = 16;
-  { What --selftest-player will tolerate from FrameClockMs. Chosen to
-    separate a 1 ms clock from a 15.6 ms one, not to be tight. }
+  { Maximum acceptable clock granularity for frame pacing. }
   FRAME_CLOCK_MAX_STEP_MS = 5;
 
 type
-  { p_InputState @ 0x0046CC58. Offsets in comments are from the original;
-    the interpretation of +0x08..+0x18 is provisional. }
+  { Input state and frame-to-frame edge-detection fields. }
   TInputState = record
     AxisX: Integer;                        // +0x00
     AxisY: Integer;                        // +0x04
@@ -69,11 +62,10 @@ type
     GameLevel: Integer;      // +0x04  0..2
     { Four logical-button mappings; defaults form the identity mapping. }
     KeyMap: array[0..3] of Integer;  // +0x08..+0x14
-    { FormDestroy names each of these by the global it copies from. }
-    SoftwareVsyncFlag: Byte; // +0x18  <- p_SoftwareVsync 0x0046CE60
-    WaitOnFlag: Byte;        // +0x19  <- p_WaitOn        0x0046D2E4
-    FullScreenFlag: Byte;    // +0x1A  <- p_FullScreenOn  0x0046D268
-    DebugLogFlag: Byte;      // +0x1B  <- p_DebugLog      0x0046CDB8
+    SoftwareVsyncFlag: Byte; // +0x18
+    WaitOnFlag: Byte;        // +0x19
+    FullScreenFlag: Byte;    // +0x1A
+    DebugLogFlag: Byte;      // +0x1B
     { Two persistent unlock flags, each gating one half of a locked-door pair
       (ev001 tile 24,7 and ev065 tile 10,7) into the game's last map. While the
       flag is clear a variant-2 type-25 door stands there doing nothing; set,
@@ -95,78 +87,60 @@ type
     InputDevice: Integer;    // +0x34  from system.ini [device] input
   end;
 
-{ p_* addresses below identify pointer cells. Consumers must dereference the
-  cell to reach the corresponding value. }
-
 var
   { Shared runtime globals. }
-  Settings: TGameSettings;                  // p_Settings        cell 0x0046D0E8
-  FullScreenOn: Boolean = False;            // p_FullScreenOn    cell 0x0046D268
-  WaitOn: Boolean = False;                  // p_WaitOn          cell 0x0046D2E4
-  SoftwareVsync: Boolean = True;            // p_SoftwareVsync   cell 0x0046CE60
-  DebugLog: Boolean = False;                // p_DebugLog        cell 0x0046CDB8
-  GameStateValue: Integer = GS_TITLE_INIT;  // p_GameState       cell 0x0046D06C
-  SavedGameState: Integer = 0;              // p_SavedGameState  cell 0x0046CBBC
+  Settings: TGameSettings;
+  FullScreenOn: Boolean = False;
+  WaitOn: Boolean = False;
+  SoftwareVsync: Boolean = True;
+  DebugLog: Boolean = False;
+  GameStateValue: Integer = GS_TITLE_INIT;
+  SavedGameState: Integer = 0;
 
-  { The screen shake, from TFrm_main_AppIdle @ 0x00464F8A. A fresh random
-    displacement every frame rather than an oscillation, applied once to the
-    whole sprite pass. Only the final boss's ground slam sets it. }
-  ScreenShakeOn: Boolean = False;           //                   0x00484EE9
-  ScreenShakeTimer: Integer = 0;            //                   0x00484EEC
-  { 0x0046CF88 is ONE global shared by the title menu and the pause menu -
-    Title_MainMenu clamps it to 0..3 and PauseMenu_Update reuses it. That is why
-    FormKeyDown stashes it before entering pause and zeroes it. }
-  { 0x0046CC14. ONE sub-phase counter shared by every screen that has to
+  { Screen shake applies a fresh random displacement to the whole sprite pass
+    each frame. Only the final boss's ground slam enables it. }
+  ScreenShakeOn: Boolean = False;
+  ScreenShakeTimer: Integer = 0;
+  { One sub-phase counter shared by every screen that has to
     wait for a fade: the game-over screen steps 0 -> 1 -> 2 through it, the
     opening sequence runs its whole six-beat sequence on it, and the message
     box uses it as a wait flag. EventRunner.pas already described it from the
     interpreter's side. GameState_Reset zeroes it. }
-  ScreenPhase: Integer = 0;                 //                   0x0046CC14
-  { 0x0046CEF8. Which of NEW GAME / CONTINUE the title menu chose, and reset
-    to 0 by the game-over screen on its way back to the title. }
-  TitleSubMode: Integer = 0;                // p_TitleSubMode    cell 0x0046CEF8
+  ScreenPhase: Integer = 0;
+  { Which of NEW GAME / CONTINUE the title menu chose. }
+  TitleSubMode: Integer = 0;
   { ONE variable, shared by the title menu, the options screen and the pause
     menu - so moving the cursor in one moves it in the others. }
-  MenuIndex: Integer = 0;                   // p_MenuIndex       cell 0x0046CF88
-  SavedMenuIndex: Integer = 0;              // p_SavedMenuIndex  cell 0x0046D2C0
-  Input: TInputState;                       // p_InputState      cell 0x0046CC58
-  { p_KeyMap 0x0046CEA8. DDDD1Init copies Settings.KeyMap into this on the way
-    in and FormDestroy copies it back on the way out, so the two are the same
-    four numbers held twice - which is why changing a key in the options
-    screen edits THIS and the file only picks it up at exit. }
+  MenuIndex: Integer = 0;
+  SavedMenuIndex: Integer = 0;
+  Input: TInputState;
+  { Runtime key mappings are copied from settings at startup and written back
+    when settings are saved. }
   KeyMap: array[0..3] of Integer;
 
-{ 0x00466E4C. "Confirm" is EITHER of the first two buttons, and it is an
-  EDGE, not a level:
+{ Confirm is the rising edge of either of the first two buttons:
 
       (Button[0] and not ButtonLatch[0]) or (Button[1] and not ButtonLatch[1])
 
   Both buttons participate in the rising-edge test. }
 function ConfirmPressed(const Inp: TInputState): Boolean;
 
-{ Convenience for the pause path, which the original open-codes. }
-{ The tail of TFrm_main_AppIdle @ 0x00464D30, which is where the input record's
-  DERIVED fields are maintained. It runs AFTER the state handlers, so the latch
+{ Maintain derived input fields after state handlers, so the latch
   a handler reads holds the PREVIOUS frame's button state - which is what makes
   "Button and not ButtonLatch" a rising edge.
 
   It also ages the double-tap window. Player_Update opens that window; this
-  closes it, and clears the remembered direction when it expires. Splitting it
-  this way is the original's, not a convenience: the controller and the poller
-  each own half of the record. }
+  closes it and clears the remembered direction when it expires. }
 procedure InputEndOfFrame(var Inp: TInputState; const Down: array of Boolean);
 
 procedure EnterPause;
 procedure LeavePause;
 
-{ data\system.dat, from DDDD1Init (which reads it over a set of defaults) and
-  FormDestroy @ 0x00466644 (which writes it back on exit).
-
-  The file is a raw 56-byte image of TGameSettings, so the record must stay
+{ data\system.dat is a raw 56-byte image of TGameSettings, so the record must stay
   exactly that size - asserted at startup, the same guard TPlayerState uses.
 
-  SaveSettings gathers the loose globals back into the record first, in the
-  original's order, because those are what the options screen actually edits. }
+  SaveSettings gathers the runtime globals back into the record first because
+  those are what the options screen edits. }
 function LoadSettings(const AGameDir: string): Boolean;
 function SaveSettings(const AGameDir: string): Boolean;
 procedure SettingsToGlobals;
@@ -184,8 +158,6 @@ implementation
 uses
   Classes, SysUtils, MsClock;
 
-{ The order is the original's, from FormKeyDown @ 0x004665C8: the menu index is
-  saved and cleared BEFORE the game state is saved. }
 procedure InputEndOfFrame(var Inp: TInputState; const Down: array of Boolean);
 var
   ButtonIndex: Integer;
@@ -219,18 +191,6 @@ begin
   end;
 end;
 
-{ Input_ConfirmPressed @ 0x00466E4C. The whole body is one disjunction:
-
-      (in[0x1c] = 1 and in[0x20] = 0) or (in[0x1d] = 1 and in[0x21] = 0)
-
-  Button sits at +0x1C and ButtonLatch at +0x20, so those four bytes are
-  Button[0]/Latch[0] and Button[1]/Latch[1]. It is an EDGE, on EITHER of two
-  buttons - both halves were once wrong at the same time, a level instead of an
-  edge and only one button.
-
-  IT WRITES NOTHING. No latch is consumed, which is what lets GameOver_Update
-  take the answer as an eagerly-evaluated argument without differing from the
-  original, which calls this lazily as the second half of a C or-else. }
 function ConfirmPressed(const Inp: TInputState): Boolean;
 begin
   Result := (Inp.Button[0] and not Inp.ButtonLatch[0])
@@ -278,9 +238,7 @@ begin
     Exit;
   Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
   try
-    { The original reads 0x38 unconditionally. Refuse a short file rather than
-      leaving the tail of the record holding whatever was there before - the
-      same guard LoadSave makes for save.dat. }
+    { Refuse a short file rather than leaving part of the record uninitialized. }
     if Stream.Size < SizeOf(TGameSettings) then
       Exit;
     Stream.ReadBuffer(Settings, SizeOf(TGameSettings));
@@ -307,8 +265,7 @@ begin
       Stream.Free;
     end;
   except
-    { The original opens for write, falls back to create, and ignores failure
-      either way - a read-only game directory must not stop it shutting down. }
+    { A read-only game directory must not prevent shutdown. }
     on E: Exception do
       Result := False;
   end;
@@ -335,11 +292,8 @@ begin
 end;
 
 initialization
-  { data\system.dat is a raw image of this record, so a layout slip makes
-    every setting after the slip garbage.
-
-    NOT Assert - FPC compiles those out without -Sa, which this project does
-    not pass, so the Assert that stood here had never run. See Entities.pas. }
+  { This must remain a runtime check because disabling assertions must not make
+    save-file layout errors silent. }
   if SizeOf(TGameSettings) <> $38 then
     raise Exception.CreateFmt('TGameSettings is %d bytes; data/system.dat is '
       + 'a raw image of it and must be 56', [SizeOf(TGameSettings)]);

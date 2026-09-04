@@ -1,7 +1,7 @@
 { AkujiReg - design-time registration for the Akuji component classes.
 
   The runtime units call RegisterClass in their initialization sections, which
-  is what lets the shipping binary stream GmMain.lfm. The Lazarus IDE is a
+  lets the application stream GmMain.lfm. The Lazarus IDE is a
   separate process and never links those units, so the form designer cannot
   resolve TDDDD / TDDIDEX / TDDSD / TKbgmPlayer without this.
 

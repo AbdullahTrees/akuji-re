@@ -1,6 +1,5 @@
-{ Per-type entity update handlers dispatched by Entity_UpdateAll @ 0x004608BC.
-  HANDLER_ADDR maps type ids to handler addresses. Identified entity names are
-  sourced from tools/entity_names.csv; unknown types retain numeric names. }
+{ Per-type entity behavior dispatched by Entity_UpdateAll. Identified names
+  follow tools/entity_names.csv; unknown types retain numeric names. }
 
 unit EntityHandlers;
 
@@ -12,10 +11,9 @@ uses
   SysUtils, Entities, GameState, SoundTable, PlayerState, Player, Directions;
 
 const
-  { Contiguous sprite-table data at 0x0046BC2C. Several handlers perform
-    unchecked indexing that can cross into an adjacent table, so the complete
-    region is retained as one array. Reads beyond the region remain clamped
-    under DIV-011. }
+  { Contiguous sprite-table data. Some unchecked lookups can cross into an
+    adjacent table, so the complete region remains one array. Reads beyond
+    this region are clamped for safety. }
   SPRITE_DATA_BASE = $0046BC2C;
   SPRITE_DATA: array[0..245] of Integer = (
       28,   29,   30,   31,   32,   33,   34,   35,   36,   37,
@@ -70,7 +68,7 @@ const
     ( 71,  72,  73,  72),
     (118, 119, 120, 119));
 
-  { Type 24 @ 0x0045A43C, a bobbing pickup. Sixteen variants, one sprite each,
+  { Type 24 is a bobbing pickup with sixteen single-sprite variants.
     in a FLAT table - stride 4, not 16; this one has no frames.
 
     It reuses EF_FACING as a PHASE rather than a heading, adding DirVelY of it
@@ -95,27 +93,13 @@ const
   ITEM24_BEAT_SPRITES: array[0..ITEM24_BEAT_FRAMES - 1] of Integer = (480, 481);
   ITEM24_BEAT_TICKS   = $3C;   { 60; the sound fires when the count EXCEEDS it }
 
-  { --- Type 25 @ 0x0045A4F0 ---------------------------------------------
-    Twenty-eight bytes: one table lookup and nothing else. Three variants, one
-    sprite each, and the shipped data uses A = 0, 1 and 2 - flush again.
-
-    Type 25 is the most-placed entity in the game, 160 records spread across all
-    65 stages, and it does not move, animate or react to anything. It is
-    scenery. The compiler left a `GameState - 60` in EAX on the way out, the
-    remains of a comparison with an empty body; the caller ignores it. }
+  { Type 25 is static scenery with three single-sprite variants. }
   ITEM25_VARIANTS   = 3;
   ITEM25_TABLE_ADDR = $0046BE08;
   ITEM25_TABLE_PTR  = $0046CF00;
   ITEM25_SPRITES: array[0..ITEM25_VARIANTS - 1] of Integer = (82, 104, 105);
 
-  { Type 27 @ 0x0045A540, the save point. The handler does not know it is one
-    - what makes it a save point is the EVENT. Type 27 appears exactly ONCE in
-    each of 43 stages, always opcode 1, always with no ParamA argument, and
-    with a ParamB byte-identical in all 43:
-
-        0000-03-0000 / 0003-13 / 0003-03-0001
-
-    say line 0; if flag 3 is set, sub-op 13, SAVE; then say line 1. }
+  { Type 27 is animated scenery whose attached event implements a save point. }
   SAVE_POINT_FRAMES = 2;
   SAVE_POINT_ADDR   = $0046BE24;
   SAVE_POINT_PTR    = $0046D18C;
@@ -133,8 +117,7 @@ const
   { EF_ANIM_ID and EF_VARIANT moved to Entities.pas - they are core entity
     fields, not handler-local ones, and the event spawn walk needs them too. }
 
-  { --- The two touch handlers @ 0x00458274 and 0x00458490 ---------------
-    Both are what EF_TOUCH_KIND 2 and 5 reach, and both follow the same shape:
+  { Touch kinds 2 and 5 follow the same pickup sequence:
     change the player's state, set the progress flag named by the event's
     ParamB, put a type 26 effect where the entity was, and destroy themselves.
     The effect's VARIANT is how one entity type shows three different pickups.
@@ -147,7 +130,7 @@ const
   PICKUP_FX_LEVELUP = 1;
   PICKUP_FX_HEAL    = 3;
 
-  { Entity_PlayerTouch @ 0x00457880. Seven touch kinds after one box test, and
+  { Seven touch kinds run after one overlap test and
     three guards first: the player must not be invulnerable UNLESS the kind is
     3 - which is the only kind that reaches through invulnerability - the
     entity's own EF_TIMER must be 0, and a kind of 0 is not a touch at all.
@@ -156,9 +139,7 @@ const
     Inp.AxisYNegative still clear, which is the edge; the latch is set the
     frame after, so holding Up does not retrigger.
 
-    The original's return value is a local that is never assigned, so callers
-    read whatever was on the stack. Entity_UpdateAll ignores it, so this is a
-    procedure. }
+    The dispatcher has no meaningful result. }
   TOUCH_KIND_HURT       = 1;
   TOUCH_KIND_MANA       = 2;
   TOUCH_KIND_THRU_INVULN = 3;
@@ -167,8 +148,8 @@ const
   TOUCH_KIND_STOMP      = 6;
   TOUCH_KIND_HURT_HARD  = 7;
 
-  { --- Player_TakeDamage @ 0x00458138 -----------------------------------
-    Ninety frames of invulnerability, knocked into state 8, thrown up and
+  { Player damage grants ninety invulnerability frames, enters knockback state
+    8, and throws the player up and
     away from whichever way it is facing.
 
     The lost-life particles spawn at the HUD LIFE ICON, not at the player:
@@ -186,7 +167,7 @@ const
   HUD_LIFE_STEP     = 16;
   HUD_LIFE_Y        = 16;
 
-  { Type 36, the falling item @ 0x0045A7BC. Its two sprites are chosen by
+  { Type 36 is a falling item whose two sprites are chosen by
     EF_FLAG1C, the field Entity_MaybeDropItem writes its rarity roll into - so
     the same flag that makes Entity_TouchLife give a full refill also picks
     which sprite the thing wears on the way down.
@@ -211,8 +192,8 @@ const
         when it spawns the spark, so one table serves two burst colours. Type
         7 takes its row from the VARIANT.
 
-    The tables sit in one run at 0x0046BC5C, each one's extent being the next
-    one's start - the rule tools/table_bounds.py enforces. }
+    The tables occupy one contiguous region, with each table ending where the
+    next begins. }
   T3_FRAMES = 3;  T3_TICKS = 4;   { advance when the count EXCEEDS, so every 5 }
   T3_TABLE_ADDR = $0046BC5C;
   T3_SPRITES: array[0..1, 0..T3_FRAMES - 1] of Integer =
@@ -234,14 +215,8 @@ const
     ((204, 205, 206, 207), (208, 209, 210, 211));
 
   T7_FRAMES = 4;  T7_TICKS = 4;
-  { TWO rows - eight ints. The bound is TYPE8_SPRITES at 0x0046BCCC, exactly
-    0x20 past this table, and a twelve-int reading of it overruns into type
-    8: the 50 --emudiff sees the original return for variant 2 is type 8's
-    first sprite, reached by running off the end of this one. That is
-    DIV-011 again.
-
-    An adjacent table's contents are evidence about the ADJACENT table.
-    tools/table_extents.py is what pins this one. }
+  { Two rows of four frames. Unchecked variant indexing may continue into the
+    adjacent type-8 table. }
   T7_ROWS = 2;
   T7_TABLE_ADDR = $0046BCAC;
   T7_SPRITES: array[0..T7_ROWS - 1, 0..T7_FRAMES - 1] of Integer =
@@ -277,9 +252,8 @@ const
     States 2 and 3 never end; like types 11 and 12 they rely on the off-screen
     cull.
 
-    Two things reproduced rather than tidied: states 1, 2 and 3 add VEL_Y to
-    POS_Y TWICE in the same frame - the original really does write it on two
-    separate lines - so debris falls at double the rate its velocity says; and
+    States 1, 2, and 3 add VEL_Y to POS_Y twice per frame, so debris falls at
+    double the rate its velocity suggests. In addition,
     the gravity is applied BEFORE the first add, so the first frame moves. }
   T13_STATE_SPLASH = 0;
   T13_STATE_SHARD  = 1;
@@ -423,8 +397,7 @@ const
 
     Type 34's frames advance on a difficulty divisor of 8, 10 or 12, so the
     shot animates FASTER on easy and, dying at the end of its animation, has a
-    shorter range there. That is backwards from every other difficulty table
-    and it is what the binary says. }
+    shorter range there, opposite to the other difficulty tables. }
   T34_FRAMES = 5;
   T34_TABLE_ADDR = $0046BEF0;
   T34_SPRITES: array[0..T34_FRAMES - 1] of Integer = (512, 513, 514, 515, 516);
@@ -590,15 +563,7 @@ const
   T42_PATROL_BASE = $78;      { HP * 10 + this }
   T42_PATROL_SOUND = $23;
   T42_LAND_SOUND = 4;
-  { -$40 and -$60, not -$C0 and -$A0. The handler writes these as the literals
-    0xFFFFFFC0 and 0xFFFFFFA0, which are -64 and -96; the low byte is the two's
-    complement, not the magnitude. Same slip as T44_LAUNCH_VY, and found the
-    same way it should have been found the first time -
-    tools/const_immediates.py, which searches the handler's own code for the
-    encoding of each constant and reports when the FOLD is present instead.
-
-    --emudiff could not have caught these: type 42 only reaches states 2 and 4
-    through transitions the probe's four starting states never make. }
+  { Rise and retreat velocities are signed fixed-point values. }
   T42_RISE_VY = -$40;
   T42_RETREAT_VY = -$60;
   T42_GRAVITY = 4;
@@ -635,13 +600,7 @@ const
   T44_TABLE_ADDR = $0046C03C;
   T44_SPRITES: array[0..T44_FRAMES - 1] of Integer =
     (505, 506, 507, 508, 509, 510, 511, 512);
-  { -$50, not -$B0. The disassembly writes the launch velocity as the literal
-    0xFFFFFFB0, and that is -80, i.e. -$50 - the low byte is the two's
-    complement, not the magnitude. Transcribed as -$B0 it was -176, and the
-    entity left the ground more than twice as fast as it should.
-
-    --emudiff caught it as a 96-unit error in one frame of EF_POS_Y: the
-    original moved -78 (launch -80, plus one tick of gravity), ours moved -174. }
+  { Launch velocity is -80; type 42's own jump uses -176. }
   T44_LAUNCH_VY = -$50;
   T44_GRAVITY = 2;
   T44_TERMINAL = $200;
@@ -809,8 +768,7 @@ const
     The heading wrap is written `next := aim + 4; if next > 63 then next :=
     aim - 0x3C` - a subtraction of 60 from the PREVIOUS value rather than a
     mask on the new one. It is exactly equivalent to (aim + 4) mod 64 for
-    every aim in 0..63, which is worth stating because it does not look it.
-    Kept in the original's form anyway.
+    every aim in 0..63.
 
     The fuse lives in EF_TIMER, which Entity_UpdateAll counts down, so this
     handler only watches for zero. }
@@ -1199,8 +1157,7 @@ const
 
   { Types 67 and 68, and the last of type 57. With type 67's egg, every
     variant of type 57 has an owner - 56's burst, 63's skimmer, 65's fireball,
-    67's egg - so the four-things-in-one-handler at 0x0045D00C is four things
-    four different enemies needed rather than a grab bag.
+    and 67's egg, so the shared handler supports four distinct emitters.
 
     Type 67's retreat uses Compare(player.x, self.x), the AWAY arithmetic that
     looks like a slip in type 61. Two handlers writing it settles that it is
@@ -1345,10 +1302,8 @@ const
     `if EF_HP = 0 then frame := 4` sits BEFORE Entity_UpdateDying, so the dead
     pose shows on the frame the death sequence starts rather than one later.
 
-    Type 74's fan is type 56's rebuilt line for line, and its three tables
-    hold the SAME NUMBERS as type 56's at different addresses. Types 52 and 54
-    duplicate an HP table the same way: these bosses were built by copying a
-    working attack and re-entering its constants, not by sharing them. }
+    Type 74's fan duplicates type 56's attack values in separate tables, as do
+    the HP tables for types 52 and 54. }
   T73_FRAMES = 4;  T73_TICKS = 8;
   T73_TABLE_ADDR = $0046C5FC;
   T73_SPRITES: array[0..4] of Integer = (500, 501, 502, 501, 503);
@@ -1422,12 +1377,11 @@ const
     indexed by [phase][step].
 
     Each phase's sprite table is exactly as wide as the highest frame that
-    phase's script can reach, which is how the extents below are pinned - the
-    binary's pointer layout and the action table agree on all five. }
+    phase's script can reach. }
   T77_PHASES = 6;
   T77_STEPS = 6;
 
-  { phases 0 and 1 share this one - the `< 2` test in the original }
+  { Phases 0 and 1 share this value. }
   T77_P01_TABLE_ADDR = $0046C6B0;
   T77_P01_SPRITES: array[0..1, 0..9] of Integer =
     ((584, 585, 500, 501, 502, 503, 535, 534, 535, 536),
@@ -1607,19 +1561,14 @@ const
   T80_V1_SPRITES: array[0..T80_V1_FRAMES - 1] of Integer = (64, 65, 66, 65);
   T80_V1_BLINK = 2;
 
-  { Types 8 and 26, the two self-destructing effects. Both are spawned by
-    something else, play a short animation, and destroy themselves - which is
-    why a MISSING handler here filled the screen with copies of Akuji rather
-    than leaking: an effect that never reaches its Entity_Destroy stays alive
-    for ever wearing the anim id Entity_Spawn gave it, and that is sprite 0.
+  { Types 8 and 26 are spawned effects that play a short animation and destroy
+    themselves.
 
     Type 26's VARIANT is the whole difference between its two sprites: 0 for
     an ordinary stone, 1 when the stone completed a target and paid a life.
 
-    The frame index is unchecked in the original and cannot overflow: the
-    frame that would run off the end is the frame that destroys the entity,
-    and the sprite is written first. The clamps below are unreachable rather
-    than corrective - the same situation type 33 is in. }
+    Their frame indexes cannot overflow because the terminating frame destroys
+    each entity. }
   TYPE8_FRAMES      = 4;
   TYPE8_TICKS       = 4;    { advance when the count EXCEEDS it, so every 5 }
   TYPE8_TABLE_ADDR  = $0046BCCC;
@@ -1628,29 +1577,19 @@ const
   TYPE26_LIFT       = $10;  { 16 sub-pixels a frame, straight up }
   TYPE26_LIFETIME   = $1E;  { destroyed when the count EXCEEDS 30 }
   TYPE26_TABLE_ADDR = $0046BE14;
-  { The handler indexes this by EF_VARIANT with NO bound check, so all four
-    entries are reachable even though the shipped data only ever spawns 0 and
-    1. It was recorded here as two - the observed use - until the table sweep
-    in --selftest-entities pinned the extent at four from the next table's
-    start. Recorded at its extent now, which is what the binary holds. }
+  { All four entries are addressable even though shipped data uses variants 0
+    and 1. }
   TYPE26_VARIANTS   = 4;
   TYPE26_SPRITES: array[0..TYPE26_VARIANTS - 1] of Integer =
     (83, 99, 102, 103);
 
-  { Types 16 and 22, the one-sprite entities. Each writes ONE anim id and
-    stops. That id is not a literal - it is element 0 of a table reached
-    through a pointer, in the same run at 0x0046BE3C as the animated types':
-
-        0x0046BE74  54   type 16, the sign
-        0x0046BE84  60   type 22
-
-    Only element 0 is read, so no larger extent is declared. }
+  { Types 16 and 22 each select one fixed sprite. }
   SIGN_SPRITE       = 54;
   SIGN_SPRITE_ADDR  = $0046BE74;
   TYPE22_SPRITE     = 60;
   TYPE22_SPRITE_ADDR = $0046BE84;
 
-  { Type 33, the explosion @ 0x0045A698. On its FIRST update it throws six
+  { Type 33 throws six sparks on its first update.
     type-6 sparks, each taking one random heading of 64 and a velocity from
     BOTH direction tables at that index, which is what makes the burst radial
     rather than axis-aligned. The two speed multipliers are drawn SEPARATELY,
@@ -1665,7 +1604,7 @@ const
   BOOM_SPARKS     = 6;
   BOOM_SPEED_MAX  = 3;    { RandomBelow(3) + 1, so 1..3, per axis }
 
-  { Type 32, the emitter @ 0x0045A5D4 - an invisible spawner that reads its
+  { Type 32 is an invisible spawner that reads its
     configuration out of block A and keeps its state in block B:
 
       A[1] $09  frames between spawns    B[0] $12  countdown to the next
@@ -1678,7 +1617,7 @@ const
     type gives two different deaths.
 
     The exhaustion test is `A[2] < B[1]` AFTER the increment, so an emitter
-    configured for N spawns N + 1 times. Reproduced. }
+    configured for N spawns N + 1 times. }
   EMIT_EVERY       = $09;   { A[1] }
   EMIT_TOTAL       = $0A;   { A[2] }
   EMIT_RADIUS      = $0B;   { A[3] }
@@ -1689,7 +1628,7 @@ const
   EMIT_SPAWN_TYPE  = $21;   { 33, the explosion }
   EMIT_RADIUS_SHIFT = 4;    { Random(r shl 4), centred by r * 8 }
 
-  { Entity_TakeProjectileHits @ 0x00457AB4. A switch on the TARGET's
+  { Projectile damage switches on the target's
     EF_VULN_KIND, with the projectile's own EF_STATE as its POWER. Most arms
     are immunity, and several are conditional on that power, which is what
     makes them armour rather than invulnerability:
@@ -1732,8 +1671,7 @@ const
   PIERCING_POWER_B = 3;
   LOOT_POWER       = 4;       { this one is destroyed WITH loot }
 
-  { The per-target hit sound, at 0x00468E34 through the pointer 0x0046CC48.
-    Four entries, four readers, all of them in this one function. }
+  { Hit sounds selected by the target's type data. }
   HIT_SOUND_COUNT = 4;
   HIT_SOUND_ADDR  = $00468E34;
   HIT_SOUND_PTR   = $0046CC48;
@@ -1748,13 +1686,11 @@ const
   SND_BOM03          = $22;   { 34 }
 
 
-{ 0x004615A8. The death guard, called from THIRTY sites - the top of nearly
+{ Death handling is called before normal behavior by most entity handlers.
   every per-type handler. Returns True when it has taken over, and the caller
   must then skip its normal update.
 
-  It only engages for EF_CLASS 1, 2 and 6. The original writes that test as an
-  UNSIGNED (class - 1) compared against 2 and 5, which is the compiler's way of
-  saying "class in [1, 2, 6]" - not three separate comparisons.
+  It engages only for EF_CLASS 1, 2, and 6.
 
   Classes 1 and 2 both spawn a type-32
   emitter - the invisible spawner whose configuration lives in its block A -
@@ -1771,16 +1707,7 @@ const
 function EntityUpdateDying(var E: TEntity; AGameState: Integer;
                            World: TEntityWorld): Boolean;
 
-{ 0x0045A3E0. THE MANA STONE - the collectible the HUD counter counts.
-
-  Identified two ways that agree. In the game it is the pickup the player
-  gathers, confirmed on screen; and in the data its type-table column 3 is 2,
-  which is TOUCH_KIND_MANA, so Entity_PlayerTouch routes it to
-  Entity_TouchPickup @ 0x00458274 - the routine this file has always called
-  "the Mana Stone". Types 24 and 25 use touch kind 3 and are something else.
-
-  It is also by far the most placed collectible: 122 records over 32 stages,
-  every one opcode 9, and its GET popup is type 26.
+{ The Mana Stone collectible counted by the HUD.
 
   An animated pickup: four frames on a five-frame cycle, and a one-shot settle
   downward the first time it updates.
@@ -1792,436 +1719,427 @@ function EntityUpdateDying(var E: TEntity; AGameState: Integer;
   in Entity_PlayerTouch. }
 procedure EntityUpdate_Type14_ManaStone(var E: TEntity; AGameState: Integer);
 
-{ 0x00458274. The Mana Stone. The counter climbs by the entity's variant, and
+{ Collects a Mana Stone. The counter climbs by the entity's variant, and
   when it reaches MANA_TARGETS[TargetIndex] the player gains a life of maximum
   AND is refilled - which is what tk001.dat describes in words. }
 procedure EntityTouchPickup(var E: TEntity; var P: TPlayerState;
                             World: TEntityWorld);
 
-{ 0x00458490. A full heal, and nothing else. }
+{ Applies a full heal. }
 procedure EntityTouchHeal(var E: TEntity; var P: TPlayerState;
                           World: TEntityWorld);
 
-{ 0x00458404. The life pickup. Its variant comes from EF_FLAG1C, which is the
+{ Collects a life pickup. Its variant comes from EF_FLAG1C, which is the
   very field Entity_MaybeDropItem sets from its rarity roll - so a dropped
   item's rare flag is what decides +1 life against a full refill. }
 procedure EntityTouchLife(var E: TEntity; var P: TPlayerState;
                           World: TEntityWorld);
 
-{ 0x00458138. The player takes a hit. }
+{ Applies a hit to the player. }
 procedure PlayerTakeDamage(var Player: TEntity; var P: TPlayerState;
                            Damage: Integer; World: TEntityWorld);
 
-{ 0x00457880. The touch dispatcher. }
+{ Dispatches player contact behavior. }
 procedure PlayerTouch(var E, Player: TEntity; var P: TPlayerState;
                       var Inp: TInputState; World: TEntityWorld);
 
-{ 0x00457AB4. Everything the actor slots have thrown at this entity. }
+{ Applies projectile hits from actor slots to this entity. }
 procedure TakeProjectileHits(var E: TEntity; World: TEntityWorld);
 
-{ 0x0045A43C. The power orb. It carries one of Akuji's nine abilities - Dash,
+{ The power orb carries one of Akuji's nine abilities: Dash,
   Fire, Bat and the rest - and which one is its placement variant. World is
   needed only for the heartbeat, which only variant 8 has. }
 procedure EntityUpdate_Type24_PowerOrb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A7BC. The falling item. See DROP_SPRITES above. }
+{ Falling item behavior. See DROP_SPRITES above. }
 procedure EntityUpdate_Type36_FallingItem(var E: TEntity; AGameState: Integer;
                                           World: TEntityWorld);
 
-{ 0x0045B3EC. PoyoPoyo, a bouncing blob - land on it and it throws the player
+{ PoyoPoyo is a bouncing blob that throws the player
   very high. A springboard and a shooter by variant; see the T40_ block,
   whose launch rewrites six fields of the player's entity. }
 procedure EntityUpdate_Type40_PoyoPoyo(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
-{ 0x0045C678. A BOSS - a fire lion that jumps about and breathes fire.
+{ A fire-lion boss that jumps and breathes fire.
   Circle, dive, dive, summon; see the T52_ block. }
 procedure EntityUpdate_Type52_Boss_FireLion(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CAD8. A BOSS - a floating magician that teleports around the arena,
+{ A floating magician boss that teleports around the arena,
   throwing an orb as it goes. Hover, blink out, fire, hop, blink in; see the
   T54_ block. }
 procedure EntityUpdate_Type54_Boss_FloatingMagician(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CC98. The boss's fireball in state 0 and its trail in state 1. }
+{ The magician boss's fireball in state 0 and its trail in state 1. }
 procedure EntityUpdate_Type55(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D00C. Four unrelated entities in one handler, chosen by
+{ Four unrelated entities share this handler, selected by
   EF_VARIANT. See the T57_ block. }
 procedure EntityUpdate_Type57(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DA28. HenaHena, a monster that is AFRAID of the player and runs away.
+{ HenaHena is afraid of the player and runs away.
   Catching it is the only way to kill it, which needs the Cloud dash: it
   zeroes its own EF_HP on a 1x1 overlap with the player, in both states. See
   the T61_ block, and note the acceleration really is away from the player. }
 procedure EntityUpdate_Type61_Mon_HenaHena(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DC84. A royal penguin carrying a shield, so its weak side is
+{ A shield-bearing royal penguin whose weak side is
   whichever way the shield is not: it recomputes its own vulnerability every
   frame from which way it is heading relative to the player. }
 procedure EntityUpdate_Type62_Mon_PenguinHeishi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045DDF4. An armoured penguin that stops to throw a knife. Walks, fires
+{ An armored penguin that stops to throw a knife. Walks, fires
   one type-57 skimmer, then turns round; see the T63_ block. }
 procedure EntityUpdate_Type63_Mon_PenguinKnife(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E030. A large spike press that stamps down on a fixed interval: drops
+{ A large spike press that stamps down on a fixed interval: drops
   from the ceiling, sends a wave each way along the floor, rests, and climbs
   back. }
 procedure EntityUpdate_Type64_SpikePress(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E25C. DorDor: it vanishes when attacked and can only be hurt in the
+{ DorDor vanishes when attacked and can only be hurt in the
   moment after it reappears. It reads the input directly - nothing happens
   until the player presses ATTACK while standing in its box. See T65_. }
 procedure EntityUpdate_Type65_Mon_DorDor(var E: TEntity; AGameState: Integer;
                               var Inp: TInputState; World: TEntityWorld);
 
-{ 0x0045E4EC. A giant ball. Environmental rather than an enemy: it damages on
+{ A giant environmental ball that damages on
   contact and does nothing else. An anchor and the satellite that orbits it,
   one handler and two variants; see the T66_ block for what EF_FACING means
   here. }
 procedure EntityUpdate_Type66_GiantBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045E714. A turtle that lays bombs and runs from them. Walks, lays a
+{ A turtle that lays bombs and runs from them. Walks, lays a
   type-57 egg, then bolts away from it and coasts to a halt; see the T67_
   block. }
 procedure EntityUpdate_Type67_Mon_TurtleBomb(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EA40. What hatches: a riser that resizes its own hitbox frame by
+{ The hatched riser resizes its own hitbox frame by
   frame, and falls and drops loot once something has caught it. }
 procedure EntityUpdate_Type68(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EB1C. GoroGoro: a ball the player rolls by SHOOTING it, to be dropped
+{ GoroGoro is a ball the player rolls by shooting it, to be dropped
   onto a switch. It slides, and when it finds a hole under it pays out a type
   68 and sets its event's progress flag. }
 procedure EntityUpdate_Type69_GoroGoro(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EC4C. The angry switch - a switch, not an enemy. The only way to
+{ The angry switch is activated by
   throw it is to drop a GoroGoro on top, which kills it: it has exactly 100
   hp and any wound at all is fatal, which is what makes the ball the one
   thing that works. Variant 1 walks, variant 0 stands; see the T70_ block. }
 procedure EntityUpdate_Type70_AngrySwitch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045ED88. A cat that DEFLECTS anything thrown at it, except during the
+{ A cat that deflects anything thrown at it except during the
   brief pause when it stops. Walks invulnerable, curls up vulnerable,
   repeats; see the T71_ block, and note the walk timer only runs while it is
   on screen. }
 procedure EntityUpdate_Type71_BouncyCat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045EFC8. A faller, a flyer that picks its sprite by heading, and the
+{ A faller, a heading-based flyer, and the
   trail the flyer drops. See the T72_ block. }
 procedure EntityUpdate_Type72(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F218. A MINIBOSS - the same lizard as type 31 in another colour, with
+{ A miniboss variant of type 31 with
   its own attack. Three of its states are left by a spawned child rather than
   by anything here; see the T73_ block. }
 procedure EntityUpdate_Type73_Boss_MidoriLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F498. Type 73's charge-up, and the fan of shots it throws. The
+{ Type 73's charge-up and fan of shots. The
   charge-up is what writes state 6 back into its parent. }
 procedure EntityUpdate_Type74(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F668. Eight frames, then it writes a state into its owner and goes.
+{ Runs eight frames, writes a state into its owner, and ends.
   The only child that dies when its parent's health reaches zero. }
 procedure EntityUpdate_Type75(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F744. A levitating spike press that tracks left and right: one
+{ A levitating spike press that tracks left and right: one
   heading step per reload, velocity from that heading, so it crosses and
   comes back over a full turn. }
 procedure EntityUpdate_Type76_SpikePress_Lev(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045F85C. THE FINAL BOSS - the Hero, at the end of the game. Six phases,
+{ The final boss, the Hero, has six phases,
   each running a six-step script out of two tables; see the T77_ block. }
 procedure EntityUpdate_Type77_Boss_Hero(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0046023C. The boss's second body. It has no behaviour: it reads the
+{ The boss's second body has no behavior: it reads the
   boss's state every frame and writes its own position and sprite. }
 procedure EntityUpdate_Type78(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x004603B4. Everything type 77 emits. Variant 5 is what frees the boss
+{ Handles everything type 77 emits. Variant 5 frees the boss
   from state 8, after throwing three flyers. See the T79_ block. }
 procedure EntityUpdate_Type79(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x004607E8. Decoration and nothing else: touch kind 0, so it cannot be
+{ Static decoration with touch kind 0, so it cannot be
   touched or hurt, and the handler only animates. Two placements in the whole
   game, both unconditional in the final arena. Variant 1 is unreachable - no
   record selects it and nothing spawns type 80. }
 procedure EntityUpdate_Type80_Fx_ArenaEmber(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D598. A FAKE MANA STONE - it sits there looking like the collectible,
+{ A fake Mana Stone that resembles the collectible,
   and is a crab. Sleeps until touched, then wobbles on the spot. }
 procedure EntityUpdate_Type58_Mon_NiseMana(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D7D8. A golem. Attack it and it loses its head and gets faster. A
+{ A golem that loses its head and accelerates when attacked. A
   walker that turns at walls AND at ledges, and enrages when its health drops
   below 11; see the T60_ block. }
 procedure EntityUpdate_Type60_Mon_Golem(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045D670. The red eye: it rises out of the lava when the player comes
+{ The red eye rises out of lava when the player comes
   near and travels toward where they are. Wakes, rises, aims once at the
   apex, then flies. }
 procedure EntityUpdate_Type59_Mon_RedEye(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CE78. A red mushroom that swells as the player nears and bursts,
+{ A red mushroom that swells as the player nears and bursts,
   throwing a projectile. See the T56_ block. }
 procedure EntityUpdate_Type56_Mon_AkaiKinoko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C608. A blue spherical ghost: it passes through terrain, follows the
+{ A blue spherical ghost that passes through terrain and follows the
   player and hurts on contact. The simplest chaser - steer, move, repeat, for
   ever. }
 procedure EntityUpdate_Type51_Mon_Ghost(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045CA28. Winds up, then charges in whatever direction it faces. }
+{ Winds up, then charges in its facing direction. }
 procedure EntityUpdate_Type53(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C430. An armoured turtle, vulnerable only while it is open and
+{ An armored turtle, vulnerable only while open and
   firing. Patrols, opens to fire, closes, and changes its own vulnerability
   while open; see the T50_ block. }
 procedure EntityUpdate_Type50_Mon_Turtle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C250. A red creature that lives in the water and leaps when the
+{ A red water creature that leaps when the
   player nears. A diver - hover, drop, climb, rest; see the T49_ block. }
 procedure EntityUpdate_Type49_Mon_Water(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045C0F4. Type 47's shot: four bounces, each shorter than the last. }
+{ Type 47's shot bounces four times, each lower than the last. }
 procedure EntityUpdate_Type48(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BF58. A pink squid that lobs spiky bouncing balls on a fixed
+{ A pink squid that lobs spiky bouncing balls on a fixed
   interval: wait, wind up, throw two shots, rest, repeat. }
 procedure EntityUpdate_Type47_Mon_PinkSquid(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BCC4. NukeNuke: a block that stops being solid once the player has
+{ NukeNuke is a block that stops being solid once the player has
   stood on it too long. The only reader of EF_RIDDEN. }
 procedure EntityUpdate_Type45_Block_NukeNuke(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BD9C. A purple bat. It sleeps until the player comes close, then
+{ A purple bat that sleeps until the player comes close, then
   homes on them. }
 procedure EntityUpdate_Type46_Mon_Bat(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BBD8. GashiGashi: a BLOCK, broken by shooting it with Fire+ - not
+{ GashiGashi is a block broken by shooting it with Fire+, not
   armour worn by anything. Its VARIANT selects which of the four
   vulnerability kinds it has, which is what makes Fire+ the one shot that
   works; see the T43_ block. }
 procedure EntityUpdate_Type43_GashiGashi(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045BC00. Type 42's shot: thrown up, pulled down, culled off screen. }
+{ Type 42's shot is thrown up, pulled down, and culled off screen. }
 procedure EntityUpdate_Type44(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B7C4. THE SECOND BOSS, placed exactly once in the whole game. Six
+{ The second boss has six
   states, and its timings scale with its own HP as well as with the
   difficulty; see the T42_ block. }
 procedure EntityUpdate_Type42_Boss_TealBlobSlammer(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B62C. A green jumping cricket. A hopper; see the T41_ block. }
+{ A green jumping cricket. See the T41_ block. }
 procedure EntityUpdate_Type41_Mon_TondaCricket(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B0CC. A stationary cat that fires on a fixed interval. Waits only
+{ A stationary cat that fires on a fixed interval. Waits only
   while on screen, then fires a type 39. }
 procedure EntityUpdate_Type38_Mon_AkuNeko(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045B260. Type 38's shot: charges, then flies. }
+{ Type 38's shot charges, then flies. }
 procedure EntityUpdate_Type39(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x00459A0C. The player's shot. See the T2_ block above. }
+{ Player projectile behavior. See the T2_ block above. }
 procedure EntityUpdate_Type02(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AF2C. Type 31's shot. Double speed, difficulty-keyed animation. }
+{ Type 31's shot uses double speed and difficulty-keyed animation. }
 procedure EntityUpdate_Type34(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AFA8. Type 31's telegraph, and the thing that puts its owner into the
+{ Type 31's telegraph puts its owner into the
   attack state. See the T35_ block. }
 procedure EntityUpdate_Type35(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045ABD8. Looks like Akuji. Whether it is MEANT to be him is unsettled -
+{ An Akuji-like entity whose
   the sprite says so and nothing in the code does. A patroller that gets
   meaner on hard; see the T30_ block. }
 procedure EntityUpdate_Type30_Akuji(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AC94. THE FIRST BOSS, a purple lizard that spits short-range red
+{ The first boss is a purple lizard that spits short-range red
   projectiles. Six states, three difficulty tables, and a child entity that
   drives the transition this handler cannot make itself. }
 procedure EntityUpdate_Type31_Boss_MurasakiLizard(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A848. The boss key: it drops when a boss dies, opens the door and
+{ The boss key drops when a boss dies, opens the door, and
   restores health. Drops, lands, and lies there animating. }
 procedure EntityUpdate_Type37_BossKey(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A95C. A switch, thrown by pressing UP against it - most often what
+{ A switch activated by pressing Up against it, usually
   unlocks a door. The only handler that writes to the event table. }
 procedure EntityUpdate_Type15_Switch(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A9D4 and 0x0045A9D0. Both are a single RET. The switch HAS an arm for
+{ Both handlers are inert. The switch has an arm for
   these two types and the arm does nothing, which is not the same as types 0,
   18 and 20, which have no arm at all. Written out so the difference survives
   in code rather than only in HANDLER_ADDR. }
 procedure EntityUpdate_Type17(var E: TEntity);
 procedure EntityUpdate_Type19(var E: TEntity);
 
-{ 0x0045AA10. The winged-horse block - a platform that carries the player
+{ The winged-horse block is a platform that carries the player
   along its axis. See the T21_ block above for why EF_FACING is a speed here
   and not a heading. }
 procedure EntityUpdate_Type21_WingedHorseBlock(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AA78. A candle, and a switch in disguise: it is set by SHOOTING FIRE
+{ A candle that acts as a switch when shot with Fire
   at it. It owns the two flame entities above it. }
 procedure EntityUpdate_Type23_Candle(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A580. Four frames, and inert unless its variant is 0. }
+{ Runs four frames and is inert unless its variant is 0. }
 procedure EntityUpdate_Type28(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045AB64. A green one-eyed monster. Its idle animates faster when the
+{ A green one-eyed monster whose idle animates faster when the
   player is close. }
 procedure EntityUpdate_Type29_Mon_MidoriMonster(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x00459EB4. A moving puff whose sprite row is chosen by which way it is
+{ A moving puff whose sprite row is selected by its direction.
   going - and by the SIGN of its velocity, so a puff with no horizontal speed
   at all keeps whatever sprite it had. }
 procedure EntityUpdate_Type03(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x00459F1C. Two frames and gone. }
+{ Runs for two frames, then ends. }
 procedure EntityUpdate_Type04(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x00459F6C. An effect that hangs off another entity: its position is its
+{ An effect attached to another entity: its position is its
   OWNER's plus an offset, and the offset shrinks toward zero along its heading
   every frame, so it retracts into whatever fired it. }
 procedure EntityUpdate_Type05(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A020. The spark the explosion throws out. Its sprite ROW comes from
+{ The spark emitted by an explosion. Its sprite row comes from
   block A[1], which EntityUpdate_Type33_Explosion sets when it spawns one. }
 procedure EntityUpdate_Type06(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A08C. Four frames in one of two rows, chosen by the variant. }
+{ Four frames in one of two rows selected by the variant. }
 procedure EntityUpdate_Type07(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A120. A particle that circles: one direction step a frame, moving by
+{ A circling particle that advances one direction step per frame and moves by
   the full X component and HALF the Y, which is what makes the path an ellipse
   rather than a circle. It never destroys itself - it leaves the screen. }
 procedure EntityUpdate_Type09(var E: TEntity; AGameState: Integer);
 
-{ 0x0045A184. Six frames and gone. }
+{ Runs six frames, then ends. }
 procedure EntityUpdate_Type10(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A1C0. A four-frame loop with no end, and a death timer it keeps
+{ A continuous four-frame loop whose death timer is kept
   topping back up. }
 procedure EntityUpdate_Type11(var E: TEntity; AGameState: Integer);
 
-{ 0x0045A20C. The same loop one tick slower, without the timer. }
+{ The same loop one tick slower, without the timer. }
 procedure EntityUpdate_Type12(var E: TEntity; AGameState: Integer);
 
-{ 0x0045A24C. The debris. Four states - see the T13_ block above. }
+{ Debris behavior with four states. See the T13_ block above. }
 procedure EntityUpdate_Type13(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A0E4. The four-frame puff. See TYPE8_SPRITES above. }
+{ Four-frame puff behavior. See TYPE8_SPRITES above. }
 procedure EntityUpdate_Type08(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A50C. The rising GET a collected Mana Stone leaves. Its VARIANT says
+{ The rising GET effect left by a collected Mana Stone. Its variant says
   which of the two messages to show, and Entity_TouchPickup sets it. }
 procedure EntityUpdate_Type26(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A944. The sign: the player reads its text by interacting with it. Two
+{ A sign whose text is read through interaction. Two
   instructions of substance, and no game-state guard at all. }
 procedure EntityUpdate_Type16_InfoSign(var E: TEntity);
 
-{ 0x0045AA60. A stationary spike ball; it only has to exist and hurt. One
+{ A stationary spike ball with a single sprite.
   sprite, plus the Entity_UpdateDying call whose result it discards. }
 procedure EntityUpdate_Type22_SpikeBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 
-{ 0x0045A698. The explosion. See BOOM_SPRITES above. }
+{ Explosion behavior. See BOOM_SPRITES above. }
 procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
                                         World: TEntityWorld);
 
-{ 0x0045A5D4. The invisible emitter. See EMIT_EVERY above for the block-A
+{ Invisible emitter behavior. See EMIT_EVERY above for the block-A
   configuration it runs off. }
 procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
                                       World: TEntityWorld);
 
-{ 0x0045A4F0. The door, and the main way between rooms: interacting steps to
+{ A door used to move between rooms. Interaction advances to
   the next or previous one. One table lookup indexed by the variant. It takes
   no game state because it does not read any. }
 procedure EntityUpdate_Type25_Door(var E: TEntity);
 
-{ 0x0045A540. The Akuji statue: the save point, which asks before it saves.
+{ The Akuji statue is a save point that asks before saving.
   See SAVE_POINT_SPRITES for why it is the save point, which is not visible
   from this function at all. }
 procedure EntityUpdate_Type27_AkujiStatue(var E: TEntity; AGameState: Integer);
 
-{ ==========================================================================
-  Entity_UpdateAll @ 0x004608BC - the per-frame loop over the entity pool.
-  ========================================================================== }
+{ Per-frame entity-pool update. }
 
 const
-  { Every arm of the switch, by type; 0 means the type has NO arm. Types 0, 18
-    and 20 are the only three without one, which is exactly what an earlier
-    reading of the switch predicted from the other side.
-
-    This is data, not commentary. The addresses are all distinct and all land
-    inside 0x004585A8..0x00460880, and --selftest-entities checks both - a
-    transcription slip in 78 hand-copied addresses would otherwise be invisible.
-
-    HANDLER_ADDR is the address index used by coverage and differential tests. }
+  { Reference handler-address index used by coverage and differential tests.
+    Zero indicates a type without a dispatch arm. }
   HANDLER_ADDR: array[0..ENTITY_TYPE_COUNT - 1] of Cardinal = (
     $00000000, $004585A8, $00459A0C, $00459EB4,   { 0..3 }
     $00459F1C, $00459F6C, $0045A020, $0045A08C,   { 4..7 }
@@ -2247,18 +2165,14 @@ const
 
   HANDLER_NONE = 0;
 
-  { What --selftest-entities needs to read the switch back out of akuji.exe.
-    The compiler did not emit a compare chain: at 0x00460917 it emits
-    `JMP dword ptr [EAX*4 + 0x00460924]`, so the binary carries the whole table.
-    Entries pointing at HANDLER_NO_ARM_TARGET are the types with no arm - that
-    is the same address the range check jumps to for a type above 0x50. }
+  { Reference image mapping used to validate the handler jump table. }
   CODE_VA_BIAS          = $00400C00;   { VA = file offset + this, CODE section }
   HANDLER_JUMP_TABLE    = $00460924;
   HANDLER_NO_ARM_TARGET = $00460DE1;
 
   { Type 68 gets an extra Entity_PlayerTouch, outside the slot range that
     normally gets one, whenever its EF_STATE is 3 - so one sitting in a minor
-    slot is touch-tested TWICE in a frame. That is the original.
+    slot is touch-tested twice in a frame.
 
     It is a HAZARD, not a generosity. Type 68's own table column 3 is 0, so a
     table-spawned one has EF_TOUCH_KIND 0 and the test does nothing; the only
@@ -2287,7 +2201,7 @@ var
   EntityPlayerTouch:        TTouchProc = nil;
   EntityTakeProjectileHits: TEntityCallback = nil;
 
-{ 0x004608BC. Walks slots 0..$FF - not the whole pool, see ENTITY_UPDATE_COUNT -
+{ Walks updateable slots 0..$FF rather than the entire pool,
   and for each live one: carries it along with the scroll unless it is
   screen-space, runs its per-type handler, pushes its state onto its sprite,
   ticks its two timers, rebuilds its collision boxes from the sprite size, and
@@ -2298,8 +2212,7 @@ var
   change it mid-loop. That is not defensive: the last of those four reads exists
   precisely so that a touch which starts an event script abandons the rest of
   the frame's entities. }
-{ The type switch on its own - see the note on the implementation. Exposed so
-  --emudiff can run one handler against an entity of its choosing. }
+{ Runs one type handler; exposed for isolated handler tests. }
 procedure EntityRunHandler(var E: TEntity; var P: TPlayerState;
                            var L: TLayerInfo; var Inp: TInputState;
                            World: TEntityWorld; AGameState: Integer);
@@ -2309,19 +2222,8 @@ procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
                           var P: TPlayerState; var L: TLayerInfo;
                           var Inp: TInputState; var AGameState: Integer);
 
-{ Half * Percent / 100, rounded the way the original's FPU rounds it.
-
-  The original computes this on the x87 stack, where Delphi runs with precision
-  control set to 64-bit significands. FPC on x86-64 has no such type - Extended
-  is an alias for Double there, 8 bytes, which was checked rather than assumed -
-  so NO floating-point expression can reproduce the original on this target.
-  Nor is the difference theoretical: over half-extents 0..1024 and percentages
-  0..100 the 80-bit and 64-bit answers differ in 118 of 103,525 cases, and three
-  of those are reachable from the shipped type table with a sprite no wider than
-  the screen.
-
-  So this is done in integers, which is exact on every architecture. The model
-  it reproduces is the three roundings the original performs:
+{ Computes Half * Percent / 100 using integer arithmetic that reproduces the
+  three required rounding stages consistently across architectures:
 
       d := RN64(Percent / 100)     the FDIV, one rounding
       m := RN64(Half * d)          the FMULP, a second
@@ -2329,7 +2231,7 @@ procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
 
   Away from a tie the exact value sits at least 1/100 from a .5 boundary while
   the FPU's relative error is about 1e-19, so neither rounding can move the
-  answer and plain integer division gives it. EVERY case where the original
+  answer and plain integer division gives it. Every case where x87 rounding
   disagrees with exact arithmetic is a tie - Half * Percent = 50 (mod 100) - and
   the whole tail of this function is about which way the hardware breaks it.
 
@@ -2339,7 +2241,7 @@ procedure EntityUpdateAll(Pool: TEntityPool; World: TEntityWorld;
 function ScaleByPercent(Half, Percent: Integer): Integer;
 
 { One int of the sprite DATA region - the four unchecked handlers read through
-  this so that an overrun lands on the same bytes the original's does. }
+  this so an overrun lands in the same contiguous region. }
 function SpriteDatum(Index: Integer): Integer;
 
 
@@ -2480,8 +2382,7 @@ begin
     Inc(P.Lives)
   else if Variant = 1 then
     P.Lives := P.MaxLives;
-  { Note there is no clamp on the +1 path. Lives can exceed MaxLives here and
-    the original does not stop it; whatever bounds it does so elsewhere. }
+  { The +1 path is not clamped here; HUD drawing normalizes the value. }
   World.PlaySound(SND_GET01);
   SpawnedSlot := PickupCommon(E, World);
   World.SetSpawnField(SpawnedSlot, EF_VARIANT, Variant + 2);
@@ -2580,7 +2481,7 @@ var
 begin
   SoundIndex := E.Raw[EF_HIT_SOUND];
   if (SoundIndex < 0) or (SoundIndex >= HIT_SOUND_COUNT) then
-    SoundIndex := 0;            { the original indexes this unchecked }
+    SoundIndex := 0;
   Result := HIT_SOUNDS[SoundIndex];
 end;
 
@@ -2671,7 +2572,7 @@ begin
 
     if Vulnerability = VULN_SHOVE then
     begin
-      { Compare(0, X) is how the original spells Sign(X). }
+      { Convert horizontal velocity to a direction sign. }
       Direction := Compare(0, Projectile^.Raw[EF_VEL_X]);
       E.Raw[EF_VEL_X] := Direction shl SHOVE_SPEED_SHIFT;
       Inc(E.Raw[EF_FLAG1C], Compare(0, E.Raw[EF_VEL_X]));
@@ -2729,9 +2630,7 @@ var
 begin
   Variant := E.Raw[EF_VARIANT];
   Frame   := E.Raw[EF_FLAG1C];
-  { The original indexes both tables unchecked. Clamping is the one deviation,
-    and it cannot change behaviour for any shipped placement - the data's range
-    is 0..15 and the table has sixteen entries. }
+  { Clamp invalid runtime data before indexing sprite tables. }
   if (Variant < 0) or (Variant >= ITEM24_VARIANTS) then
     Variant := 0;
   if (Frame < 0) or (Frame >= ITEM24_BEAT_FRAMES) then
@@ -2748,9 +2647,7 @@ begin
   { The bob. EF_FACING is a phase here, not a heading: one step of 64 per frame
     through the direction table's Y column is one full sine period. }
   Inc(E.Raw[EF_POS_Y], DirVelY(WrapDir(E.Raw[EF_FACING])));
-  { `mod` and not `and`: the original writes AND 0x8000003F with the usual sign
-    fixup, which is a SIGNED mod 64. The two agree for every value this field
-    actually holds, but the faithful one costs nothing. }
+  { Signed modulo keeps the phase within the direction table. }
   E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
 
   if E.Raw[EF_VARIANT] <> ITEM24_BEAT_VARIANT then
@@ -2758,8 +2655,7 @@ begin
 
   { The frame counter is compared against ZERO, so it resets on the very frame
     it is incremented and the two frames alternate every frame. The counter is
-    vestigial rather than a speed control - that is what the original does, and
-    it is why this reads as a flicker rather than an animation. }
+    vestigial rather than a speed control, producing a flicker. }
   Inc(E.Raw[EF_BLOCK_B]);
   if E.Raw[EF_BLOCK_B] > 0 then
   begin
@@ -2780,12 +2676,8 @@ var
   Variant: Integer;
 begin
   Variant := E.Raw[EF_VARIANT];
-  { DIVERGENCE DIV-010. The original does not check, and out of range reads on
-    into the next type's sprite table - the emulator says variant 3 gives 83
-    and variant 7 gives 84, which are the DATA words at 0x0046BE14 and
-    0x0046BE24. Every one of the 160 shipped placements carries 0, 1 or 2, and
-    nothing writes EF_VARIANT on a live type 25, so the clamp is unreachable
-    rather than corrective. }
+  { DIVERGENCE DIV-010: clamp malformed variants instead of crossing tables. }
+  { Shipped placements use variants 0..2; clamp malformed runtime data. }
   if (Variant < 0) or (Variant >= ITEM25_VARIANTS) then
     Variant := 0;
   E.Raw[EF_ANIM_ID] := ITEM25_SPRITES[Variant];
@@ -3114,8 +3006,7 @@ begin
     if E.Raw[EF_CHILD_B] > T55_TRAIL_EVERY then
     begin
       E.Raw[EF_CHILD_B] := 0;
-      { Y's random is drawn first - that is the order the original draws
-        them, and the sequence only matches if it is kept. }
+      { Draw Y jitter before X to preserve random-sequence behavior. }
       JitterY := World.RandomBelow(T55_TRAIL_SPREAD) - T55_TRAIL_CENTRE;
       JitterX := World.RandomBelow(T55_TRAIL_SPREAD) - T55_TRAIL_CENTRE;
       Slot := World.Spawn(EKIND_MINOR, T55_SELF_TYPE,
@@ -4310,8 +4201,7 @@ begin
   end;
   if E.Raw[EF_VARIANT] = 1 then
   begin
-    { By HEADING, not by a frame counter - and shifted with the original's
-      round-toward-zero correction. }
+    { Select by heading rather than frame, rounding toward zero. }
     Dir := E.Raw[EF_FACING];
     if Dir < 0 then
       Inc(Dir, (1 shl T72_DIR_SHIFT) - 1);
@@ -5037,8 +4927,8 @@ begin
   OwnerState := World.Pool.Field(Owner, EF_STATE);
   OwnerFrame := World.Pool.Field(Owner, EF_FLAG1C);
 
-  { The slam and the lob place it AND set its sprite, before the dying
-    check; the idle placement happens after. That order is the original's. }
+  { Slam and lob placement occurs before the dying check; idle placement occurs
+    afterward. }
   if OwnerState = 4 then
   begin
     E.Raw[EF_TOUCH_KIND] := 1;
@@ -5842,14 +5732,7 @@ begin
     end;
 
     E.Raw[EF_FACING] := (E.Raw[EF_FACING] + 1) mod DIR_COUNT;
-    { A quarter of the heading's Y component.
-
-      `div`, NOT `shr`. The original's `if v < 0 then v := v + 3; v := v sar
-      2` is not a shift the author wrote - it is what Delphi EMITS for a
-      signed `div 4`, the +3 turning the arithmetic shift's floor into
-      truncation toward zero. Transcribing that codegen literally gives a
-      LOGICAL shift in Pascal: with Step = -1 the original gives -1 and `shr
-      2` gives $3FFFFFFF. Caught by --emudiff on type 49. }
+    { Use signed division for one quarter of the heading's Y component. }
     Inc(E.Raw[EF_POS_Y],
         DirVelY(E.Raw[EF_FACING]) div (1 shl T49_BOB_SHIFT));
   end;
@@ -6145,8 +6028,7 @@ begin
   if E.Raw[EF_STATE] = 1 then
   begin
     E.Raw[EF_FLAG1C] := T46_SLEEP_FRAME;
-    { Horizontal distance in PIXELS, with the original's round-toward-zero
-      shift. Easy has the LONGEST range, so it wakes soonest there. }
+    { Horizontal pixel distance; Easy has the longest wake range. }
     Dist := Abs(OriginPixel(E.Raw[EF_POS_X]
                 - World.Pool.Field(SLOT_SINGLE_FIRST, EF_POS_X)));
     if Dist < T46_RANGE[D] then
@@ -6613,7 +6495,7 @@ var
 begin
   Frame := E.Raw[EF_FLAG1C];
   Row := E.Raw[EF_VARIANT];
-  { 0x0045B0CC, unchecked. }
+  { Sprite row and frame are intentionally read through the contiguous table. }
   E.Raw[EF_ANIM_ID] := SpriteDatum(T38_AT + Row * SPRITE_ROW + Frame);
 
   if E.Raw[EF_STATE] = 0 then
@@ -6772,9 +6654,8 @@ var
 begin
   Frame := E.Raw[EF_FLAG1C];
   Row := E.Raw[EF_STATE];
-  { 0x00459A0C indexes base + Frame*4 + State*0x10 with no bounds test, and
-    takes the left-facing half from eight bytes further on. Right half then
-    left, by the SIGN, two ifs and no else. }
+  { Select the state row and facing half from the contiguous sprite table. A
+    zero horizontal velocity leaves the previous sprite unchanged. }
   if E.Raw[EF_VEL_X] > 0 then
     E.Raw[EF_ANIM_ID] := SpriteDatum(T2_AT + Row * SPRITE_ROW + Frame);
   if E.Raw[EF_VEL_X] < 0 then
@@ -7138,8 +7019,6 @@ begin
   if E.Raw[EF_BLOCK_B] > T37_TICKS then
   begin
     E.Raw[EF_BLOCK_B] := 0;
-    { The original divides AND takes the remainder, leaving the quotient in
-      EAX as a dead result - see type 16 for the same shape. }
     E.Raw[EF_FLAG1C] := (E.Raw[EF_FLAG1C] + 1) mod T37_FRAMES;
   end;
 end;
@@ -7237,8 +7116,7 @@ begin
 
   if E.Raw[EF_STATE] = 3 then
   begin
-    { Slot 0 counts as "none" here, which is the original's test - and slot 0
-      is the player, so a child can never legitimately be there. }
+    { Slot 0 is the player and cannot be a child, so it also represents none. }
     if (E.Raw[EF_CHILD_A] <> 0) and (World.Pool <> nil) then
     begin
       World.DestroyEntity(World.Pool.Entity(E.Raw[EF_CHILD_A])^, False);
@@ -7338,8 +7216,7 @@ begin
   Frame := E.Raw[EF_FLAG1C];
   if (Frame < 0) or (Frame >= T3_FRAMES) then
     Frame := 0;
-  { By the SIGN, and zero writes nothing at all - the original has two
-    separate ifs with no else, so a puff standing still keeps its sprite. }
+  { Choose by velocity sign; a stationary puff keeps its current sprite. }
   if E.Raw[EF_VEL_X] < 0 then
     E.Raw[EF_ANIM_ID] := T3_SPRITES[0][Frame];
   if E.Raw[EF_VEL_X] > 0 then
@@ -7458,9 +7335,8 @@ var
 begin
   Frame := E.Raw[EF_FLAG1C];
   Row := E.Raw[EF_VARIANT];
-  { 0x0045A08C, unchecked. This one can overrun on the FRAME as well as the
-    row: the sprite is written before the `> 3` test that destroys the
-    entity, so the frame that ends it reads one past its row. }
+  { The terminating frame is read from the contiguous table before the entity
+    is destroyed, so it can cross into the next row. }
   E.Raw[EF_ANIM_ID] := SpriteDatum(T7_AT + Row * SPRITE_ROW + Frame);
 
   if AGameState <> GS_PLAY then
@@ -7618,9 +7494,7 @@ begin
     Inc(E.Raw[EF_VEL_Y], T13_GRAVITY);
     if E.Raw[EF_VEL_Y] > T13_TERMINAL then
       E.Raw[EF_VEL_Y] := T13_TERMINAL;
-    { TWICE. The original writes POS_Y += VEL_Y on two separate lines with the
-      X move between them, so this falls at double the rate its velocity
-      says. Reproduced, not corrected. }
+    { This state intentionally applies vertical velocity twice per frame. }
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
     Inc(E.Raw[EF_POS_X], E.Raw[EF_VEL_X]);
     Inc(E.Raw[EF_POS_Y], E.Raw[EF_VEL_Y]);
@@ -7637,8 +7511,7 @@ begin
     end;
   end;
 
-  { States 2 and 3 share one arm - the original tests `state - 2 < 2` - and
-    neither animates nor ends. }
+  { States 2 and 3 share continuous motion without animation or expiry. }
   if (E.Raw[EF_STATE] = 2) or (E.Raw[EF_STATE] = 3) then
   begin
     Inc(E.Raw[EF_VEL_Y], T13_GRAVITY);
@@ -7703,7 +7576,7 @@ procedure EntityUpdate_Type22_SpikeBall(var E: TEntity; AGameState: Integer;
                               World: TEntityWorld);
 begin
   E.Raw[EF_ANIM_ID] := TYPE22_SPRITE;
-  { The original ignores what this answers, so this does too. }
+  { Death handling may update the entity; its Boolean result is irrelevant here. }
   EntityUpdateDying(E, AGameState, World);
 end;
 
@@ -7713,9 +7586,7 @@ var
   I, Slot, Facing, Frame: Integer;
 begin
   Frame := E.Raw[EF_FLAG1C];
-  { The original indexes unchecked. It cannot actually run past the end - the
-    frame that would do it is the one that destroys the entity, and the sprite
-    is set before that - so this clamp is unreachable rather than corrective. }
+  { Clamp malformed frame state before indexing the explosion animation. }
   if (Frame < 0) or (Frame >= BOOM_FRAMES) then
     Frame := 0;
   E.Raw[EF_ANIM_ID] := BOOM_SPRITES[Frame];
@@ -7815,17 +7686,7 @@ var
 begin
   Variant := E.Raw[EF_VARIANT];
   Frame := E.Raw[EF_FLAG1C];
-  { The original indexes without bounds checks and would read past the table
-    on a bad variant; clamping instead of faulting is the one deviation here,
-    and it is DIV-011's class.
-
-    It is unreachable for shipped data. tools/entity_usage.py finds 122
-    placements of type 14 over 32 stages, all opcode 9, with only two ParamA
-    forms: `0014-*` 91 times, which writes no variant at all, and
-    `0014-A-001` 31 times. So the shipped variants are exactly 0 and 1,
-    against a table the layout independently says is two rows. }
-  { 0x0045A3E0, unchecked. Only the VARIANT can leave the table here - the
-    frame counter is masked to 0..3 where it is advanced. }
+  { Shipped variants are 0 and 1. The frame counter is always kept in range. }
   E.Raw[EF_ANIM_ID] := SpriteDatum(MANA_AT + Variant * SPRITE_ROW + Frame);
 
   if E.Raw[EF_STATE] = 0 then
@@ -7846,24 +7707,17 @@ begin
 end;
 
 
-{ The original compares the LOW BYTE of +0x08 against 1, not the int against 0.
-  Only 0 and 1 are ever stored there, so the two agree - but the loop is written
-  the original's way because the difference is free to keep. }
+{ Entity activity is encoded in the low byte of EF_ALIVE. }
 function IsAlive(const E: TEntity): Boolean;
 begin
   Result := (E.Raw[EF_ALIVE] and $FF) = 1;
 end;
 
-{ One int of the sprite DATA region.
-
-  Inside the region this is the read the original makes, overrun and all.
-  Outside it there is nothing to read - the original would take whatever the
-  process happened to have at that address, which is not reproducible - so the
-  index is clamped THERE and only there. }
+{ Reads the contiguous sprite-data region, clamping indexes outside it. }
 function SpriteDatum(Index: Integer): Integer;
 begin
-  { DIVERGENCE DIV-011, and all that is left of it: inside the region this is
-    the original's read, overrun and all. Outside it there is nothing to copy. }
+  { DIVERGENCE DIV-011: clamp only indexes outside the sprite-data region. }
+  { Preserve cross-table reads within the region and clamp beyond its bounds. }
   if Index < 0 then
     Index := 0;
   if Index > High(SPRITE_DATA) then
@@ -7972,16 +7826,8 @@ begin
     Result := SignMultiplier * Integer(Quotient + 1);
 end;
 
-{ The type switch, lifted out of EntityUpdateAll's loop so a test can drive
-  one handler without running a whole frame.
-
-  This is a REFACTOR, not a divergence: it is the same case statement, called
-  from the same place, in the same order, and no arm's behaviour changes. It is
-  extracted because --emudiff needs to call a handler by type against an entity
-  it controls, and the alternative was a second copy of a 78-arm switch that
-  could drift from this one silently. In the original the switch is a jump
-  table inlined in Entity_UpdateAll @ 0x004608BC; it is a procedure here for
-  the same reason TEntityWorld is a class - so the parts can be tested. }
+{ The type switch is separate so individual handlers can be tested without
+  running a complete frame. }
 procedure EntityRunHandler(var E: TEntity; var P: TPlayerState;
                            var L: TLayerInfo; var Inp: TInputState;
                            World: TEntityWorld; AGameState: Integer);
@@ -8065,10 +7911,8 @@ begin
     22: EntityUpdate_Type22_SpikeBall(E, AGameState, World);
     26: EntityUpdate_Type26(E, AGameState, World);
     36: EntityUpdate_Type36_FallingItem(E, AGameState, World);
-    { Every arm in HANDLER_ADDR now has a case above. This else is not in
-      the original - the compiler emitted a jump table with no default -
-      and exists only so the claim can be checked; see EntitiesUnhandled.
-      DIVERGENCE DIV-006. }
+    { DIVERGENCE DIV-006: count otherwise-unhandled types for coverage checks. }
+    { Count unexpected types for dispatch coverage checks. }
   else
     Inc(EntitiesUnhandled);
   end;
@@ -8193,12 +8037,8 @@ begin
       if Assigned(EntityPlayerTouch) then
         EntityPlayerTouch(EntityPtr^, Pool.Entity(0)^, P, Inp, World);
 
-    { A touch can change the game state - start an event script, kill the
-      player - and when it does the original ABANDONS the rest of the pool for
-      this frame. It is a real early return: the branch target is the function
-      epilogue, not the loop tail, and the loop tail is four instructions away.
-      Reachable only through the two calls above, since the state was GS_PLAY a
-      dozen lines up. }
+    { A touch that changes game state abandons the remaining entity updates for
+      this frame. }
     if (AGameState <> GS_PLAY) and (AGameState <> GS_STATE_140) then
       Exit;
 

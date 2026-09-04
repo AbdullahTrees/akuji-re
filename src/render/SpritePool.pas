@@ -15,7 +15,7 @@ const
   { Entity spawning fails when all slots are occupied. }
   SPRITE_POOL_SIZE = 256;
 
-  { The depth buckets 0x00464D30 draws, and the two it treats specially. }
+  { Main sprite depths and the separate above-interface layer. }
   SPRITE_DEPTH_FIRST     = 1;   { bucket 0 is never drawn }
   SPRITE_DEPTH_MAIN_LAST = 7;
   SPRITE_DEPTH_TOP       = 8;   { drawn after the HUD, not with the rest }
@@ -193,28 +193,9 @@ begin
       Inc(Result);
 end;
 
-{ THE DRAW ORDER, and it was inverted.
-
-  0x0044D1E0 buckets every visible sprite by its depth, and 0x00464D30 then
-  draws the buckets in ASCENDING order:
-
-      for (i = 1; i != 8; i++) FUN_0044D31C(sprites, i);
-      ...
-      if (*p_GameState != 10) FUN_0044D31C(sprites, 8);
-
-  so a LOW depth is drawn first and ends up BEHIND, and a high depth is drawn
-  last and ends up in front. This drew `MaxDepth downto 0`, which is exactly
-  backwards, and the type table says what that costs: the player is depth 4
-  while signs, save statues and mana stones are 1, doors and orbs 2, and
-  monsters 3. Every one of them was landing on top of Akuji.
-
-  BUCKET 0 IS NEVER DRAWN. The original's loop starts at 1, and that is not an
-  oversight - Entity_Destroy zeroes EF_DEPTH, so depth 0 is the destroyed and
-  the inert. Types 18 and 20 carry it and have no sprite at all.
-
-  WITHIN a bucket the original walks the pool from the LAST slot to the first,
-  so a lower slot number draws later and therefore in front of a higher one at
-  the same depth. }
+{ Draw lower depths first, placing higher depths in front. Depth zero is
+  reserved for destroyed or inert entities and is not drawn. Within a depth,
+  lower slot numbers draw later and therefore appear in front. }
 procedure TSpritePool.ShiftY(Delta: Integer);
 var
   Slot: Integer;
@@ -254,11 +235,7 @@ begin
                  FSlots[Order[I]].X, FSlots[Order[I]].Y);
 end;
 
-{ Bucket 8, which 0x00464D30 draws AFTER the HUD and the message box rather
-  than with the others - the only sprite layer that sits over the interface.
-  No shipped record places the one type that carries depth 8 (type 13), so
-  nothing reaches this today; it exists so that the layer is where the original
-  puts it rather than folded into the pass above. }
+{ Draw the dedicated above-interface sprite layer after the HUD and dialogue. }
 procedure TSpritePool.DrawTop(Dest: TCanvas; ASurfaces: TSurfaceSet);
 var
   I: Integer;

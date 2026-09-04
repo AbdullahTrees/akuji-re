@@ -43,13 +43,11 @@ type
     procedure StopAll;
     function IsPlaying(Index: Integer): Boolean;
 
-    { How many of the 57 slots actually loaded, and whether the device is up -
-      both reported by the self-test. }
+    { How many sound slots loaded and whether the output device is active. }
     property LoadedCount: Integer read FLoadedCount;
     property Opened: Boolean read FOpened;
 
-    { The 0..10 scale straight out of data\system.dat +0x24. The original's
-      attenuation curve is reproduced in AudioMixer.VolumeToGain. }
+    { The 0..10 scale stored in data\system.dat. }
     property Volume: Integer read GetVolume write SetVolume;
   published
     property DebugOption: TDDSDDebugOption read FDebugOption write FDebugOption;

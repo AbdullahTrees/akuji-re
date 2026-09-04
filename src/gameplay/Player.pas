@@ -1,10 +1,5 @@
-{ Player controller (Player_Update @ 0x004585A8) and its delegated states:
-
-      0x004593B0  glide       state 6
-      0x00459624  air dash    state 7
-      0x00459828  knockback   state 8
-
-  Tilemap, entity, sound, and camera services are accessed through TPlayerWorld.
+{ Player controller. Tilemap, entity, sound, and camera services are accessed
+  through TPlayerWorld.
   PF_* names describe the player's use of shared entity slots. PF_LANDED and
   Entities.EF_RIDDEN are the same slot, 8+2, used for different things by
   different entity types.
@@ -60,18 +55,12 @@ const
   SND_CHARGED     = 7;    SND_LAND_SOFT  = 8;
   { Glide and air-dash sounds play on both entering and leaving their state. }
   SND_GLIDE       = 9;    SND_AIRDASH    = 10;
-  { 0x79. Both death states hold for 121 frames before the game-over
-    screen. }
+  { Both death states hold for 121 frames before the game-over screen. }
   DEATH_HOLD      = $79;
   SND_DEATH       = 12;   SND_DASH_START = 21;
 
-  { --- The weapon table @ 0x00468E84, four 16-byte records ----------------
-    Row 4 would start at 0x468EC4, which is exactly where HUD_Draw's 12-entry
-    counter-target table begins - so there are four weapons and no more. Only
-    weapon 3 can be charged; Player_Update tests the index for 3 specifically
-    rather than testing a capability bit. }
+  { Four weapons. Only weapon 3 supports charging. }
   WEAPON_COUNT = 4;
-  WEAPON_TABLE_ADDR = $00468E84;
 type
   TWeapon = record
     MaxShots: Integer;   { how many of ours may be alive at once }
@@ -100,8 +89,7 @@ type
     procedure PrepareDisplay; virtual;
     procedure ResetInput; virtual;
     procedure LoadStageAssets(StageIndex: Integer); virtual;
-    { Font 0, from surface 0: chars $20..$5F, 9x9 cells, 8-pixel advance. The
-      numbers are GameFont.pas's and are checked there against Game_DrawText. }
+    { Define the bitmap font described by GameFont.pas. }
     procedure DefineFont; virtual;
     procedure SetBackgroundSurface; virtual;
   end;
@@ -111,26 +99,20 @@ const
   PLAYER_SPAWN_KIND = EKIND_SINGLE;
   PLAYER_SPAWN_TYPE = 1;
 
-{ 0x00462210. What GS_STAGE_BEGIN runs, once - it ends by setting GS_PLAY, so
-  the state exists for exactly one frame.
+{ Initialize a stage and enter GS_PLAY.
 
   The order is kept: assets load BEFORE the layer origin is written and the
   player spawned, because loading replaces the tilemaps and surfaces the
   other two depend on.
 
-  The layer origin, the spawn position and the facing are all PIXELS shifted
-  into 1/32 units, which is what settled that SpawnX and SpawnY are not tile
-  numbers - see PlayerState.pas. It also clears the interpreter's wait state,
-  which is why a script cannot be left half-run across a stage change. }
+  The layer origin and spawn position are pixels shifted into 1/32 units. }
 procedure StageBegin(Pool: TEntityPool; var L: TLayerInfo;
                      var P: TPlayerState; Host: TStageHost;
                      StageIndex: Integer; var AGameState: Integer);
 
 { One frame. E is the player entity, P the save state (abilities, weapon, jump
   strength, lives), L the layer the camera lives in.
-  Inp is VAR, not const: the double-tap window lives in the input record, and
-  Player_Update writes it. That is the original's design - the controller owns
-  the tap state, not the poller. }
+  Inp is writable because the controller owns the double-tap window. }
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
                        World: TPlayerWorld; AGameState: Integer);
@@ -140,13 +122,9 @@ implementation
 uses
   Directions;
 
-{ ---------------------------------------------------------------------------
-  The three delegated states. Each is its own function in the original and is
-  reached from the tail of Player_Update, not from the switch at its head.
-  --------------------------------------------------------------------------- }
+{ Specialized movement states delegate their collision and camera work. }
 
-{ Shared by all three: run the X half and the Y half of a move through the
-  solid check, the tile check and the camera, in the original's order. }
+{ Shared movement runs each axis through solid, tile, and camera handling. }
 procedure TStageHost.PrepareDisplay; begin end;
 procedure TStageHost.ResetInput; begin end;
 procedure TStageHost.LoadStageAssets(StageIndex: Integer); begin end;
@@ -234,7 +212,6 @@ begin
   Result := Facing shr 5;
 end;
 
-{ Player_UpdateGlide @ 0x004593B0. }
 procedure UpdateGlide(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                       const Inp: TInputState; World: TPlayerWorld);
 var
@@ -248,8 +225,8 @@ begin
     E.Raw[EF_VEL_X] := -GLIDE_MAX_SPEED;
 
   E.Raw[EF_VEL_Y] := E.Raw[EF_VEL_Y] + GLIDE_GRAVITY;
-  { ORIGINAL BUG, reproduced: both clamps test the VERTICAL velocity and then
-    assign to the HORIZONTAL one. See the unit header. }
+  { Compatibility quirk: both vertical-limit tests clamp horizontal velocity.
+    Changing these assignments alters braking at the top and bottom of the arc. }
   if E.Raw[EF_VEL_Y] > PLAYER_TERMINAL then
     E.Raw[EF_VEL_X] := PLAYER_TERMINAL;
   if E.Raw[EF_VEL_Y] < -$100 then
@@ -290,7 +267,6 @@ begin
   end;
 end;
 
-{ Player_UpdateAirDash @ 0x00459624. }
 procedure UpdateAirDash(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                         World: TPlayerWorld);
 var
@@ -329,7 +305,6 @@ begin
   end;
 end;
 
-{ Player_UpdateKnockback @ 0x00459828. }
 procedure UpdateKnockback(var E: TEntity; var P: TPlayerState; var L: TLayerInfo;
                           World: TPlayerWorld);
 var
@@ -408,7 +383,6 @@ begin
   ScreenPhase := 0;
 end;
 
-{ Player_Update @ 0x004585A8. }
 procedure PlayerUpdate(var E: TEntity; var P: TPlayerState;
                        var L: TLayerInfo; var Inp: TInputState;
                        World: TPlayerWorld; AGameState: Integer);
@@ -417,8 +391,7 @@ var
   ScrollX, ScrollY, BlockedX, BlockedY: Boolean;
   JumpEdge, AttackEdge: Boolean;
 begin
-  { The play clock runs regardless of state - it is the first thing the
-    original does, before it even checks whether the game is running. }
+  { The play clock runs before the gameplay-state guard. }
   Inc(P.Field11C0);
   if P.Field11C0 > 59 then
   begin
@@ -525,9 +498,8 @@ begin
         if E.Raw[PF_ANIM_TIMER] = 0 then
         begin
           World.SpawnDebris(E, 0);
-          { The original stops the music here, before the death sound -
-            FUN_00450CBC with a fade of 0. Falling silences the stage track;
-            dying on screen does not. }
+          { Falling silences the stage track before playing the death sound;
+            an on-screen death leaves the music running. }
           World.StopMusic;
           World.PlaySound(SND_DEATH);
         end;
@@ -592,8 +564,7 @@ begin
     else
     begin
       Inc(E.Raw[PF_ANIM_TIMER]);
-      { Ground advances every 10 frames, the dash every 6 - the original writes
-        it as state * -4 + 10, which is the same two numbers. }
+      { Ground animation advances every 10 frames and dash animation every 6. }
       if E.Raw[PF_ANIM_TIMER] > E.Raw[PF_STATE] * -4 + 10 then
       begin
         E.Raw[PF_ANIM_TIMER] := 1;
@@ -797,7 +768,7 @@ begin
   if (WeaponIndex < 0) or (WeaponIndex >= WEAPON_COUNT) then
     WeaponIndex := 0;
 
-  { Only weapon 3 charges - the original tests the index for 3, not a flag. }
+  { Only the designated charge weapon accumulates charge frames. }
   if Inp.Button[1] and (E.Raw[PF_STATE] <> PS_LANDING) and
      (E.Raw[PF_STATE] <> PS_ATTACK) and (P.Weapon = CHARGE_WEAPON) and
      (E.Raw[PF_SHOTS] < WEAPONS[WeaponIndex].MaxShots) then

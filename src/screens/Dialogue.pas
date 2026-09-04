@@ -5,8 +5,7 @@
         \e  end of the message
         \w  a yes/no prompt whose answer goes in Progress[3]
   Pages contain three lines spaced 16 pixels apart. The box is placed above or
-  below the player to avoid covering them. MessageBox_Update @ 0x00456038
-  handles the typewriter and yes/no prompt.
+  below the player to avoid covering them.
 
   Markers are scanned in the priority order \w, \e, \k, \n. Text is processed
   in two-byte units for Shift-JIS compatibility. Prompt answers update
@@ -25,9 +24,7 @@ uses
 
 const
 
-  { MessageBox_Update @ 0x00456038. }
-
-  { The mode global at 0x0046CF28, and the marker that selects each. }
+  { Message typewriter modes. }
   MB_MODE_IDLE   = 0;
   MB_MODE_TYPING = 1;
   MB_MODE_WAITKEY = 2;      { \k }
@@ -39,7 +36,7 @@ const
   SOULGET_IDLE    = 0;
   SOULGET_PLAYING = 1;
   SOULGET_FADING  = 2;
-  { AutoLoadMidis[11] - the byte offset in the original is 0x2C. }
+  { AutoLoadMidis[11]. }
   SOULGET_MIDI    = 11;
 
   { The text is Shift-JIS and it is scanned a PAIR of bytes at a time, so the
@@ -47,20 +44,11 @@ const
     not ASCII 0x20. }
   MB_FULLWIDTH_SPACE = #$81#$40;
 
-  { --- MessageBox_Update's typewriter and its two icons -------------------
-    All four numbers below are the original's, and the units matter.
-
-    THE REVEAL IS IN TWO-BYTE UNITS. 0x00456038 rebuilds the visible lines
-    every frame by scanning Copy(text, i * 2 - 1, 2) from the page start to a
-    cursor, so one step of that cursor uncovers TWO bytes. The text is
-    Shift-JIS, which is what the pairing is for; in the English build that
-    means two ASCII letters appear at a time. It is also why every marker is
-    exactly two characters - they have to land on the same grid to be seen. }
+  { Text is revealed in two-byte Shift-JIS units. In the English build this
+    exposes two ASCII characters per step; control markers are also two bytes. }
   MB_REVEAL_TICKS   = 2;    { counter > 2, so a step every THIRD frame }
 
-  { The \k prompt: six animation steps over a four-cell strip, 0 16 32 48 32
-    16 - a ping-pong, read from the table at 0x0046CB2C through the pointer
-    cell at 0x0046D050. }
+  { The \k prompt follows a six-step ping-pong animation. }
   MB_KEY_FRAMES     = 6;
   MB_KEY_ANIM_TICKS = 4;    { timer > 4, so a step every FIFTH frame }
   MB_KEY_SPRITE_X: array[0..MB_KEY_FRAMES - 1] of Integer =
@@ -87,8 +75,7 @@ const
   MB_HAND_ICON_STEP = $34;
   MB_HAND_ICON_DY   = $3C;
 
-  { Where the box goes: below the player if the player is high on the screen,
-    above if not. 0x79 is the test, 0x88 the low position. }
+  { Place the box below a high player and above everyone else. }
   MB_PLAYER_HIGH  = $79;
   MB_BOX_LOW_Y    = $88;
   MB_BOX_HIGH_Y   = 0;
@@ -103,8 +90,7 @@ const
   MB_FILL         = $FFFFFF;
   MB_OUTLINE      = $735400;
 
-  { The wait-for-key prompt: a six-frame cycle from the table at 0x0046D050,
-    stepped every five frames, drawn from surface slot 1. }
+  { Wait-for-key prompt animation, drawn from surface slot 1. }
   MB_PROMPT_TABLE_ADDR = $0046D050;
   MB_PROMPT_FRAMES = 6;
   MB_PROMPT_TICKS  = 4;
@@ -126,8 +112,7 @@ const
   MB_ANSWER_YES = 3;
   MB_ANSWER_NO  = 4;
 
-  { FUN_004568D0's numbers. The box flips to the lower half of the screen when
-    the player is in the upper half. }
+  { Dialogue-box geometry. }
   BOX_X        = $30;   { 48 }
   BOX_TEXT_X   = $3C;   { 60 }
   BOX_LOW_Y    = $88;   { 136, when the player is high on screen }
@@ -138,22 +123,9 @@ const
   BOX_W          = 224;
   BOX_H          = 72;
 
-  { THE BOX IS TILED, NOT FILLED. 0x0044DE3C draws a nine-slice out of an 8x8
-    sheet: four corners, four edges, and a tiled centre. The call is
-
-        FUN_0044DE3C(obj, 0x30, boxY + 0x10, 8, 0x1B)
-
-    so 27 tiles across and 8 down, which is where BOX_W 224 and BOX_H 72 come
-    from - (27+1)*8 and (8+1)*8. The size had been worked out correctly and
-    then drawn as a single Rectangle, which is why the panel came out a flat
-    slab in the wrong colours: the colours are the SHEET's, not ours to pick.
-
-    The sheet is set by Stage_Begin:
-
-        FUN_0044DE18(obj, p_Surfaces[1], 0, 0)
-
-    so it is surface slot 1 with its origin at (0,0) - the top-left 24x24
-    pixels, read as a 3x3 grid of 8x8 tiles. }
+  { The box is a nine-slice built from the top-left 3x3 grid of 8-pixel tiles
+    on surface slot 1. Cols and Rows specify the far tile index, so both loops
+    are inclusive. }
   BOX_TILE       = 8;
   BOX_COLS       = $1B;     { 27 }
   BOX_ROWS       = 8;
@@ -161,29 +133,14 @@ const
   BOX_SHEET_SLOT = 1;
   BOX_LINES      = 3;
 
-  { Overlay_Update @ 0x004568D0 has two modes and this is the other one: the
-    full-screen power-up panel. It blits a 320x240 picture over everything and
-    draws ONE line, centred, near the bottom. The 6 is the original's own
-    character step for this line - `(0x140 - len * 6) >> 1` - which is not the
-    8 the tile font advances by, so the panel's text is a different metric and
-    almost certainly a different sheet. Recorded, not yet reproduced. }
-  { Colours, straight off the Game_DrawTextOutlined call sites. FUN_00406aa8
-    takes r, g, b and returns a TColor, which is BGR - so RGB(200,$E6,$FF)
-    is $FFE6C8. }
-  BOX_TEXT_FILL    = $FFE6C8;   { RGB(200, $E6, $FF), Overlay_Update 0x004569xx }
+  { The power-up panel uses a six-pixel centering step for its single line. }
+  { TColor stores RGB components in BGR byte order. }
+  BOX_TEXT_FILL    = $FFE6C8;   { RGB(200, $E6, $FF) }
   BOX_TEXT_OUTLINE = $735400;   { RGB(0, $54, $73) }
-  PANEL_TEXT_FILL    = $FFFFFF; { RGB($FF, $FF, $FF), Overlay_Update 0x00456980 }
+  PANEL_TEXT_FILL    = $FFFFFF; { RGB($FF, $FF, $FF) }
   PANEL_TEXT_OUTLINE = $FF0000; { RGB(0, 0, $FF) }
 
-  { The yes/no prompt colours. The geometry and the wording were already
-    defined by MB_PROMPT_TEXT, MB_PROMPT_TEXT_X, and MB_PROMPT_TEXT_DY: one
-    padded string on the third line.
-
-    The SELECTION is a sprite, not a highlight on the text: the choice index at
-    0x0046CF70 places a cursor, MB_CURSOR_X plus MB_CURSOR_STEP. Drawing it
-    needs the surface layer, so for now both options show with nothing marking
-    which is chosen. Left that way rather than keeping the old two-colour
-    highlight, which was a highlight the original does not have. }
+  { The yes/no choice is marked by a sprite positioned beside a padded line. }
   MB_PROMPT_FILL    = $FFFFFF;
   MB_PROMPT_OUTLINE = $735400;
 
@@ -191,8 +148,7 @@ const
   PANEL_CHAR_W  = 6;
   PANEL_W       = $140;
 
-{ 0x00456038's answer write, both flags. Choice 0 is Yes. Separate from the
-  box so it can be checked without one. }
+{ Writes complementary Yes and No progress flags. Choice 0 means Yes. }
 procedure DialogueAnswer(var P: TPlayerState; Choice: Integer);
 
 type
@@ -204,26 +160,18 @@ type
     Title.pas and Ending.pas do. }
   TOverlaySound = procedure(Id: Integer) of object;
   TOverlayMusic = procedure(Track: Integer; Loop: Boolean) of object;
-  { 0x00450EDC before the fanfare, 0x00450EF0 when it finishes. The first
-    remembers what was playing; the second brings it back, looping. }
+  { Saves and restores the track interrupted by a fanfare. }
   TOverlayRememberMusic = procedure of object;
   TOverlayResumeMusic = procedure of object;
   TOverlayStartFade = procedure(FadeOut: Boolean) of object;
   TOverlayFadeBusy = function: Boolean of object;
   TOverlaySoulGetDone = procedure of object;
-  { 0x00450FD0 - "is a track still playing". Phase 1 waits on it. }
+  { Phase 1 waits while the current track is playing. }
   TOverlayMusicBusy = function: Boolean of object;
 
-  { The message overlay as the interpreter's collaborator. It owns no drawing
-    surface - the form hands it a canvas - and it advances the script itself,
-    which is what the original does.
-
-    ONE object with two modes, because that is what Overlay_Update is: the
-    same per-frame function, the same active flag, the same three strings, and
-    a mode selector at 0x0046CDA0 deciding whether to draw a three-line box or
-    a full-screen panel. Splitting them into two classes would lose the fact
-    that only one can be up at a time - which is exactly what sub-op 10's arm
-    guards on. }
+  { Event-script overlay with mutually exclusive dialogue-box and power-up
+    panel modes. It borrows the form's canvas and advances the script when the
+    active overlay closes. }
   TDialogueBox = class(TEventHost)
   private
     FMode: TOverlayMode;
@@ -237,12 +185,12 @@ type
     FRest: string;            { pages still to come, after a \k }
     FPrompt: Boolean;         { this page ended in \w }
     FChoice: Integer;         { 0 = yes, 1 = no }
-    FBoxMode: Integer;        { p_MessageMode 0x0046CF28 - MB_MODE_* }
+    FBoxMode: Integer;        { MB_MODE_* }
     FPageText: string;        { the page being typed, markers stripped }
-    FReveal: Integer;         { p_Reveal 0x0046CF24, in TWO-BYTE units }
-    FRevealTimer: Integer;    { 0x0046CBA4 }
-    FAnimFrame: Integer;      { 0x0046D320 + 0x10 }
-    FAnimTimer: Integer;      { 0x0046D320 + 0x14 }
+    FReveal: Integer;         { In two-byte units. }
+    FRevealTimer: Integer;
+    FAnimFrame: Integer;
+    FAnimTimer: Integer;
     FScript: TEventScript;
     FRunner: TEventRunner;
     FPlayer: PPlayerState;
@@ -275,53 +223,33 @@ type
     { TEventHost. Sub-op 3 lands here. }
     procedure ShowLine(Index: Integer); override;
 
-    { TEventHost. Sub-op 10 lands here - the ability pickup. PowerUp_Show
-      grants by the EVENT'S ENTITY's variant, so the overlay has to reach the
-      pool to find it, exactly as the original reaches p_Entities through the
-      event table. }
+    { Sub-op 10 grants the ability stored in the event entity's variant. }
     procedure SubMode; override;
 
-    { Sub-op 0 and sub-op 1: the stage load and the warp. Both carry TILE
-      coordinates and convert them identically - and the conversion was
-      already read and written down in PlayerState.pas, complete with the
-      asymmetric +16 / +19, long before anything called it.
-
-      Nothing overrode either, so LoadStage did nothing at all: the interpreter
-      set GS_STAGE_BEGIN, the stage number never changed, and the stage
-      reloaded itself. Walking out of room 1 put you back in room 1. }
+    { Sub-ops 0 and 1 place the player and camera from tile coordinates. }
     procedure LoadStage(Stage, PlayerTileX, PlayerTileY,
                         CamTileX, CamTileY: Integer); override;
     procedure WarpPlayer(PlayerTileX, PlayerTileY,
                          CamTileX, CamTileY: Integer); override;
 
-    { Sub-op 8 @ 0x004557xx: Entity_Destroy on the event's own entity, then
-      advance. The interpreter advances; this only destroys. }
+    { Sub-op 8 destroys the event's entity; the interpreter advances. }
     procedure DestroyEventEntity(EventId: Integer); override;
-    { Sub-op 16 @ 0x00455Fxx: writes EF_STATE (+0x20) on the event's entity. }
+    { Sub-op 16 writes EF_STATE on the event's entity. }
     procedure SetEventEntityState(EventId, Value: Integer); override;
     { The screen fade, which lives on the display component - see
       DDDDComponent. Routed through callbacks so this unit stays off it. }
     procedure StartFade(Out_: Boolean); override;
     function FadeBusy: Boolean; override;
-    { Sub-op 12. The FADE play path, 0x00450F74, not the hard-cut one - the
-      interpreter's two calls are at 0x00455AAF and 0x00455AFB and both go
-      through it. }
+    { Sub-op 12 changes music through the fade path. }
     procedure PlayMusic(Track: Integer; Loop: Boolean); override;
-    { Sub-op 14 @ 0x00455Exx: TileMap_Set on layer 0. }
-    { Sub-op 9. Every gallery book is `0000-04-118N/0000-09-0016/0000-08` -
-      set the flag, play effect 16 (SND_GET01), destroy the entity - so the
-      pickup sound is the script's, not the touch handler's. This override was
-      missing, so Host.PlaySound reached TEventHost's empty default and the
-      books were collected in silence. }
+    { Sub-op 9 routes scripted effects here; sub-op 14 writes layer-zero tiles. }
     function MessageBusy: Boolean; override;
     procedure PlaySound(Id: Integer); override;
     procedure SetTile(X, Y, Tile: Integer); override;
-    { Sub-op 13 @ 0x00455Dxx. Writes the RESUME POINT into the record first -
-      the stage, the player's live position and the camera - and only then
-      dumps all 0x11E4 bytes over data\save.dat. }
+    { Sub-op 13 records the live stage, player, and camera position before
+      saving the player state. }
     procedure SaveGame(var P: TPlayerState); override;
-    { Sub-op 80, `soulget` @ 0x00455Exx - a THREE-PHASE machine on ScreenPhase,
-      not a one-shot, and the only route to the ending:
+    { Sub-op 80 is a three-phase transition to the ending:
 
           phase 0   -> 1   effect $10, playlist entry 11 once, destroy the
                            entity that was touched
@@ -334,14 +262,8 @@ type
       and a fade, which is thirty frames on its own. }
     procedure SoulGet; override;
 
-    { 0x004568D0, Overlay_Update. One frame of the box. Confirm is the edge,
-      not the level. Returns True while the box is up, which is the caller's
-      cue to step no game logic.
-
-      The address goes here rather than only in the unit header because this
-      IS that function - the whole unit was written from it, and it sat in
-      the backlog as "described, not implemented" purely because nothing
-      carried the address where the coverage tool looks. }
+    { Updates one overlay frame. Confirm is edge-triggered. Returns True while
+      the overlay is active, during which normal game logic is suspended. }
     procedure PlayBoxSound(Index: Integer);
     function  GetVisibleLine(Index: Integer): string;
     procedure BuildLines;
@@ -353,9 +275,7 @@ type
     procedure Draw(Dest: TCanvas; Font: TGameFont; PlayerScreenY: Integer);
 
     property Active: Boolean read FActive;
-    { Read-only, for the tests. Observation only - nothing here gates any
-      behaviour, and the original has no counterpart because in the original
-      these ARE the globals 0x0046CF28, 0x0046D320+0x10 and 0x0046CF70. }
+    { Read-only state exposed for tests and rendering. }
     property BoxMode: Integer read FBoxMode;
     property AnimFrame: Integer read FAnimFrame;
     property Choice: Integer read FChoice;
@@ -370,12 +290,10 @@ type
     property OnStartFade: TOverlayStartFade read FOnStartFade
                                             write FOnStartFade;
     property OnFadeBusy: TOverlayFadeBusy read FOnFadeBusy write FOnFadeBusy;
-    { Sub-op 12 fades; the power-up fanfare cuts. Two different wrappers in
-      the original, so two callbacks here. }
+    { Scripted music fades; the power-up fanfare cuts immediately. }
     property OnFadeMusic: TOverlayMusic read FOnFadeMusic write FOnFadeMusic;
     property Map: TTileMap read FMap write FMap;
-    { Where sub-op 13 writes. The original hard-codes data\save.dat relative
-      to the working directory; this is given the resolved path. }
+    { Resolved save path used by sub-op 13. }
     property SaveFileName: string read FSaveFileName write FSaveFileName;
     { p_Surfaces[1], the sheet the box frame is tiled from. }
     property FrameSheet: TBitmap read FFrameSheet write FFrameSheet;
@@ -474,9 +392,7 @@ begin
   Result := (Length(FPageText) + 1) div 2;
 end;
 
-{ The visible lines, rebuilt from scratch each frame exactly as 0x00456038
-  does it: walk the page in two-byte units up to the cursor, start a new line
-  on \n, append anything else. }
+{ Rebuilds visible lines from the revealed two-byte units. }
 procedure TDialogueBox.BuildLines;
 var
   UnitIndex, LineIndex: Integer;
@@ -527,10 +443,7 @@ begin
   FWorld := AWorld;
 end;
 
-{ Where a destination in tiles lands in the player state. The original does
-  this five times in a row at 0x004553B2..0x004554C2, reading each argument
-  out of the step at a fixed column and multiplying by the LAYER's tile size -
-  not by a constant 32, which is why the layer has to be reachable here. }
+{ Converts a tile destination into player and camera pixel positions. }
 procedure TDialogueBox.PlaceAt(PlayerTileX, PlayerTileY,
                                CamTileX, CamTileY: Integer);
 var
@@ -538,9 +451,7 @@ var
 begin
   if FPlayer = nil then
     Exit;
-  { The shipped maps are all 32x32, but the map header carries the size and
-    the original multiplies by the LAYER's value, so this does too. The
-    fallback is only for a world that has not loaded a map yet. }
+  { Use 32-pixel tiles until a loaded layer provides its dimensions. }
   TileWidth := 32;
   TileHeight := 32;
   if FWorld <> nil then
@@ -559,8 +470,7 @@ end;
 procedure TDialogueBox.LoadStage(Stage, PlayerTileX, PlayerTileY,
                                  CamTileX, CamTileY: Integer);
 begin
-  { 0x004553B8 - the stage number goes straight into the settings, and
-    Stage_Begin reads it back. The interpreter sets GS_STAGE_BEGIN itself. }
+  { Stage_Begin reads the selected stage from Settings. }
   Settings.CurrentStage := Stage;
   PlaceAt(PlayerTileX, PlayerTileY, CamTileX, CamTileY);
 end;
@@ -588,8 +498,7 @@ begin
   Slot := EventSlot(EventId);
   if (Slot = SLOT_NONE) or (FPool = nil) then
     Exit;
-  { Entity_Destroy, not a kill - the same distinction that left the power-up
-    orb on screen. DropLoot is 0 at this call site. }
+  { Full destruction also releases the sprite; this scripted removal drops no loot. }
   if FWorld <> nil then
     FWorld.DestroyEntity(FPool.Entity(Slot)^, False)
   else
@@ -612,8 +521,6 @@ begin
     FOnFadeMusic(Track, Loop);
 end;
 
-{ 0x0046CF28 non-zero: a three-line box is up. The panel is the overlay's
-  flag (0x0046CD00) and is guarded separately, by SubMode. }
 function TDialogueBox.MessageBusy: Boolean;
 begin
   Result := FActive and (FMode = omBox);
@@ -630,16 +537,7 @@ begin
     FMap.SetTileRaw(X, Y, Tile);
 end;
 
-{ The nine-slice, tile for tile as 0x0044DE3C draws it.
-
-  Source tiles come from a 3x3 grid at the sheet's origin: column 0 is the left
-  edge, 1 the middle, 2 the right; row 0 the top, 1 the middle, 2 the bottom.
-  The destination runs 0..Cols and 0..Rows INCLUSIVE - the original draws its
-  far corner at Cols*8, so a 27-column box is 28 tiles wide. }
-{ One 16x16 cell of slot 1's icon strip, which starts MB_ICON_SRC_X in.
-  Opaque, exactly as DrawFrame blits the box out of the same sheet - the real
-  one goes through TDDDD_DrawSprite with the component's colour key, which is
-  DIV-008's territory rather than this unit's. }
+{ Draws one opaque 16x16 cell from the frame sheet's icon strip. }
 procedure TDialogueBox.DrawIcon(Dest: TCanvas; X, Y, SrcX, SrcY: Integer);
 begin
   if FFrameSheet = nil then
@@ -692,13 +590,8 @@ end;
 
 procedure TDialogueBox.SaveGame(var P: TPlayerState);
 begin
-  { The resume point, in the original's order. Note these are the LIVE
-    position and camera converted back to pixels, not the values the stage
-    started at - saving mid-room has to come back to the same spot.
-
-    The conversion is PixelOf: subtract the bias, and for a negative subtract
-    bias-31 instead so the shift truncates toward zero. The original writes
-    that idiom out four times in a row at 0x00455Dxx. }
+  { Save the live player and camera positions so a mid-room save resumes at
+    the same location. }
   P.SavedStage := Settings.CurrentStage;
   if FPool <> nil then
   begin
@@ -721,10 +614,8 @@ end;
 
 procedure TDialogueBox.SoulGet;
 begin
-  { The order below is the original's, and it is NOT phase order: the
-    music-finished test is written first and reads the phase the previous
-    frame left, so phase 0 falls through to phase 1 on the same frame it
-    starts. Reproduced rather than tidied into a case. }
+  { Check completion before starting phase 0 so a newly started track remains
+    in phase 1 until a later frame. }
   if (ScreenPhase = SOULGET_PLAYING) and (not MusicBusy) then
   begin
     ScreenPhase := SOULGET_FADING;
@@ -767,8 +658,7 @@ procedure TDialogueBox.SubMode;
 var
   Slot, Variant: Integer;
 begin
-  { Sub-op 10's arm at 0x0045597C runs PowerUp_Show only when the overlay is
-    not already up. }
+  { Ignore nested attempts to open the power-up panel. }
   if FActive then
     Exit;
   if (FScript = nil) or (FPool = nil) or (FPlayer = nil) or (FRunner = nil) then
@@ -786,14 +676,10 @@ begin
 
   Variant := FPool.Field(Slot, EF_VARIANT);
 
-  { The audio comes FIRST, before the panel is raised - that is the original's
-    order, and the fanfare is what dismisses the panel again. Without the stop
-    the looping stage music keeps IsPlaying true forever and the overlay never
-    closes; that was the softlock on the dash orb. }
+  { Save the stage track before starting the fanfare that controls panel lifetime. }
   if Assigned(FOnSound) then
     FOnSound(POWERUP_SOUND);
-  { REMEMBER, not stop. 0x00450EDC only copies the current track's name
-    aside; the stop happens inside the play below, which is 0x00450F14. }
+  { Playing the fanfare performs the actual stop after the track is remembered. }
   if Assigned(FOnRememberMusic) then
     FOnRememberMusic;
   if Assigned(FOnMusic) then
@@ -804,10 +690,7 @@ begin
   PowerUpGrant(FPlayer^, Variant);
   FPanelText := POWERUP_PREFIX + PowerUpName(Variant) + POWERUP_SUFFIX;
 
-  { PowerUp_Show ends with Entity_Destroy @ 0x00461400, NOT a bare kill.
-    FPool.Kill only clears EF_ALIVE; the destroy also hides the sprite and
-    zeroes the depth, which is what actually makes the orb stop being drawn.
-    Killing it left the ball sitting there after the panel closed. }
+  { Full destruction hides and releases the collected orb's sprite. }
   if FWorld <> nil then
     FWorld.DestroyEntity(FPool.Entity(Slot)^, False)
   else
@@ -908,12 +791,7 @@ begin
         end;
         if ((Inp.AxisY <> 0) and not Inp.Moving) or Confirm then
         begin
-          { The original clears the shared sub-phase here as well as advancing
-            - 0x00456038's mode-2 arm is
-                PTR_DAT_0046cc14 = 0; reveal++; pageStart = reveal; mode = 1;
-            and 0x0046CC14 is ScreenPhase, the same global the pause menu and
-            the game-over screen step through. It went unnoticed while this
-            unit had no way to say so. }
+          { Starting the next page also resets the shared screen phase. }
           ScreenPhase := 0;
           TakePage(FRest);
         end;
@@ -935,9 +813,7 @@ begin
     { --- 4, \w: the yes/no prompt, with the animated hand ------------------
       HORIZONTAL. Mode 4 draws "Yes       No  " as one string at x 0x70 and
       puts the hand at choice * 0x34 + 0x60 - side by side - and moves the
-      choice on AxisX with the Moving guard, ADDING the delta and then
-      clamping rather than each direction selecting a fixed side. This once
-      took Up and Down, which is the one axis the original does not read. }
+      choice on AxisX with the Moving guard, adding the delta and clamping it. }
     MB_MODE_PROMPT:
       begin
         if (Inp.AxisX <> 0) and not Inp.Moving then
@@ -955,11 +831,9 @@ begin
         end;
         if Confirm then
         begin
-          { Sound 1 on choosing, which the original plays before it writes. }
+          { Play confirmation before storing the answer. }
           PlayBoxSound(SND_OK);
-          { BOTH flags, which is what 0x00456038 writes - see the header.
-            Writing only Progress[3] left every script that guards on "No"
-            unable to see the answer at all. }
+          { Store complementary flags so scripts can test either answer. }
           if FPlayer <> nil then
             DialogueAnswer(FPlayer^, FChoice);
           FPrompt := False;
@@ -972,15 +846,7 @@ begin
   end;
 end;
 
-{ What GameState_Reset @ 0x004653C8 zeroes on this side: the message box's
-  page start and reveal cursor (0x0046CC98, 0x0046CF24), its mode
-  (0x0046CF28), and the overlay's flag and mode (0x0046CD00, 0x0046CDA0).
-  Called through TGameSession.OnResetHost, because the reset belongs to the
-  session and this object belongs to the form.
-
-  Placed ABOVE Draw deliberately: Draw is the last routine in this unit, so
-  its frozen fingerprint runs to end-of-file and anything appended after it
-  would move the hash without changing a statement. }
+{ Clears all dialogue and panel state during a game-state reset. }
 procedure TDialogueBox.Reset;
 begin
   FActive := False;
@@ -1008,12 +874,8 @@ begin
 
   if FMode = omPanel then
   begin
-    { The original blits bmp\power.bmp over the whole screen first. The form
-      has the surfaces; this draws only the line, centred by the original's
-      own 6-pixel step. }
-    { Centred on a 6-pixel step - the original computes
-      (0x140 - len * 6) >> 1 and then draws with a PROPORTIONAL font, so the
-      step is a centring convention rather than the real glyph width. }
+    { The form draws the panel background; this draws its line using the
+      panel's six-pixel centering convention. }
     Game_DrawTextOutlined((PANEL_W - Length(FPanelText) * PANEL_CHAR_W) div 2,
                           PANEL_TEXT_Y, FPanelText,
                           PANEL_TEXT_OUTLINE, PANEL_TEXT_FILL,
@@ -1021,7 +883,7 @@ begin
     Exit;
   end;
 
-  { Out of the player's way, as Overlay_Update does it. }
+  { Keep the box clear of the player. }
   if PlayerScreenY < BOX_PLAYER_SPLIT then
     BoxY := BOX_LOW_Y
   else

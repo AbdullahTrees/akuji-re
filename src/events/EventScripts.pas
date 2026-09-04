@@ -1,4 +1,4 @@
-{ Per-stage event and dialogue loading (Load_Event_Scripts @ 0x00465B50):
+{ Per-stage event and dialogue loading:
 
       data\ev%.03d.dat   the event table, CSV
       data\tk%.03d.dat   the dialogue, one line per string
@@ -14,7 +14,8 @@
   bookkeeping Events_SpawnNearCamera keeps: in-window, entity-exists, and the
   slot it occupies.
 
-  THE CONDITION FIELDS gate the spawn, and the forbidding one is destructive:
+  The condition fields gate spawning, and the forbidding condition permanently
+  retires an event:
 
       required   csv1 = 0 or Progress[csv1] <> 0
       forbidding csv2 = 0 or Progress[csv2] <> 1
@@ -22,9 +23,9 @@
                  tile := (-32,-32) - and its entity destroyed
 
   Opcodes: 0 touch, 1 touch plus a button while EF_VEL_Y is 0,
-  4 always active (the window test is bypassed and Event_Begin runs every
-  frame), 5 sets Progress[first four characters of ParamB], 7 calls
-  Event_Begin, 9 collectible. 2 and 3 exist only in the code - the
+  4 always active (the window test is bypassed and StartEvent runs every
+  frame), 5 sets Progress[first four characters of ParamB], 7 starts an event,
+  and 9 is collectible. 2 and 3 exist only in code - the
   solid-collide pair start them when the player pushes into a solid - and
   appear in no shipped stage. }
 
@@ -38,7 +39,7 @@ uses
   Classes, SysUtils;
 
 const
-  EVENT_RECORD_BYTES = $24;   { the original's stride }
+  EVENT_RECORD_BYTES = $24;
   EVENT_CSV_FIELDS   = 7;
 
   { Event activation opcodes. }
@@ -46,7 +47,7 @@ const
   EVOP_TOUCH_BUTTON = 1;   { starts on overlap while standing, with a button }
   EVOP_SET_PROGRESS = 5;
   EVOP_ON_HIT       = 6;   { starts when a projectile hits the entity }
-  EVOP_CALL_454EF4  = 7;   { starts unconditionally from Entity_Destroy }
+  EVOP_ON_DESTROY   = 7;   { starts unconditionally from Entity_Destroy }
   EVOP_ALWAYS       = 4;   { spawned and run every frame, ignoring the camera }
   EVOP_PUSH_AXIS    = 2;   { unused: push into the solid holding a direction }
   EVOP_PUSH_CONFIRM = 3;   { unused: push into the solid and press confirm }
@@ -56,8 +57,7 @@ const
   EVENT_DISABLED_TILE = -32;
 
   { The spawn window, in tiles around the camera's top-left tile. The screen
-    is 10 x 7.5 tiles and the margin is 2 on every side; the vertical bound is
-    a float in the original for the same reason it is in Camera.pas. }
+    is 10 x 7.5 tiles and the margin is 2 on every side. }
   SPAWN_MARGIN_TILES = 2;
 
 type
@@ -208,8 +208,6 @@ begin
   Result := FLines[Index];
 end;
 
-{ Load_Event_Scripts @ 0x00465B50. It loads BOTH files - the event table
-  and the dialogue - which is why one routine covers both. }
 function TEventScript.Load(const ADataDir: string; StageIndex: Integer): Integer;
 var
   SourceLines, Fields: TStringList;
@@ -233,7 +231,8 @@ begin
       begin
         if Trim(SourceLines[LineIndex]) = '' then
           Continue;
-        { The original sets .CommaText, exactly as the other CSV loaders do. }
+        { CommaText accepts both comma-separated and whitespace-separated
+          fields, matching the data files used by the game. }
         Fields.CommaText := SourceLines[LineIndex];
         if Fields.Count < EVENT_CSV_FIELDS then
           Continue;
@@ -251,8 +250,7 @@ begin
       SetLength(FEvents, EventCount);
     end;
 
-    { The dialogue file is read straight into a string list - the original
-      copies one string per line with no parsing at all. Its escape codes
+    { Dialogue is stored as one unparsed string per line. Its escape codes
       (\n, \e, \k, \w) are the consumer's problem, not the loader's. }
     FileName := DataPath + Format('tk%.3d.dat', [StageIndex]);
     if FileExists(FileName) then

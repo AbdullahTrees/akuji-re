@@ -1,7 +1,7 @@
 { Entity storage, lifecycle, collision helpers, and static type metadata.
 
-  THE POOL is one flat array at 0x0046CB68, stride 0x104 = 65 ints, partitioned
-  by Spawn's first argument:
+  The pool is one flat array of 65-integer records, partitioned by Spawn's
+  first argument:
 
       kind 0 -> slot 0 only        kind 1 -> slots 1..0x20
       kind 2 -> slots 0x21..0x120  289 in all
@@ -14,7 +14,7 @@
   pixels. It exists to keep the stored field positive, so truncating division
   by a tile size behaves the same either side of the origin.
 
-  The type table contains 81 rows of 18 integers at 0x0046909C. Unknown fields
+  The type table contains 81 rows of 18 integers. Unknown fields
   retain numeric names until their behavior is understood. }
 
 unit Entities;
@@ -30,7 +30,7 @@ const
   ENTITY_INTS   = $41;      { 65 ints = 0x104 bytes, the array stride }
   ENTITY_BYTES  = $104;
 
-  { Slot partitioning, from the three-way branch at the top of Entity_Spawn. }
+  { Slot partitions selected by Spawn's Kind argument. }
   EKIND_SINGLE  = 0;        { slot 0 only - the player }
   EKIND_ACTOR   = 1;        { slots 1..0x20 }
   EKIND_MINOR   = 2;        { slots 0x21..0x120 }
@@ -70,17 +70,15 @@ const
     tile. Stages.pas has which tile that is per terrain. }
   KILL_TILE_STATE = 10;          { Entity_TileCollide*'s "nothing solid that way" }
 
-  { Delphi-compatible random generator from 0x00402AC4:
+  { Delphi-compatible random generator:
 
         RandSeed := RandSeed * $08088405 + 1
         Result   := (N * RandSeed) shr 32
 
-    Debris, scatter, and item drops share its seed at 0x0046E040. }
+    Debris, scatter, and item drops share one seed. }
   RANDOM_MULT = $08088405;
-  RANDOM_SEED_ADDR = $0046E040;
 
-  { --- Entity_SpawnDebris @ 0x00461874 ----------------------------------
-    Five particles of type 13, fanned upward at fixed speeds and scattered
+  { Five debris particles, fanned upward at fixed speeds and scattered
     horizontally at random. The impact sound depends on the KIND, and kind 0
     asks the terrain - which is where terrain 3 and 4 turn out to mean water. }
   DEBRIS_SPLASH   = 0;    { the sound comes from the terrain }
@@ -90,8 +88,8 @@ const
   DEBRIS_DEPTH    = 6;
   DEBRIS_SPEED_MAX = 3;   { RandomBelow(3) + 1, so 1..3 }
 
-  { --- Entity_MaybeDropItem @ 0x004617FC --------------------------------
-    One roll of Random(256) decides everything. The item drops when the roll
+  { One Random(256) roll decides both whether an item drops and its rarity. The
+    item drops when the roll
     EXCEEDS 179, which is 76 of 256 - a shade under 30% - and the same roll,
     compared against 245, picks between two variants: 10 of 256 outright, so
     about 13% of the drops that happen.
@@ -142,11 +140,10 @@ const
     sit outside the two 10-int blocks. }
   EF_ANIM_ID     = $05;
   EF_VARIANT     = $06;
-  EF_FLAG1C      = $07;   { set to 0 or 1 by FUN_004617FC }
+  EF_FLAG1C      = $07;   { item variant or animation selector }
   EF_BLOCK_A     = $08;   { 10 ints, zeroed on spawn }
-  { Block B is a bank of 10 COUNTDOWN TIMERS. Steer (0x00461738) decrements one
-    of them and only acts when it reaches zero, then reloads it - which is how
-    the original rate-limits per-entity behaviour without a scheduler. }
+  { Block B is a bank of 10 countdown timers. Steer decrements and reloads one
+    to rate-limit per-entity behavior without a scheduler. }
   EF_BLOCK_B     = $12;   { 10 ints at +0x48, contiguous with A }
   EF_TIMER_COUNT = 10;
   EF_TIMER       = $1C;   { +0x70. One slot with several uses, all timers:
@@ -158,24 +155,16 @@ const
   EF_VEL_X       = $20;   { zeroed on spawn }
   EF_VEL_Y       = $21;   { dropped items receive their upward launch here }
   EF_FACING      = $22;   { direction 0..63, see Directions.pas }
-  { Type table column 2. Entity_UpdateAll copies it to the sprite's draw-order
-    key, so this is the DRAW LAYER - except that -1 means "sort by screen Y",
-    clamped to 1..SCREEN_H. No shipped type is -1 (column 2 runs 0..8 across all
-    81 rows) and a byte scan of the code section finds no instruction writing -1
-    into +0x8C either, so the Y-sorting branch is present and never taken. That
-    is recorded rather than dropped: it is the original's dead branch, not a
-    misreading of it.
-
-    Entity_PlayerTouch reads the same field as `PosY + arg - 2 * [$23]`, i.e. as
-    a vertical inset, which is why the provenance name is kept alongside the
-    decoded one. }
+  { Sprite draw layer. -1 selects screen-Y sorting, although no shipped entity
+    type uses that mode. Touch handling also reads this slot as a vertical
+    inset, so the type-table alias remains explicit. }
   EF_TYPEF_08    = $23;   { <- type table +0x08, column 2 }
   EF_DEPTH       = EF_TYPEF_08;
   DEPTH_BY_SCREEN_Y = -1;
   EF_HP          = $24;   { type table col 1. On a target this is HIT POINTS;
                             on a projectile the SAME slot is its damage. One
                             field, two roles by role - see the note below. }
-  EF_TYPEF_04    = EF_HP; { the old provenance name, kept for the spawn code }
+  EF_TYPEF_04    = EF_HP; { type-table alias used by spawn initialization }
   EF_BYTE94      = $25;   { byte, set to 1 on spawn }
   { +0xB0. A velocity PARKED for one frame. Type 57 variant 3 uses it to
     bounce off a wall: on the frame it hits, EF_VEL_X is overwritten with the
@@ -184,21 +173,12 @@ const
     flush-landing write would destroy the bounce. }
   EF_PARKED_VEL  = $2C;
 
-  { +0xC0. NOT identified. Entity_Spawn neither fills it from the type table
-    nor zeroes it - the bulk clear covers $08..$1B and the table copy covers
-    $32..$35 and $37..$40 - so whatever a slot's previous occupant left here
-    is still here. Type 72 variant 0 writes 1 to it on its first frame,
-    alongside EF_CLASS and EF_VULN_KIND, and no reader has been found yet.
-    Named so the write is visible rather than a bare index. }
+  { Unidentified field retained between occupants because Spawn neither clears
+    nor initializes it. Type 72 variant 0 writes 1; no reader is known. }
   EF_FIELD_C0    = $30;
 
-  EF_EVENT_ID    = $2E;   { +0xB8. The event record this entity came from, or
-                            -1 when it came from nowhere. Entity_SolidCollideX
-                            and ...Y index p_EventTable by it (stride 0x24) to
-                            fire push-against triggers, and event sub-ops 8 and
-                            16 go the other way, from the event to the entity
-                            it spawned. -1 on spawn is what named this. }
-  { --- The type table's 18 columns, exactly as Entity_Spawn copies them -----
+  EF_EVENT_ID    = $2E;   { +0xB8. Source event, or -1 for direct spawns }
+  { Type-table columns copied by Spawn:
 
         col   0        -> int $05   the drawn sprite id
         col   1        -> int $24   EF_HP
@@ -207,25 +187,13 @@ const
         col   7        -> NOWHERE. Never copied, and zero in all 81 rows.
         col   8 .. 17  -> int $37 .. $40
 
-    Read straight off Entity_Spawn @ 0x004610C4, so the gap at column 7 is the
-    original's own and not a mis-transcription. Note the crossover: column 1
-    goes to $24 and column 2 to $23, the other way round from the obvious
-    reading. }
+    Column 7 is intentionally skipped. Columns 1 and 2 cross over into fields
+    $24 and $23 respectively. }
   EF_TYPEF_0C    = $32;   { <- type table col 3, the first of the $32..$35 run }
   EF_TYPEF_20    = $37;   { <- type table col 8, the first of the $37..$40 run }
 
-  { --- The bounding box and its tile-grid offsets ---------------------------
-
-    From Entity_TileEdgeDistX / Entity_TileEdgeDistY @ 0x00457150 / 0x00457228,
-    which are an exact X/Y pair: every field below appears in one at offset N
-    and in the other at N+4, with the X one reading p_LayerInfo+0x00/+0x10 and
-    the Y one p_LayerInfo+0x04/+0x14.
-
-    That pairing is the evidence. A misread would not produce two functions
-    identical except for a consistent +4 on six independent fields.
-
-    EF_EXTENT_* is halved before use (shr 1), so it is a full width/height and
-    the box is centred on the position. }
+  { Bounding-box and tile-grid fields. Extents are full width and height; box
+    calculations halve them around the entity position. }
   { Also not stored. Entity_UpdateAll refreshes both from the sprite's CURRENT
     frame, and only while it is visible - so an entity that animates through
     frames of different sizes has a collision box that changes with them. }
@@ -250,19 +218,13 @@ const
   EF_BOX_PCT_Y   = $3B;   { +0xEC, column 12 }
   EF_INSET_PCT_X = $3C;   { +0xF0, column 13 }
   EF_INSET_PCT_Y = $3D;   { +0xF4, column 14 }
-  BOX_PERCENT_DIVISOR: Single = 100.0;   { the Single at 0x004610C0 }
+  BOX_PERCENT_DIVISOR: Single = 100.0;
   EF_SOLID          = $3E;  { +0xF8, the kind above, from TYPE_COL_SOLID. The
                               shipped table holds only 0, 1 and 2, so "blocks
                               both" is a case the code supports and this game
-                              never reaches. Pinned by --selftest-dir. }
+                              never reaches. }
   EF_RIDDEN         = $0A;  { +0x28, block A[2]. Entity_SolidCollideY sets it
                               on the SOLID when something lands on top of it. }
-
-  { The three globals the solid collision answers through. It returns only
-    "something was hit"; how far to push out comes back here. }
-  SOLID_PUSH_X_ADDR   = $00484FAC;
-  SOLID_PUSH_Y_ADDR   = $00484FB0;
-  SOLID_ON_TOP_ADDR   = $00484FB4;
 
   { Landing counts as "on top" only if the overlap is under this many pixels,
     which is what stops a deep overlap being read as a landing. }
@@ -273,24 +235,17 @@ const
   SOLID_SCAN_FIRST = $21;
   SOLID_SCAN_LAST  = $FF;
 
-  { Entity_UpdateDying @ 0x004615A8 is called from THIRTY sites, more than
-    anything else in the game layer, which is why these fields earn names even
-    though only part of the state machine is understood. }
+  { Shared dying-state fields. }
   EF_DEATH_TIMER = $1D;   { +0x74, counts down; 0 destroys the entity }
   EF_DYING       = $11;   { +0x44, the one-shot latch }
   EF_CLASS       = $33;   { +0xCC }
 
-  { EF_CLASS is the entity's broad kind, NOT its type index - EF_TYPE is that.
-    Values seen so far, and where:
+  { EF_CLASS is the entity's broad lifecycle category, not its type index:
 
         1, 2, 6   Entity_UpdateDying   each with its own death effect
         4, 5, 7   Entity_Destroy       4 decrements a counter on its owner,
                                        5 recursively destroys two child slots
-                                       at +0x4C and +0x50, 7 is checked before
-                                       calling 0x00461874
-
-    Class 2's death plays sound 34, which SoundTable independently gives as
-    bom03.wav - an explosion. That is unrelated evidence for the reading. }
+                                       at +0x4C and +0x50, 7 spawns debris }
   EF_CHILD_A     = $13;   { +0x4C, destroyed with the parent when EF_CLASS = 5 }
   EF_CHILD_B     = $14;   { +0x50 }
 
@@ -320,16 +275,13 @@ const
   EF_CULL_OFFSCREEN = $39;
   CULL_MARGIN       = 4;        { Entity_IsOffScreen's argument in the update loop }
 
-  { Entity_UpdateAll @ 0x004608BC is one switch on EF_TYPE, one arm per type -
-    which is the shape of EntityHandlers.pas. Types 0, 18 and 20 have no arm at
-    all. That nearly, but not exactly, coincides with the three rows whose
-    TYPE_COL_ANIM_ID is -1: those are 18, 20 and 32, and 32 does have an arm,
-    so it updates while drawing nothing. }
+  { Types 0, 18, and 20 have no update handler. Type 32 updates without a
+    sprite. }
 
   { Deliberately smaller than ENTITY_COUNT: Entity_Spawn allocates as far as
     slot $120 but Entity_UpdateAll returns after 256, so the last 33 slots can
     be spawned into and are then never updated, drawn or culled. The sprite
-    search stops at 256 too, so they could not get art either. Reproduced. }
+    search stops at 256 too, so they cannot receive art. }
   ENTITY_UPDATE_COUNT = $100;   { what Entity_UpdateAll actually walks }
 
   { The two 10-int blocks Entity_Spawn zeroes, $08..$11 and $12..$1B:
@@ -354,45 +306,25 @@ const
     own +0x90 from it and clamps at zero; the stun is the +0x70/+0x74 pair,
     set to 8 on every hit. }
 
-  { --- Being hit, from Entity_TakeProjectileHits @ 0x00457AB4 ---------------
-
-    Runs for every entity above SLOT_ACTOR_LAST and scans slots 1..$20 - the
-    actor range - for projectiles overlapping it. That the scan bound is
-    exactly SLOT_ACTOR_LAST is more evidence for where that boundary sits.
+  { Projectile-hit handling scans actor slots 1..$20 for each minor entity.
 
     EF_VULN_KIND decides what a hit does, and it is a wide switch: kinds 2, 4,
     5, 6, 7 and $5A..$5D each behave differently, several of them gated on the
     projectile's own EF_BLOCK_A, which acts as its power or element. Only the
     common path is translated here. }
   EF_VULN_KIND  = $35;   { +0xD4, from type table column 6 }
-  EF_HIT_SOUND  = $38;   { +0xE0, from type column 9; indexes a table at 0x46CC48 }
+  EF_HIT_SOUND  = $38;   { +0xE0, from type column 9 }
   HIT_STUN_FRAMES = 8;
 
-  { Two things fall out of where these land.
-
-    EF_TILE_OFS_Y at int 64 is exactly the final slot of the 65-int record - an
-    independent check on ENTITY_INTS, since a wrong stride would have put it
-    outside.
-
-    And EF_TILE_OFS_X/Y are $3F/$40, i.e. EF_TYPEF_20 + 8 and + 9, so they ALIAS
-    the last two slots that Entity_Spawn fills from the type table (columns 8..17
-    -> ints $37..$40). Those two columns are type table +0x40 and +0x44, which a
-    separate survey found to be ZERO for all 81 types. That is consistent rather
-    than contradictory: they are runtime offsets whose initial value is 0, which
-    is also why the survey saw a dead column there. Do not treat them as two
-    different fields. }   { <- type table +0x20 .. +0x44 land at $37..$40 }
+  { These runtime tile offsets alias the last two type-specific fields. Both
+    fields initialize to zero for every entity type. }
 
   ENTITY_TYPE_COUNT  = 81;
   ENTITY_TYPE_FIELDS = 18;
 
 type
-  { p_LayerInfo @ 0x00483BF4. A plain global struct, not a pointer - the
-    original indexes it directly.
-
-    Origin is in the same biased 1/32-pixel units as an entity position, so
-    PixelOf applies to it unchanged. Delta is what the layer moved THIS frame,
-    in 1/32 pixel, and exists so the parallax and the riding code can follow a
-    scroll they did not cause. }
+  { Origin uses the same biased 1/32-pixel units as entity positions. Delta is
+    the layer movement during the current frame. }
   TLayerInfo = record
     OriginX:    Integer;   // +0x00
     OriginY:    Integer;   // +0x04
@@ -411,67 +343,27 @@ type
   end;
   PEntity = ^TEntity;
 
-  { Everything an entity handler needs that it does not own: the tilemap, the
-    pool, the sound device. A test supplies a flat world; the game supplies
-    the real one. The surface is deliberately the ORIGINAL's shape rather
-    than a tidier one.
-
-    TileAt returns the tile an entity would hit and leaves the caller to
-    compare it against SolidThreshold, because the original does. EdgeDist
-    returns how far it may actually move. SolidCollide* answer only whether
-    something was hit - how far to push out comes back through PushX/PushY
-    and OnTopOfSolid, three globals rather than out parameters, kept because
-    the callers read them in that order. }
+  { Services and shared state used by entity handlers. Tile collision returns
+    the encountered tile, while solid collision reports displacement through
+    PushX, PushY, and OnTopOfSolid. }
   { Declared ahead of TEntityWorld because Entity_Destroy reaches other
     entities by slot, and the pool is defined further down. }
   TEntityPool = class;
 
-  { A collision box in screen pixels, in the order the original stores it: four
-    consecutive ints passed by pointer to Rect_Overlap. }
+  { Axis-aligned collision box in screen pixels. }
   TBox = record L, T, R, B: Integer; end;
 
-  { The tilemap, as the collision code sees it.
-
-    TileMap_Get @ 0x0044DB5C is one line - `Data[X + Y * Width]`, a Word, with
-    NO bounds check of any kind. That is not the same as returning 0 off the
-    map, and the difference is reachable: an X outside 0..Width-1 simply indexes
-    into the NEIGHBOURING ROW, so the map wraps horizontally for anything that
-    walks off the side. An implementation is expected to reproduce that. Only an
-    index outside the array altogether cannot be reproduced.
-
-    The original also takes a LAYER INDEX and resolves both p_LayerInfo[layer]
-    and p_TileMaps[layer] from it - p_LayerInfo is an array of these records,
-    stride 0x20, which is one independent confirmation that TLayerInfo is
-    exactly eight ints. Here the caller resolves the layer instead and passes
-    the two directly. }
+  { Collision-facing tile access. Implementations use linear X + Y * Width
+    indexing; an X outside the row can therefore address an adjacent row. }
   TTileSource = class
   public
     function TileAt(TileX, TileY: Integer): Integer; virtual; abstract;
   end;
 
-  { The sprite pool, as Entity_UpdateAll sees it.
-
-    The original keeps sprites in a Delphi TList at 0x0046D35C and EF_SPRITE is
-    the index into it - FUN_0044CFB8 is nothing but TList.Get. The update loop
-    touches exactly five fields on a sprite and no methods, so only those are
-    here; anything more would be inventing a renderer rather than recording one.
-
-        +0x1C  animation base, written from EF_ANIM_ID
-        +0x20  frame within the animation, not touched here
-        +0x2C  screen X          +0x30  screen Y
-        +0x34  draw-order key    +0x3D  visible, a byte
-
-    These are plain field stores in the original, not property setters: the
-    depth step reads +0x30 straight back after writing it and gets exactly what
-    it wrote. This interface passes the value along instead, which is the same
-    thing and one fewer method to stub. }
+  { Sprite operations required by entity creation, updates, and destruction. }
   TSpriteSink = class
   public
-    { Entity_Spawn allocates one of these per entity whose type table column 0
-      is not -1, and Entity_Destroy releases it. The defaults refuse, so a
-      test double that models only the seven drawing calls behaves exactly as
-      it did before this existed: no sprite, and extents left where the test
-      put them. }
+    { The default implementation disables sprite allocation. }
     function AllocSprite(AnimId: Integer): Integer; virtual;
     procedure ReleaseSprite(Handle: Integer); virtual;
 
@@ -484,8 +376,7 @@ type
     procedure SetDepth(Handle, Depth: Integer); virtual; abstract;
   end;
 
-  { Asked of the host at the point of use, the way the original dereferences
-    its component rather than being handed a value. }
+  { Callback for state that must be sampled at the point of use. }
   TWorldQuery = function: Boolean of object;
 
   TEntityWorld = class
@@ -494,52 +385,30 @@ type
     FOnFading: TWorldQuery;
     function GetFading: Boolean;
   public
-    PushX, PushY: Integer;       { 0x00484FAC / 0x00484FB0 }
-    OnTopOfSolid: Boolean;       { 0x00484FB4 }
-    SolidThreshold: Integer;     { 0x00484EF4, set per terrain }
-    { 0x00484EF8, the tile index that kills on contact - the water in the
-      surf rooms. Terrain_Configure writes it directly beside the threshold,
-      which is what "adjacent in BSS" means literally. }
+    PushX, PushY: Integer;
+    OnTopOfSolid: Boolean;
+    SolidThreshold: Integer;
+    { Tile index that kills an entity on contact. }
     KillTile: Integer;
-    { ASKED, NOT STORED. Player_Update reads the fader where it uses it, to
-      suppress the soft landing sound mid-fade. Copying the answer into a
-      field once a frame is the shape of mistake that hid the game-over
-      screen, where the caller sampled the music state before the code that
-      starts the music had run. A world with no fader wired keeps answering
-      the plain field, which is what the test doubles set. }
+    { Fading is sampled on demand so sound decisions use the current state. }
 
-    { The layer the entities live on, and the stage's terrain id. Both are
-      globals in the original - p_LayerInfo and the stage record's last int -
-      and both are read by code that has no other way to reach them. }
+    { Current entity layer and terrain profile. }
     Layer: TLayerInfo;
     TerrainId: Integer;
 
-    { The pool itself, when the world has one. Entity_Destroy reaches other
-      entities by slot - its owner, its children - and cannot do that through
-      Spawn alone. Nil is a legitimate configuration: a world with no pool
-      simply has no cross-entity bookkeeping to settle. }
+    { Nil disables cross-entity bookkeeping during destruction. }
     Pool: TEntityPool;
 
-    { The sprite pool, so a destroyed entity can hide and release its sprite.
-      Nil when the world does not draw. }
+    { Nil when the world does not draw entities. }
     Sprites: TSpriteSink;
 
-    { The tilemap. Nil is a world with no terrain, where every tile query
-      answers TILE_NONE - which is what the player trace's flat room wants. }
+    { Nil represents a world with no collidable terrain. }
     Tiles: TTileSource;
 
-    { Scrolling is an INPUT to the tile query, not just a consequence of it:
-      Entity_TileCollideX/Y take it as their fifth argument, because when the
-      layer moves instead of the entity the tile under the entity differs. }
-    { These four were abstract while the functions behind them were only
-      described. They are real now - Entity_TileCollideX/Y and
-      Entity_TileEdgeDistX/Y - and stay virtual only so a test can supply a
-      room without a tilemap. }
-    { DeltaY is the sixth argument of Entity_TileCollideX and it is not
-      always zero: a walker probes one tile DOWN with it to find the edge of
-      the platform it is on, which is how type 60 turns round at a ledge
-      rather than walking off. Defaulted so every existing caller is
-      unchanged. }
+    { Scrolling selects whether motion is applied to the layer origin or the
+      entity position during tile queries. }
+    { DeltaY lets horizontal probes inspect the row above or below the entity,
+      such as when a walker checks for a platform edge. }
     property Fading: Boolean read GetFading write FFading;
     property OnFading: TWorldQuery read FOnFading write FOnFading;
 
@@ -551,9 +420,7 @@ type
     function EdgeDistX(const E: TEntity; Delta: Integer): Integer; virtual;
     function EdgeDistY(const E: TEntity; Delta: Integer): Integer; virtual;
 
-    { 0x00456B4C / 0x00456E0C. Real, not abstract. AgainstPlayer swaps the
-      scan from the minor slots to slot 0 alone, which is how a moving solid
-      asks whether it would push the player rather than the other way round. }
+    { AgainstPlayer restricts the collision scan to the player slot. }
     function SolidCollideX(const E: TEntity; Delta: Integer;
                            SkipSoft: Boolean;
                            AgainstPlayer: Boolean = False): Boolean; virtual;
@@ -573,14 +440,9 @@ type
     function ConfirmPressed: Boolean; virtual;
 
     function Spawn(Kind, TypeId, X, Y: Integer): Integer; virtual; abstract;
-    { 0x00461400. Real, not abstract. }
     procedure DestroyEntity(var E: TEntity; DropLoot: Boolean); virtual;
 
-    { What Entity_Destroy needs from the event system, which it reaches
-      through globals in the original. The defaults are "no event table
-      wired" - EventOpcode returning -1 means every event test is skipped -
-      which is a real configuration, not a stub: the player trace runs that
-      way on purpose. }
+    { Event hooks default to an unattached event table. }
     function EventOpcode(EventId: Integer): Integer; virtual;
     function EventProgressIndex(EventId: Integer): Integer; virtual;
     procedure BeginEvent(EventId, Arg: Integer); virtual;
@@ -597,18 +459,16 @@ type
       not otherwise reachable from a handler, so it comes through here. }
     function PlayerDifficulty: Integer; virtual;
     procedure SetSpawnField(Slot, IntIndex, Value: Integer); virtual; abstract;
-    { 0x00461874. Real, not abstract: this is the whole function. }
     procedure SpawnDebris(const E: TEntity; Kind: Integer); virtual;
 
-    { 0x004617FC. A ~30% chance of dropping a type 36. }
+    { Gives the entity a roughly 30 percent chance to drop an item. }
     procedure MaybeDropItem(const E: TEntity); virtual;
     procedure PlaySound(Id: Integer); virtual; abstract;
     { Player_Update's fall-death arm stops the music before the death
       sound - FUN_00450CBC with a fade of 0. Abstract on purpose: a
       no-op default is how the other silent-audio bugs happened. }
     procedure StopMusic; virtual; abstract;
-    { Delphi's Random(N), which the original's behaviour genuinely depends
-      on. Overridable only so a test can make a trace repeatable. }
+    { Overridable to support deterministic simulations. }
     function RandomBelow(N: Integer): Integer; virtual;
   end;
 
@@ -634,9 +494,8 @@ type
 
     procedure Clear;
 
-    { Entity_Spawn @ 0x004610C4. X and Y are logical pixels; the bias is
-      applied here. Returns the slot index, or SLOT_NONE if the kind's range is
-      full - the original drops the spawn in that case and so does this. }
+    { X and Y are logical pixels. Returns SLOT_NONE when the selected partition
+      is full. }
     function Spawn(Kind, TypeId, X, Y: Integer): Integer;
     procedure Kill(Slot: Integer);
 
@@ -651,23 +510,16 @@ type
 
     function LiveCount: Integer;
 
-    { Steer @ 0x00461738. Ticks timer TimerSlot; when it runs out, reloads it
-      with Reload, turns one step toward the PLAYER, and rewrites the velocity
-      from the direction table. Velocity is rewritten on every call, not only
-      on the tick, so an entity keeps moving between turns.
-
-      This is what establishes that slot 0 is the player: the original homes on
-      p_Entities[0] with no indirection at all, reading +0x78/+0x7C straight
-      off the array's base pointer. }
+    { Periodically turns one step toward the player, then refreshes velocity
+      from the direction table on every call. }
     procedure Steer(Slot, TimerSlot, Reload: Integer);
 
     property Alive[Index: Integer]: Boolean read GetAlive;
   end;
 
 const
-  { Verbatim from 0x0046909C. Columns are, in order:
-      +00 +04 +08 +0C +10 +14 +18 +1C +20 +24 +28 +2C +30 +34 +38 +3C +40 +44
-    +00 is -1 for the three types that need no sprite object. }
+  { Per-type defaults copied into new entities. A sprite id of -1 disables
+    sprite allocation for that type. }
   ENTITY_TYPES: array[0..ENTITY_TYPE_COUNT - 1] of TEntityType = (
     {  0 } (Raw: (    0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0)),
     {  1 } (Raw: (    0,     0,     4,     0,     0,     1,     0,     0,     0,     0,     0,    30,    20,    30,    30,     0,     0,     0)),
@@ -752,55 +604,37 @@ const
     { 80 } (Raw: (    0,     0,     2,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0))
   );
 
-{ Bounds-checked accessor; an out-of-range id yields an all-zero record rather
-  than reading past the table, which the original would happily do. }
+{ Returns an all-zero record for an unknown type id. }
 function EntityType(Id: Integer): TEntityType;
 
-{ Pixel position of an entity, with the bias removed and rounded toward zero
-  exactly as the original does. }
+{ Pixel position with the fixed-point bias removed and rounded toward zero. }
 function EntityPixelX(const E: TEntity): Integer;
 function EntityPixelY(const E: TEntity): Integer;
 
-{ Entity_IsOffScreen @ 0x004580BC. Margin is multiplied by the entity's own
-  extent, so a bigger sprite gets a proportionally bigger margin. }
+{ Margin scales with the entity extent. }
 function IsOffScreen(const E: TEntity; Margin: Integer): Boolean;
 
-{ The layer origin's pixel value. Rounds with a bare +31 for negatives and does
-  NOT remove POSITION_BIAS, unlike an entity position. }
+{ Converts a layer origin to pixels without removing POSITION_BIAS. }
 function OriginPixel(Raw: Integer): Integer;
 
-{ 0x00457150 / 0x00457228. How far the entity may move on that axis before it
-  is flush against the tile boundary it is heading for, in 1/32 pixel. Callers
-  use it to land exactly on an edge after Entity_TileCollide* reported a
-  blocker. }
+{ Distance in 1/32-pixel units to the next tile edge on each axis. }
 function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
                        Delta: Integer): Integer;
 function TileEdgeDistY(const E: TEntity; const L: TLayerInfo;
                        Delta: Integer): Integer;
 
-{ 0x0045117C. Move V toward zero by Step without ever crossing it. Used for
-  friction - the air dash bleeds off through this - and called from several
-  places rather than inlined. }
+{ Moves V toward zero by Step without crossing zero. }
 procedure ApproachZero(var V: Integer; Step: Integer);
 
-{ 0x00457300 / 0x004574DC. The first solid tile in the way of moving DeltaMain
-  along this axis, or TILE_NONE. It stops at the first tile at or above the
-  terrain's threshold rather than returning the whole span.
+{ Returns the first solid tile in the path of DeltaMain, or TILE_NONE.
 
-  It sweeps the LEADING EDGE across every tile the box spans on the other
-  axis, so a tall entity is stopped by a wall that only meets its feet.
-  DeltaCross shifts that span.
+  The leading edge is swept across every tile occupied on the other axis, with
+  DeltaCross shifting that span.
 
-  DELTA OF ZERO RETURNS TILE_NONE - the body is inside `if Delta <> 0` - so a
-  motionless entity is never blocked and can rest inside a solid tile until
-  its next non-zero velocity.
+  A zero delta returns TILE_NONE, so stationary entities are not tested.
 
-  SCROLLING chooses whether Delta is added to the layer origin or the entity
-  position. Both reach the same sum, so it changes the answer only through
-  rounding, when the two 1/32-pixel fractions straddle a pixel boundary.
-
-  The globals at 0x00484FA4/0x00484FA8 are spilled locals, not outputs -
-  nothing outside these two functions reads them. }
+  Scrolling applies DeltaMain to the layer origin instead of the entity. The
+  distinction matters when fixed-point fractions round across a pixel edge. }
 function EntityTileCollideX(const E: TEntity; const L: TLayerInfo;
                             Tiles: TTileSource; SolidThreshold: Integer;
                             DeltaX, DeltaY: Integer;
@@ -810,77 +644,51 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
                             DeltaY, DeltaX: Integer;
                             Scrolling: Boolean): Integer;
 
-{ 0x004576B4. Instant death by terrain: sweeps the tiles the entity's box
-  covers and, on the stage's kill tile, sets state 10 and clears EF_BLOCK_B so
-  the fall-death starts from its first frame.
+{ Sweeps the tiles covered by the entity and starts fall-death when it touches
+  the configured kill tile.
 
-  Camera_ApplyMoveY is the ONLY caller, so this runs on vertical movement and
-  nowhere else - falling into a pit is checked, being pushed sideways into one
-  is not.
+  This runs during vertical camera movement only. A match uses the tile's low
+  16 bits, and stops the current row scan after a hit.
 
-  Two details of the original, both kept: the match is on the low 16 bits
-  (MOVZX), so a map word above $FFFF could never match; and a hit breaks the
-  COLUMN loop only, so the state is set once per row rather than once per
-  entity - idempotent, but it is a break and not an exit.
-
-  It always returns False - the byte is written once on entry and never
-  again - so it is modelled as a procedure. Kill tile values are in
-  Stages.pas. }
+  The routine has no meaningful result, so it is represented as a procedure.
+  Kill-tile values are defined in Stages.pas. }
 procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
                                Tiles: TTileSource; KillTile: Integer);
 
-{ 0x00457F98. The entity-versus-entity hit test. It uses the
+{ Entity-to-entity collision uses the
   EF_HITBOX_INSET_* box, not the EF_BOX_OFS_* one tile collision uses;
   getting those the wrong way round would be silent and wrong.
 
-  The pixel conversion here does NOT remove POSITION_BIAS, unlike everywhere
-  else, so both boxes carry the same +2048 offset and it cancels in the
-  comparison. Tidying that away would be a real change: it only cancels
-  because BOTH sides carry it. }
+  Both boxes retain POSITION_BIAS during pixel conversion, so the shared offset
+  cancels in comparisons. }
 function EntityBox(const E: TEntity; ScaleX, ScaleY: Integer): TBox;
 function EntitiesOverlap(const A, B: TEntity;
                          ScaleX, ScaleY: Integer): Boolean;
 
-{ 0x00451354. Axis-aligned overlap of two boxes given as (L, T, R, B), with a
-  per-axis margin that shrinks the test. The original writes it as
-  separation-versus-width rather than the usual four edge comparisons; this is
-  the same predicate, kept in the original's form. }
+{ Axis-aligned overlap with a per-axis margin that shrinks the test area. }
 function RectOverlap(const A, B: TBox; ShrinkX, ShrinkY: Integer): Boolean;
 
-{ An entity position to pixels, with POSITION_BIAS removed and the rounding
-  toward zero the original uses. Exported because the event spawn walk needs
-  the same conversion for the layer origin. }
+{ Converts a biased fixed-point position to pixels, rounding toward zero. }
 function PixelOf(Raw: Integer): Integer;
 
-{ 0x0045114C. The three-way compare the game uses wherever it wants a sign:
-  -1 when B < A, 1 when A < B, 0 when equal. Called as Compare(0, X), which is
-  Sign(X). Differential-tested against the original over 25 cases. }
+{ Three-way comparison: -1 when B < A, 1 when A < B, otherwise 0. }
 function Compare(A, B: Integer): Integer;
 
-{ 0x00451164. Compare's twin, and NOT the same function - it has no zero:
-
-      if B < A then -1 else +1
-
-  Equal values return +1 rather than 0. Type 77 relies on this to choose a
-  facing instead of freezing with direction zero. }
+{ Two-way comparison. Equal values return +1, allowing callers to choose a
+  direction instead of stopping. }
 function CompareNZ(A, B: Integer): Integer;
 
-{ E.Raw[Extent] div 2, rounded toward zero the way the original's shift-and-
-  correct does it. Exported because Entity_UpdateAll halves an extent four times
-  over and must halve it identically. }
+{ Halves an extent with signed rounding toward zero. }
 function HalfExtent(V: Integer): Integer;
 
-{ 0x00402AC4. Delphi's Random(N) - the generator the game's behaviour
-  actually depends on, reproduced exactly so a run can be replayed. }
+{ Delphi-compatible Random(N), exposed for deterministic replay. }
 function DelphiRandom(N: Integer): Integer;
 
 var
-  { 0x0046E040. Delphi's RandSeed. Set it to replay a sequence. }
+  { Set this seed to replay a random sequence. }
   RandomSeed: Cardinal = 0;
 
-  { 0x0046D20C and 0x0046D210. Entity_UpdateAll clears both at the top and
-    counts as it goes: every live slot, and every live slot that also holds a
-    sprite. Nothing inside the update loop reads them back. }
+  { Updated once per frame by Entity_UpdateAll. }
   EntitiesLive:  Integer = 0;
   EntitiesDrawn: Integer = 0;
 
@@ -902,14 +710,10 @@ end;
 
 function OriginPixel(Raw: Integer): Integer;
 begin
-  { Same +31/sar pair and the same reasoning as PixelOf above - `shr` here was
-    also correct, also only because of the widening. }
   Result := Raw div (1 shl POSITION_SHIFT);
 end;
 
 
-{ E.Raw[Extent] div 2, rounded toward zero the way the original's
-  shift-and-correct does it. }
 function HalfExtent(V: Integer): Integer;
 begin
   Result := V div 2;
@@ -937,20 +741,12 @@ function TileEdgeDistX(const E: TEntity; const L: TLayerInfo;
 var
   LayerOriginPx, TileW, EntityPx, HalfWidth, EdgeWorldPx: Integer;
 begin
-  { DIVERGENCE. On a zero delta the original returns the ENTITY POINTER cast
-    to an integer - its result starts as that and is only overwritten in the
-    two signed branches. A caller reaches this only after a collision was
-    reported, which normally implies a non-zero delta; Entity_TileCollide* can
-    still report one for an entity already inside a solid tile, and then the
-    original assigns a pointer to a velocity. Not reproducible here. }
+  { A zero delta has no edge direction. }
   Result := 0;
   if Delta = 0 then
     Exit;
-  { POSITION_BIAS is deliberately NOT removed, unlike everywhere else. It is
-    0x10000 in 1/32 pixel = 2048 px = exactly 64 tiles of 32, so it displaces
-    the coordinate by a whole number of tiles and the distance to an edge is
-    unchanged. This stops being true for any tile width that does not divide
-    2048; every shipped map is 32. }
+  { POSITION_BIAS is a whole number of shipped 32-pixel tiles, so retaining it
+    does not change the distance to the next edge. }
   LayerOriginPx := OriginPixel(L.OriginX);
   TileW := L.TileW;
   if TileW = 0 then
@@ -1128,7 +924,6 @@ begin
   end;
 end;
 
-{ 0x00402AC4. Delphi's Random(N). }
 function DelphiRandom(N: Integer): Integer;
 begin
   RandomSeed := Cardinal(RandomSeed * RANDOM_MULT + 1);
@@ -1254,7 +1049,6 @@ begin
     BeginEvent(EventId, EVENT_BEGIN_FROM_DESTROY);
 end;
 
-{ Entity_SolidCollideX @ 0x00456B4C. }
 function TEntityWorld.SolidCollideX(const E: TEntity; Delta: Integer;
                                     SkipSoft: Boolean;
                                     AgainstPlayer: Boolean): Boolean;
@@ -1287,7 +1081,6 @@ begin
   MaybePushEvent(E.Raw[EF_SLOT], Blocker, AxisX);
 end;
 
-{ Entity_SolidCollideY @ 0x00456E0C. }
 function TEntityWorld.SolidCollideY(const E: TEntity; Delta: Integer;
                                     SkipSoft: Boolean;
                                     AgainstPlayer: Boolean): Boolean;
@@ -1299,8 +1092,7 @@ var
 begin
   OnTopOfSolid := False;
   Result := False;
-  { NOTE: no `Delta = 0` guard, unlike the X sweep. That is in the original
-    and it is what keeps an entity resting on a platform aware of it. }
+  { Zero-delta checks keep a resting entity aware of its supporting platform. }
   if (E.Raw[EF_ALIVE] and $FF) = 0 then
     Exit;
 
@@ -1371,7 +1163,6 @@ begin
   Result := 0;
 end;
 
-{ Entity_Destroy @ 0x00461400. }
 procedure TEntityWorld.DestroyEntity(var E: TEntity; DropLoot: Boolean);
 var
   OwnerSlot, ChildSlot, EventId, Opcode, ProgressIndex: Integer;
@@ -1431,10 +1222,7 @@ begin
     begin
       Sprites.SetVisible(E.Raw[EF_SPRITE], False);
       Sprites.SetDepth(E.Raw[EF_SPRITE], 0);
-      { The original stops here. Those two writes ARE its release - there is no
-        free call - so allocation must be reusing slots in exactly that state.
-        Saying so explicitly beats inferring a scan rule from two writes; the
-        observable behaviour is the same. }
+      { Released sprite slots are hidden and reset to neutral depth. }
       Sprites.ReleaseSprite(E.Raw[EF_SPRITE]);
     end;
     E.Raw[EF_SPRITE] := SPRITE_NONE;
@@ -1443,7 +1231,6 @@ begin
     E.Raw[EF_SPRITE] := SPRITE_NONE;
 end;
 
-{ Entity_MaybeDropItem @ 0x004617FC. }
 procedure TEntityWorld.MaybeDropItem(const E: TEntity);
 var
   DropRoll, SpawnedSlot: Integer;
@@ -1452,21 +1239,18 @@ begin
   if DropRoll <= DROP_THRESHOLD then
     Exit;
 
-  { No layer delta here, unlike Entity_SpawnDebris - the drop is placed at the
-    parent's position exactly. Whether that is deliberate or an oversight in
-    the original cannot be told from the code; it is reproduced either way. }
+  { Drops use the parent's position without compensating for layer movement. }
   SpawnedSlot := Spawn(EKIND_MINOR, DROP_TYPE,
                        E.Raw[EF_POS_X] - POSITION_BIAS,
                        E.Raw[EF_POS_Y] - POSITION_BIAS);
   if SpawnedSlot = SLOT_NONE then
-    Exit;                        { the original does not check; see SpawnDebris }
+    Exit;
 
   SetSpawnField(SpawnedSlot, EF_TIMER, DROP_TIMER);
   SetSpawnField(SpawnedSlot, EF_VEL_Y, DROP_LIFT);
   SetSpawnField(SpawnedSlot, EF_FLAG1C, Ord(DropRoll > DROP_RARE));
 end;
 
-{ Entity_SpawnDebris @ 0x00461874. }
 procedure TEntityWorld.SpawnDebris(const E: TEntity; Kind: Integer);
 var
   ParticleIndex, SpawnedSlot, HorizontalDirection, Speed: Integer;
@@ -1495,10 +1279,7 @@ begin
                          E.Raw[EF_POS_X] - POSITION_BIAS - Layer.DeltaX,
                          E.Raw[EF_POS_Y] - POSITION_BIAS - Layer.DeltaY);
 
-    { The original does NOT check this. On a full pool Entity_Spawn returns -1
-      and it writes the five particles at Entities[-1], i.e. over whatever sits
-      before the pool. Not reproduced - there is nothing to reproduce it INTO -
-      and the difference only shows on a pool that is already full. }
+    { A full minor-entity partition drops the remaining particle. }
     if SpawnedSlot = SLOT_NONE then
       Continue;
 
@@ -1554,7 +1335,7 @@ begin
       begin
         E.Raw[EF_STATE] := KILL_TILE_STATE;
         E.Raw[EF_BLOCK_B] := 0;
-        Break;                 { the COLUMN loop only, as the original does }
+        Break;                 { Continue with the next row. }
       end;
 end;
 
@@ -1684,9 +1465,7 @@ begin
   if EntityPtr^.Raw[EF_BLOCK_B + TimerSlot] < 1 then
   begin
     EntityPtr^.Raw[EF_BLOCK_B + TimerSlot] := Reload;
-    { Both positions are read in their BIASED form. The bias is identical on
-      each, so it cancels in the subtraction inside AngleBetween - which is why
-      the original can pass the raw fields straight through. }
+    { The shared position bias cancels inside AngleBetween. }
     TargetDirection := AngleBetween(
       EntityPtr^.Raw[EF_POS_X], EntityPtr^.Raw[EF_POS_Y],
       FSlots[PLAYER_SLOT].Raw[EF_POS_X], FSlots[PLAYER_SLOT].Raw[EF_POS_Y]);
@@ -1712,11 +1491,7 @@ begin
     EKIND_ACTOR:  begin First := SLOT_ACTOR_FIRST;  Last := SLOT_ACTOR_LAST;  end;
     EKIND_MINOR:  begin First := SLOT_MINOR_FIRST;  Last := SLOT_MINOR_LAST;  end;
   else
-    { DIVERGENCE DIV-003. The original leaves its range registers uninitialised
-      for any other value and scans from whatever happened to be in them.
-      Refusing is the one place this deliberately does NOT reproduce the
-      original, because reproducing it means reading uninitialised memory -
-      and uninitialised memory has no single behaviour to copy. }
+    { DIVERGENCE DIV-003: reject unknown partition kinds deterministically. }
     Exit;
   end;
 
@@ -1736,8 +1511,7 @@ begin
   E^.Raw[EF_ALIVE] := 1;
   E^.Raw[EF_TYPE]  := TypeId;
 
-  { Two loops of ten in the original, over a contiguous 20-int span - so the
-    real record almost certainly has two array[0..9] fields here. }
+  { Reset both ten-element runtime state blocks. }
   for I := 0 to EF_BLOCK_LEN - 1 do
   begin
     E^.Raw[EF_BLOCK_A + I] := 0;

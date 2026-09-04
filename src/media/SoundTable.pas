@@ -72,8 +72,8 @@ type
   TSoundNames = array[0..SOUND_COUNT - 1] of string;
 
 const
-  { Verbatim, in the original's order. Paths use a backslash exactly as the
-    binary stores them; SoundPath below converts for the host platform. }
+  { Paths retain their Windows separators; SoundPath converts them when needed
+    on another platform. }
   SoundNames: TSoundNames = (
     'wav\pi.wav', 'wav\ok.wav',
     'wav\ng.wav', 'wav\jump.wav',

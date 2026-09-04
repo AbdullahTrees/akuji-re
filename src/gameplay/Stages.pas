@@ -1,7 +1,5 @@
-{ Stage metadata loaded by Load_StageTable @ 0x004669F8 and consumed by
-  Load_Stage_Assets @ 0x00465A1C.
-
-  Each 16-column CSV row fills a 19-integer record. The non-contiguous mapping
+{ Stage metadata. Each 16-column CSV row fills a 19-integer record. The
+  non-contiguous mapping
   is part of the file format:
 
       csv[0..7]  -> rec[0..7]        csv[8..15] -> rec[11..18]
@@ -38,17 +36,12 @@ const
   STAGE_FILE_GAP_START = 8;
   STAGE_FILE_GAP_SIZE  = 3;
 
-  { Terrain_Configure @ 0x004645B0. Index 0 is a placeholder. }
+  { Index 0 is a placeholder for an unconfigured terrain. }
   TERRAIN_MAX = 9;
   TERRAIN_SOLID_THRESHOLD: array[0..TERRAIN_MAX] of Integer =
     (0, $32, $32, $3C, $32, $46, $3C, $3C, $3C, $50);
   TERRAIN_KILL_TILE: array[0..TERRAIN_MAX] of Integer =
     (0, 29, 29, 29, 29, 29, 29, 29, 29, 1000);
-
-  { The two globals Terrain_Configure writes, adjacent in BSS - which is what
-    "right beside the threshold" above means literally. }
-  ADDR_SOLID_THRESHOLD = $00484EF4;
-  ADDR_KILL_TILE       = $00484EF8;
 
   { Every frame of every track holds for the same number of ticks. }
   TERRAIN_ANIM_TICKS  = 8;
@@ -95,7 +88,7 @@ type
     property Count: Integer read GetCount;
     property Records[Index: Integer]: TStageRecord read GetRecord; default;
 
-    { The three fields whose meaning is established from the code. }
+    { Asset-set and map-layer fields. }
     property SurfaceSet[Index: Integer]: Integer read GetSurfaceSet;
     property SpriteSet[Index: Integer]: Integer read GetSpriteSet;
     property Layer[StageIndex, LayerIndex: Integer]: Integer read GetLayer;
@@ -111,8 +104,8 @@ type
   end;
 
 const
-  { Verbatim from the nine arms of Terrain_Configure @ 0x004645B0, as tile ids.
-    Index 0 is the placeholder row and terrains 5..9 declare nothing. }
+  { Tile ids for each terrain's animation tracks. Index 0 is the placeholder
+    row and terrains 5..9 declare no animation. }
   TERRAIN_ANIM: array[0..TERRAIN_MAX] of TTerrainAnim = (
     { 0 } (TrackCount: 0; Tracks: ((TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)),
                                    (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0)))),
@@ -136,8 +129,8 @@ const
                                    (TileId: 0; FrameCount: 0; Frames: (0,0,0,0,0))))
   );
 
-{ Terrain_Configure @ 0x004645B0. Valid ids set collision thresholds and may
-  define animated tile tracks. Unknown ids preserve the previous threshold
+{ Valid ids set collision thresholds and may define animated tile tracks.
+  Unknown ids preserve the previous threshold
   values, which is why those parameters are `var` rather than `out`. }
 procedure TerrainConfigure(TerrainId: Integer;
                            var SolidThreshold, KillTile: Integer;
@@ -211,7 +204,6 @@ begin
   Result := GetRecord(Index).Raw[STAGE_TERRAIN];
 end;
 
-{ Load_StageTable @ 0x004669F8. }
 function TStageTable.Load(const ADataDir: string): Integer;
 var
   Lines, Fields: TStringList;
@@ -240,8 +232,8 @@ begin
       FillChar(Stage, SizeOf(Stage), 0);
       for FieldIndex := 0 to STAGE_FIELDS - 1 do
       begin
-        { The original's gap: columns 8..15 land at 11..18, leaving 8..10 as
-          runtime scratch. }
+        { File columns 8..15 skip record fields 8..10, which are runtime
+          scratch. }
         if FieldIndex <= STAGE_FILE_GAP_START - 1 then
           RecordField := FieldIndex
         else

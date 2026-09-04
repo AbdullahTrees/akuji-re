@@ -60,11 +60,11 @@ type
       samples and is overwritten, not added to. }
     procedure MixInto(Dest: PSmallInt; Frames: Integer);
 
-    { The 0..10 scale from data\system.dat +0x24. Clamped like the original. }
+    { The 0..10 scale stored in data\system.dat. }
     property Volume: Integer read FVolume write SetVolume;
   end;
 
-{ Exposed for testing: the original's attenuation curve as a 16.16 gain. }
+{ Convert the volume setting to a 16.16 amplitude gain. }
 function VolumeToGain(Volume: Integer): Integer;
 
 implementation
@@ -115,14 +115,8 @@ begin
   end;
 end;
 
-{ 0x00466DFC. The original walks p_SoundNames once, builds one DirectSound
-  buffer per name through the component, and hangs each on the device's
-  channel list - 0x39 iterations, which is SOUND_COUNT. One buffer per
-  effect, not a voice pool; slot number and sound number are the same thing.
-
-  This was already the shape here before the address was attached to it,
-  which is why it looked like an unread function for so long: the loop is
-  the whole of it. }
+{ Load one monophonic voice for every sound slot. Slot and sound indices are
+  intentionally identical. }
 function TAudioMixer.LoadAll(const AGameDir: string): Integer;
 var
   SoundIndex: Integer;

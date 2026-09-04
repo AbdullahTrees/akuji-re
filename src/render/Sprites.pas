@@ -1,6 +1,5 @@
-{ Sprite frame-table loader (Load_Sprite_Sheets @ 0x004660B8).
-
-  Reads data\spr%.03d.dat. Each line is CommaText with seven integer fields:
+{ Sprite frame-table loader. Each line of data\spr%.03d.dat contains seven
+  integer fields:
 
       [0] surfaceIndex   into the surface table
       [1] frameWidth
@@ -68,7 +67,6 @@ begin
   Result := FFrames[Index];
 end;
 
-{ Load_Sprite_Sheets @ 0x004660B8. }
 function TSpriteSet.LoadSet(const ADataDir: string; SetIndex: Integer): Integer;
 var
   Lines, Fields: TStringList;

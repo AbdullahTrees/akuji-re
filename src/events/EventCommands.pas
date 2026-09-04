@@ -1,18 +1,13 @@
 { Parser for the event mini-language stored in ParamA and ParamB.
 
   ParamB is a PROGRAM: '/' splits steps, '.' splits the alternatives within a
-  step. Both separators are single-character literals in the binary, at
-  0x00455098 and 0x0045520C.
+  step.
 
   An alternative's leading number is a GUARD - the progress flag that has to
   be set for it to run - not a target.
 
   Command fields are zero-padded to fixed positions in the data. This parser
   splits on `-` while preserving compatible values.
-
-  Sub-opcode meanings are in the SUBOP_ constants below. Two behave unlike the
-  rest: 15 tests a counted list of flags before setting one, and 80 never
-  advances the step - it drives its own three phases and ends in GS_ENDING.
 
   Sub-opcodes 15 and 80 have special control flow: 15 consumes a counted flag
   list, while 80 owns a three-phase sequence and does not advance normally. }
@@ -27,9 +22,7 @@ uses
   SysUtils, Classes;
 
 const
-  { All from EventScript_Execute @ 0x00455210. The four with no name in the
-    original sense - 1, 6, 11, 14 - never occur in the shipped data; they are
-    listed in the header but given no constant here, since nothing uses them. }
+  { Sub-opcodes 1, 6, 11, and 14 do not occur in the shipped data. }
   SUBOP_LOAD_STAGE   = 0;
   SUBOP_DIALOGUE     = 3;    { arg[0] indexes the stage's tk file }
   SUBOP_SET_FLAG     = 4;
@@ -45,9 +38,6 @@ const
   SUBOP_WAIT         = 17;
   SUBOP_SOUL_GET     = 80;
   SUBOP_NOP          = 99;
-
-  { Kept as the old name so existing callers still compile. }
-  SUBOP_LIST = SUBOP_TEST_FLAGS;
 
   MAX_CMD_ARGS = 12;     { the widest observed is sub-op 15 with 7 }
 
@@ -117,8 +107,7 @@ type
   depends on it. }
 procedure ParseFields(const S: string; Dest: TStrings);
 
-{ ParamA. Valid is False when the leading field is not four digits or the type
-  is outside ENTITY_TYPES - the original would simply index out of bounds. }
+{ ParamA. Valid is False when the leading field is not four digits. }
 function ParseSpawn(const ParamA: string): TEventSpawn;
 
 { Classifies ParamB by looking at the text: '' or '*' is pbNone, all digits is
@@ -152,15 +141,11 @@ function CheckSpawnArity(const Sp: TEventSpawn): Boolean;
 
 { The character position and width the interpreter reads argument N from, for
   the given sub-opcode. Returns False when the sub-opcode has no argument N.
-  Positions are 1-based, matching Delphi's Copy and the addresses in the header.
-
-  This exists so --selftest-script can read the data the way the ORIGINAL does
-  and compare it against the dash-split parse. }
+  Positions are 1-based, matching Copy. }
 function ArgPosition(SubOp, Index: Integer; out Start, Len: Integer): Boolean;
 
-{ The same thing for ParamA: where Events_SpawnNearCamera copies argument
-  Index for a placement of kind Kind. False when that kind has no argument
-  there. Positions and widths are read out of the function; see the header. }
+{ The same fixed-column lookup for a ParamA placement. Returns False when the
+  placement kind has no argument at Index. }
 function SpawnArgPosition(Kind: Char; Index: Integer;
   out Start, Len: Integer): Boolean;
 
@@ -168,8 +153,7 @@ function SpawnArgPosition(Kind: Char; Index: Integer;
 function CommandCount(const Prog: TEventProgram): Integer;
 
 { The alternative a step selects for the given progress flags, or -1 when none
-  qualifies and the step does nothing. Reproduces EventScript_AdvanceStep's
-  backwards scan exactly, including that the LAST matching alternative wins. }
+  qualifies. The last matching alternative wins. }
 function SelectAlternative(const Step: TEventStep;
   const Progress: array of Byte): Integer;
 

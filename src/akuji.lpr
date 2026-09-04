@@ -21,6 +21,11 @@ uses
 { Self-tests validate data readers, gameplay invariants, and reference behavior.
   The GUI executable writes results to selftest.log beside the executable. }
 
+const
+  { Address mapping used only by reference-executable self-tests. }
+  DATA_VA_BIAS       = $00401A00;
+  PLAYER_SPRITE_BASE = $0046BB9C;
+
 { --selftest <qda> [outdir] : archive reader. }
 { Locate the 502784-byte reference executable. Size and a known data string are
   checked so differential tests cannot accidentally compare the build with
@@ -1184,8 +1189,7 @@ begin
           pbProgram: Inc(Progs);
         end;
 
-        { The shape must be the one the opcode implies. This is the check that
-          would have caught reading a bare id like '1048' as a command. }
+        { ParamB syntax must match the shape required by its opcode. }
         if (Kind = pbProgram) <> (OpcodeExpects(Ev.Opcode) = pbProgram) then
         begin
           Log.Add(Format('  stage %d event %d: opcode %d implies %s but ParamB is %s: %s',
@@ -1229,7 +1233,7 @@ begin
               Inc(BadArity);
             end;
 
-            if Cmd.SubOp = SUBOP_LIST then
+            if Cmd.SubOp = SUBOP_TEST_FLAGS then
               Inc(Lists);
 
             { Read the SAME alternative the way EventScript_Execute does - fixed
@@ -1404,11 +1408,8 @@ const
   SHEET_COLS = 10;
   TILE_PX    = 32;
 
-  { The two values every arm of 0x004645B0 writes, transcribed from the
-    disassembly rather than from the table under test. Comparing
-    TerrainConfigure's answer against TERRAIN_SOLID_THRESHOLD only says the
-    function reads the table; it says nothing about whether the table is
-    right, and a mutation that swapped two entries walked through both. }
+  { Expected values are independent of the table under test, so swapping table
+    entries cannot make both sides of the assertion change together. }
   BIN_THRESHOLD: array[1..9] of Integer =
     ($32, $32, $3C, $32, $46, $3C, $3C, $3C, $50);
   BIN_KILL: array[1..9] of Integer =
@@ -2930,7 +2931,7 @@ begin
       Log.Add('FAILED: lives exceed the maximum');
       Inc(Result);
     end;
-    if P.JumpStrength < DEFAULT_FIELD11D0 then
+    if P.JumpStrength < DEFAULT_JUMP_STRENGTH then
     begin
       Log.Add('FAILED: jump strength is below the starting value');
       Inc(Result);
@@ -3129,7 +3130,7 @@ begin
     W.Fading := False;
 
     FillChar(P, SizeOf(P), 0);
-    P.JumpStrength := DEFAULT_FIELD11D0;      { 0x68 = 104 }
+    P.JumpStrength := DEFAULT_JUMP_STRENGTH;      { 0x68 = 104 }
     P.MaxLives := 3;
     P.Lives := 3;
     P.Weapon := 0;
@@ -4881,12 +4882,8 @@ begin
       [Swept, Bad]));
     Inc(Result, Bad);
 
-    { --- the unit initialization table, re-derived from the binary --------
-      UnitInit.pas claims fifteen compiler-emitted unit init/finalize pairs,
-      all of one shape, each touching a counter that nothing reads. Every
-      part of that is checked here rather than trusted, because eight of
-      those addresses spent a long time in the backlog looking like unread
-      game logic and the claim that they are not is the whole point. }
+    { Validate the fifteen compiler-emitted unit initialization/finalization
+      pairs and their write-only counters against the reference image. }
     Bad := 0;
     if not FileExists(ExeName) then Inc(Bad);
     SetLength(Code, CODE_HI - CODE_LO);
@@ -6674,11 +6671,8 @@ end;
   each instantly. Everything else advances itself. Returns the frame count, or
   -1 if the budget was exhausted, which is the "this program hangs" answer.
 
-  The stand-in only fires when the frame did NOT advance on its own. Without
-  that it skipped steps: a save step advances into a dialogue step, and asking
-  "is the current sub-op a dialogue" straight after Execute then advanced past
-  the dialogue before it had ever run. The save point's second line went
-  missing and the trace assertion caught it. }
+  The stand-in fires only when the frame did not advance on its own, preventing
+  a newly selected dialogue step from being skipped. }
 function DriveToEnd(R: TEventRunner; Host: TEventHost; S: TEventScript;
                     var P: TPlayerState; var GS: Integer;
                     Budget: Integer): Integer;
@@ -7733,7 +7727,7 @@ begin
     Want(P2.Weapon = 2, 'Fire+ over Fire+ did not stay at 2');
 
     FillChar(P2, SizeOf(P2), 0);
-    P2.JumpStrength := DEFAULT_FIELD11D0;
+    P2.JumpStrength := DEFAULT_JUMP_STRENGTH;
     PowerUpGrant(P2, 3);
     Want(P2.JumpStrength = $84,
          Format('variant 3 left the jump at %d, want $84',
@@ -8277,10 +8271,7 @@ begin
   World := TCountingWorld.Create;
   Spr := TSpritePool.Create;
   try
-    { A SPRITE SINK, or the whole test is vacuous. Entity_Spawn only takes a
-      sprite handle when one is attached, so without this every entity spawns
-      with EF_SPRITE already -1 and "the sprite was released" is true whatever
-      the code does. The mutation harness caught exactly that. }
+    { Attach a sprite sink so the release assertion exercises a real handle. }
     Pool.Sprites := Spr;
     World.Sprites := Spr;
     World.Pool := Pool;
@@ -8848,9 +8839,7 @@ begin
       end;
     end;
 
-    { The assertions above live inside `if we found one` blocks, so if the
-      script has no such page they never run and the test passes having
-      checked nothing. These two say so out loud. }
+    { Require both page types so conditional assertions cannot pass vacuously. }
     Want(FoundKey,
          'no page in this script ended in \k - the prompt-icon assertions '
          + 'never ran');
