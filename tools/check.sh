@@ -242,6 +242,25 @@ printf '  %-22s exit=%d  %s
 [ $rc -ne 0 ] && { fail=1; sed -n '/CLAIMED BY MORE/,$p' "$SCRATCH/shadow.log" | head -14; }
 
 note ""
+note ""
+note "=== the build still emits v1.0's machine code ==="
+# This was a manual step and got skipped, which is exactly how a .text move
+# reached a commit unnoticed: check.sh was green, and green was read as
+# "the binary is unchanged". It never checked that. Debug sections are not
+# compared - renaming anything rewrites them - so this is only the seven
+# sections that become the running program.
+#
+# A FAILURE IS NOT AUTOMATICALLY A BUG, and it is never fixed with --record
+# alone. Recording adopts whatever the build now does as the truth, including
+# a regression. Establish the behaviour is right FIRST - the self-tests above
+# and tools/emudiff.py against the original's own machine code - and only then
+# re-record, saying why in the commit message.
+python "$REPO/tools/samebinary.py" > "$SCRATCH/samebin.log" 2>&1
+rc=$?
+printf '  %-22s exit=%d  %s
+' "samebinary" "$rc" "$(head -1 "$SCRATCH/samebin.log")"
+[ $rc -ne 0 ] && { fail=1; note "        --where names the functions; do NOT --record without testing"; }
+
 note "=== negative control: a wrong directory must FAIL ==="
 rm -f "$REPO/src/selftest.log"
 "$EXE" --selftest-script "$SCRATCH/definitely-not-here" > /dev/null 2>&1

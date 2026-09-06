@@ -52,7 +52,7 @@ end;
 function EmuDiff(Log: TStringList): Integer;
 var
   Src, F: TStringList;
-  I, J, Arrow, Addr, Got, Want, Bad, Ran, Faulted, NoRef: Integer;
+  I, J, Arrow, Addr, Got, Want, Bad, Ran, Faulted, NoRef, Controls: Integer;
   Line, Name: string;
   Stk: array[0..7] of Integer;
   NStk: Integer;
@@ -247,7 +247,7 @@ var
 
 begin
   Result := 0;
-  Bad := 0; Ran := 0; Faulted := 0; NoRef := 0;
+  Bad := 0; Ran := 0; Faulted := 0; NoRef := 0; Controls := 0;
   DivConfirmed := 0; DivStale := 0;
   if not FileExists(ParamStr(2)) then
   begin
@@ -302,6 +302,16 @@ begin
       GotMem := '';
       HasMem := False;
       Divergent := Key('f.div', 0);
+
+      { A negative control asks whether the emulator FAULTS, not whether the
+        two agree. Two of them sit at handler addresses and pass a wild entity
+        pointer, so comparing them would report the unmapped memory's zeroed
+        type as a disagreement. tools/emudiff.py --sanity is what judges these. }
+      if Key('f.control', 0) <> 0 then
+      begin
+        Inc(Controls);
+        Continue;
+      end;
 
       { An entity handler, dispatched generically. The emulator jumped straight
         to the address, so EF_TYPE has to agree with the type whose handler
@@ -509,6 +519,9 @@ begin
     end;
 
     Log.Add(Format('%d cases compared, %d disagree', [Ran, Bad]));
+    if Controls > 0 then
+      Log.Add(Format('%d negative controls not compared - they are judged by '
+        + 'whether they faulted', [Controls]));
     if DivConfirmed > 0 then
       Log.Add(Format('%d declared divergence(s) exercised and confirmed - the '
         + 'original really does differ there', [DivConfirmed]));

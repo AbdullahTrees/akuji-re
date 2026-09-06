@@ -351,10 +351,15 @@ def cases_handler_pure():
         # Outside 0..2 type 25 runs off its table, which DIV-010 declares we do
         # not reproduce. Tagged so those cases invert: they must differ.
         div = '' if 0 <= v <= 2 else ' f.div=10'
+        # EF_TYPE must say 16 and 25. The emulator jumps straight to the
+        # address, but our side goes through EntityRunHandler, which switches
+        # on the field - so an entity left at type 0 sends the two down
+        # different handlers. Without this every case here was refused
+        # rather than compared.
         out.append('CASE t16_v%d 0x0045A944 eax=0x%X %s %s f.variant=%d'
-                   % (v, ENTITY_AT, entity_mem(i6=v), get, v))
+                   % (v, ENTITY_AT, entity_mem(i3=16, i6=v), get, v))
         out.append('CASE t25_v%d 0x0045A4F0 eax=0x%X %s %s f.variant=%d%s'
-                   % (v, ENTITY_AT, entity_mem(i6=v), get, v, div))
+                   % (v, ENTITY_AT, entity_mem(i3=25, i6=v), get, v, div))
     return out
 
 
@@ -390,16 +395,27 @@ def cases_handler_probe():
     Every case gets a zeroed entity and a zeroed seed, so a handler that reads
     a global sees zero rather than garbage. That is not a realistic state, and
     it is not meant to be: the question here is only "does it come back".
+
+    EF_TYPE is the one exception to the zeroing. Our side reaches the handler
+    through EntityRunHandler, which switches on that field, so leaving it 0
+    while calling type N's address runs two different handlers. These cases
+    were then refused rather than compared - 78 of them - which scored as
+    disagreement and made the whole suite red.
     """
     out = ['# one call per handler, zeroed entity - reconnaissance, not a diff']
     get = 'get=0x%X:%d' % (ENTITY_AT, ENTITY_INTS * 4)
     for typ, addr in enumerate(handler_addrs()):
         if addr == 0:
             continue
+        # The seed has to be given TWICE: once as memory, which is where the
+        # original reads it, and once as f.seed, which is where ours does.
+        # Giving only the first left the two sides on different seeds, and
+        # type 46 - which picks its facing with RandomBelow on its first
+        # frame - was the one handler whose answer depended on it.
         out.append('CASE probe_t%d 0x%08X eax=0x%X edx=60 %s %s '
-                   'mem=0x%X:%s f.probe=%d'
-                   % (typ, addr, ENTITY_AT, entity_mem(), get,
-                      RANDOM_SEED_ADDR, le([1]), typ))
+                   'mem=0x%X:%s f.probe=%d f.seed=%d'
+                   % (typ, addr, ENTITY_AT, entity_mem(i3=typ), get,
+                      RANDOM_SEED_ADDR, le([1]), typ, 1))
     return out
 
 
@@ -508,9 +524,13 @@ def cases_emu_sanity():
     return [
         '# negative controls - every one of these must FAULT',
         '# a handler writing through a wild entity pointer',
-        'CASE sanity_mustfault_write 0x0045A944 eax=0x%X' % wild,
+        # f.control marks these as negative controls. They sit at handler
+        # addresses, so without it the comparison treats them as entity cases
+        # and reports the wild pointer's zeroed type as a disagreement. What
+        # is asked of them is whether they FAULT, not whether they agree.
+        'CASE sanity_mustfault_write 0x0045A944 eax=0x%X f.control=1' % wild,
         '# a handler READING through one',
-        'CASE sanity_mustfault_read 0x0045A4F0 eax=0x%X' % wild,
+        'CASE sanity_mustfault_read 0x0045A4F0 eax=0x%X f.control=1' % wild,
         '# and executing memory that is not code',
         'CASE sanity_mustfault_exec 0x%X eax=0' % wild,
     ]
