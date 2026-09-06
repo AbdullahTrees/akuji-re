@@ -91,6 +91,10 @@ const
   WEAPON_FIRE_PLUS  = 2;
   WEAPON_CHARGE     = 3;
 
+  { CAUTION: these are named for what Player.pas does with each flag, not for
+    what the game calls the pickups - its own words are closer to 'Jump++' and
+    'Bat', which do not obviously agree. The indices are certain; the labels
+    are a reading, so do not "correct" them against the in-game text. }
   ABILITY_DASH      = 4;
   ABILITY_WALLKICK  = 5;
   ABILITY_AIRDASH   = 6;

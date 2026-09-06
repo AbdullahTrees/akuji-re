@@ -362,7 +362,10 @@ begin
   Now_ := FrameClockMs;
   Elapsed := Now_ - FLastFrame;
 
-  { SoftwareVsync is shared with the options screen and loaded from settings. }
+  { SoftwareVsync must stay the shared global the options screen writes and
+    the settings load. As a field of this form it reads correctly and is never
+    updated, so the option silently does nothing and every frame is limited
+    whatever the player chose. }
   if SoftwareVsync and (Elapsed < FRAME_MS) then
   begin
     Sleep(1);        { yield instead of spinning }

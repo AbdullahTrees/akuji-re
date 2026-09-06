@@ -8004,9 +8004,14 @@ begin
 end;
 
 
-{ Verify that the contiguous sprite region and its named table views remain
-  synchronized. Several handlers may read across adjacent tables, so this is a
-  startup check rather than an optional assertion. }
+{ SPRITE_DATA and the per-type tables are two views of the same sprite region,
+  and four handlers read across a table's end into the next one. If the two
+  views ever disagree those reads go somewhere else and all four handlers are
+  wrong at once, with nothing else to notice.
+
+  Checked at startup rather than in a self-test for that reason, and `if ...
+  raise` rather than `Assert`: FPC compiles assertions out unless -Sa is
+  passed, which this project does not pass. }
 procedure CheckSpriteData;
 
   procedure Same(const Name: string; At: Integer; const Want: array of Integer);

@@ -1596,8 +1596,16 @@ begin
 end;
 
 initialization
-  { Validate packed layouts at startup; self-tests cover the individual field
-    offsets. }
+  { A layout slip misaligns every pool slot after the first, so these must
+    fail loudly. Deliberately `if ... raise` and not `Assert`: FPC compiles
+    assertions out unless -Sa is passed, which this project does not pass, so
+    an Assert here would never run.
+
+    SizeOf is constant-folded, so the compiler reports the raise as unreachable
+    while the layout is correct. That warning is the check working. Silencing
+    it by removing the guard removes the guard.
+
+    --selftest-layouts checks the individual field offsets. }
   if SizeOf(TEntity) <> ENTITY_BYTES then
     raise Exception.CreateFmt('TEntity is %d bytes; the original indexes the '
       + 'pool as base + index * %d and the layout must match',
