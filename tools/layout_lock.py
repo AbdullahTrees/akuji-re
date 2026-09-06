@@ -54,8 +54,9 @@ def annotated(rec, decl, unit):
 
 def asserted():
     """(record, field) -> offset, from the Off(...) calls in the suite."""
-    text = open(os.path.join(REPO, 'src', 'akuji.lpr'), encoding='utf-8').read()
-    i = text.find('function SelfTestLayouts')
+    text = open(unit_path(REPO, 'LayoutTests.pas'), encoding='utf-8').read()
+    # The interface declares it as well, so take the last one - the body.
+    i = text.rfind('function SelfTestLayouts')
     if i < 0:
         return None
     body = text[i:text.index('\nend;', i)]
