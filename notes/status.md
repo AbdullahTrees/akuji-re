@@ -13,7 +13,8 @@ Every number here comes from a tool in `tools/`, not from memory.
 | | | |
 |---|---|---|
 | game-layer functions with executable Pascal | 149 / 149 | `implemented.py` |
-| entity handlers differentially verified against the binary | 296 cases, 0 disagree | `emudiff.py` |
+| entity handlers differentially verified against the binary | 296 cases, 0 disagree | `emudiff.py handler_live` |
+| the FULL differential suite | 1168 cases, 0 disagree, 4 divergences confirmed | `emudiff.py` |
 | game functions tracked, one row each | 149 | `audited.md` |
 | ... read-audited and FROZEN | 15 (7 MATCHES, 8 FIXED) | `audited.py` |
 | ... EMUDIFF - entity handlers, machine-checked | 75 | `audited.py` |
@@ -29,6 +30,37 @@ Every number here comes from a tool in `tools/`, not from memory.
 `tools/check.sh` runs all of it plus a negative control and exits non-zero on
 any failure. `--emudiff` is not in it - it drives Ghidra headless for minutes -
 so run `python tools/emudiff.py handler_live` by hand after touching a handler.
+
+## OPEN: the v1.0 baseline is stale and deliberately not re-recorded
+
+`tools/samebinary.py` fails. `.text .data .rdata .pdata` all moved when the
+self-tests were split out of `akuji.lpr` into `src/selftests/`. The tool is now
+part of `tools/check.sh`, so the gate is red until this is closed.
+
+**Do not run `--record` to clear it.** Recording adopts whatever the build
+currently does as the definition of correct, including a regression. The user
+has asked to play the game first, on the grounds that automated tests do not
+establish real-world behaviour. That decision stands until they say otherwise.
+
+The evidence gathered so far, for whoever picks this up:
+
+| question | answer |
+|---|---|
+| was the baseline already stale? | no - the tree before this work builds to `7 sections match` |
+| game functions in both builds | 515 |
+| ... byte-identical | 190 |
+| ... same LENGTH, bytes differ | 325 |
+| ... **length changed** | **0** |
+| `emudiff` full suite, before vs after | identical: 1076 cases, same 94 disagreements, same 13 faults |
+| `emudiff handler_live` | 296 cases, 0 disagree, both builds |
+| `IsSelfTestMode` vs the old 18-way chain | mode sets 18 = 18, dispatcher 17 = 17 |
+
+Zero length changes across 515 functions is what a pure relocation move looks
+like: `samebinary` hashes raw body bytes, and those include relative call and
+data displacements, so moving anything rewrites nearly every function that
+calls something. It is strong evidence and it is not proof - a changed constant
+of the same width would look identical to it. What backs the behavioural claim
+is the self-tests and `emudiff`, not the byte analysis.
 
 ## How correctness is established
 
