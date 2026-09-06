@@ -343,9 +343,6 @@ type
   end;
   PEntity = ^TEntity;
 
-  { Services and shared state used by entity handlers. Tile collision returns
-    the encountered tile, while solid collision reports displacement through
-    PushX, PushY, and OnTopOfSolid. }
   { Declared ahead of TEntityWorld because Entity_Destroy reaches other
     entities by slot, and the pool is defined further down. }
   TEntityPool = class;
@@ -655,9 +652,8 @@ function EntityTileCollideY(const E: TEntity; const L: TLayerInfo;
 procedure EntityCheckKillTiles(var E: TEntity; const L: TLayerInfo;
                                Tiles: TTileSource; KillTile: Integer);
 
-{ Entity-to-entity collision uses the
-  EF_HITBOX_INSET_* box, not the EF_BOX_OFS_* one tile collision uses;
-  getting those the wrong way round would be silent and wrong.
+{ Entity-to-entity collision uses EF_HITBOX_INSET_*, while tile collision uses
+  EF_BOX_OFS_*.
 
   Both boxes retain POSITION_BIAS during pixel conversion, so the shared offset
   cancels in comparisons. }
@@ -1600,10 +1596,8 @@ begin
 end;
 
 initialization
-  { A layout slip silently misaligns every slot after the first, so fail at
-    startup. NOT Assert: FPC compiles assertions out without -Sa and this
-    project does not pass it, so an Assert here would never run.
-    --selftest-layouts checks these sizes and every field offset besides. }
+  { Validate packed layouts at startup; self-tests cover the individual field
+    offsets. }
   if SizeOf(TEntity) <> ENTITY_BYTES then
     raise Exception.CreateFmt('TEntity is %d bytes; the original indexes the '
       + 'pool as base + index * %d and the layout must match',

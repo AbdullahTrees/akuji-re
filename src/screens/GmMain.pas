@@ -14,7 +14,6 @@ uses
   Entities, GameSession, SpritePool, Dialogue;
 
 type
-  { Forward, so the host below can hold one. }
   TFrm_main = class;
 
   { Form-level adapters connect session services to streamed components. }
@@ -1278,9 +1277,7 @@ begin
     thread holds a pointer to the mixer. }
   KbgmPlayer1.Close;
   DDSD1.Close;
-  { FGameOver, FPause, FOpening and FEnding are process-lifetime helpers at
-    present. Freeing them changes the frozen runtime image, so that shutdown
-    cleanup belongs in a separately approved fidelity batch. }
+  { FGameOver, FPause, FOpening, and FEnding live for the process lifetime. }
 end;
 
 end.

@@ -1,17 +1,6 @@
 { Player controller. Tilemap, entity, sound, and camera services are accessed
-  through TPlayerWorld.
-  PF_* names describe the player's use of shared entity slots. PF_LANDED and
-  Entities.EF_RIDDEN are the same slot, 8+2, used for different things by
-  different entity types.
-
-  Player_UpdateGlide's two vertical-limit branches intentionally write the
-  horizontal velocity:
-
-      if vy >  $200 then vx :=  $200
-      if vy < -$100 then vx := -$100
-
-  The landing branch uses PF_FALL_FRAMES div 3 for both sound selection and
-  recovery duration, so longer falls also take longer to recover from. }
+  through TPlayerWorld. PF_* names describe the player's use of shared entity
+  slots; PF_LANDED and EF_RIDDEN share a slot with type-specific meanings. }
 
 unit Player;
 
@@ -225,8 +214,8 @@ begin
     E.Raw[EF_VEL_X] := -GLIDE_MAX_SPEED;
 
   E.Raw[EF_VEL_Y] := E.Raw[EF_VEL_Y] + GLIDE_GRAVITY;
-  { Compatibility quirk: both vertical-limit tests clamp horizontal velocity.
-    Changing these assignments alters braking at the top and bottom of the arc. }
+  { The vertical limits affect horizontal velocity, shaping glide braking at
+    the top and bottom of the arc. }
   if E.Raw[EF_VEL_Y] > PLAYER_TERMINAL then
     E.Raw[EF_VEL_X] := PLAYER_TERMINAL;
   if E.Raw[EF_VEL_Y] < -$100 then

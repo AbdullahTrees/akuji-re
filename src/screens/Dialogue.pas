@@ -364,8 +364,7 @@ var
   SourceText, PageText, UnusedLine: string;
   UnusedLineIndex, UnusedPosition: Integer;
 begin
-  { These unused locals preserve the v1.0 runtime image's stack/finalization
-    shape. }
+  { Reserved locals retain this routine's stack and string-lifetime layout. }
   { COPY FIRST. Update calls TakePage(FRest), and SplitPage's Rest is an out
     parameter bound to that same FRest - so the first thing SplitPage does,
     clearing Rest, would blank the string it is about to read. A const string

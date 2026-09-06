@@ -178,8 +178,7 @@ begin
   if DecodedCount = 0 then
     Log.Add('FAILED: nothing decoded at all - wrong game directory?');
 
-  { The original's attenuation curve, tabulated so it can be checked against
-    the disassembly by hand: SetVolume((10 - v) * -0x1C2), hundredths of a dB. }
+  { Report the game's attenuation curve in hundredths of a decibel. }
   Log.Add('');
   Log.Add('volume curve (settings +0x24 -> DirectSound mB -> linear gain):');
   for SoundIndex := 0 to VOLUME_MAX do
@@ -202,8 +201,7 @@ end;
   tools/parse_midi_ref.py recomputes the same numbers independently. }
 function SelfTestMidi(Log: TStrings): Integer;
 const
-  { The playlist, from the form resource; it also sits in the executable as a
-    static array[0..14] of AnsiString at VA 0x00468D14. }
+  { The playlist normally comes from the form resource. }
   PLAYLIST: array[0..14] of string = (
     'init', 'main01', 'gameover', 'boss01', 'itemget', 'open01', 'end01',
     'main02', 'open02', 'boss02', 'end02', 'soulget', 'end03', 'end04',
@@ -10505,9 +10503,8 @@ begin
   end;
 end;
 
-{ entry @ 0x0046716C. DIVERGENCE DIV-007: self-test modes exit before the
-  application initializes; normal startup creates the main form and enters its
-  idle-driven game loop. }
+{ DIVERGENCE DIV-007: self-test modes exit before application initialization;
+  normal startup creates the main form and enters its idle-driven game loop. }
 begin
   if (ParamStr(1) = '--selftest') or (ParamStr(1) = '--selftest-audio') or
      (ParamStr(1) = '--selftest-midi') or (ParamStr(1) = '--playtest') or

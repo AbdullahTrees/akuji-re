@@ -1,5 +1,4 @@
-{ Per-type entity behavior dispatched by Entity_UpdateAll. Identified names
-  follow tools/entity_names.csv; unknown types retain numeric names. }
+{ Per-type entity behavior dispatched by Entity_UpdateAll. }
 
 unit EntityHandlers;
 
@@ -42,23 +41,12 @@ const
      128,  127,  129,  130,   30,   20,   10,  120,   60,   30,
       30,   20,   10,    1,    3,    5);
 
-  { Where each unchecked table starts in it, and the row stride they all
-    share - Row*0x10 is four ints. }
+  { Offsets into the contiguous sprite region. Each row holds four integers. }
   SPRITE_ROW = 4;
   T2_AT    = ($0046BC2C - SPRITE_DATA_BASE) div 4;
   T7_AT    = ($0046BCAC - SPRITE_DATA_BASE) div 4;
   MANA_AT  = ($0046BDA0 - SPRITE_DATA_BASE) div 4;
   T38_AT   = ($0046BF24 - SPRITE_DATA_BASE) div 4;
-
-  { Four adjacent sprite tables, delimited by their pointer targets:
-
-      ptr         base        ints  used by
-      0x0046CBA0  0x0046BDA0     8  type 14, as 2 rows of 4 frames (stride 16)
-      0x0046D0E4  0x0046BDC0    16  type 24, FLAT - one sprite per variant
-      0x0046D32C  0x0046BE00     2  type 24 variant 8's two-frame animation
-      0x0046CF00  0x0046BE08     3  type 25, flat
-
-    Table extents are checked against their adjacent pointer targets. }
 
   MANA_VARIANTS = 2;
   MANA_FRAMES   = 4;
@@ -68,17 +56,9 @@ const
     ( 71,  72,  73,  72),
     (118, 119, 120, 119));
 
-  { Type 24 is a bobbing pickup with sixteen single-sprite variants.
-    in a FLAT table - stride 4, not 16; this one has no frames.
-
-    It reuses EF_FACING as a PHASE rather than a heading, adding DirVelY of it
-    and advancing one step of 64 each frame, so it traces one full period of
-    the direction table's vertical component just over a second long. Nothing
-    else in the game uses the field that way.
-
-    Variant 8 is special twice: its sprite comes from a two-frame table
-    instead, and it plays kodou.wav - Japanese for HEARTBEAT - every 61
-    frames. }
+  { Type 24 uses EF_FACING as the phase of its vertical bob. Each variant has
+    one sprite except variant 8, which alternates between two frames and plays
+    the heartbeat sound every 61 frames. }
   ITEM24_VARIANTS   = 16;
   ITEM24_TABLE_ADDR = $0046BDC0;
   ITEM24_TABLE_PTR  = $0046D0E4;
@@ -1208,15 +1188,8 @@ const
   T68_RISING_STATE = 3;
   T68_CAUGHT_STATE = 4;     { nothing in this handler ever sets it }
 
-  { Types 69 and 70. Type 69 sets Progress[the first four characters of its
-    event's ParamB] UNCONDITIONALLY - no opcode test, and after the destroy
-    rather than inside it - so it sets its flag whatever its event's opcode
-    says, which Entity_Destroy would not have done.
-
-    Type 70 watches `EF_HP <> 100`: not a threshold and not zero, so the
-    first point of damage of any size ends it. Variant 1's sprite table is
-    (0, 1, 2, 1, 1) where variant 0's is in the 434..437 range; those low
-    values are intentionally preserved. }
+  { Type 69 sets its event flag unconditionally after being destroyed. Type 70
+    is destroyed by any damage; variant 1 intentionally uses low sprite ids. }
   T69_FRAMES = 4;
   T69_TABLE_ADDR = $0046C4B8;
   T69_SPRITES: array[0..T69_FRAMES - 1] of Integer = (430, 431, 432, 433);
@@ -2125,14 +2098,10 @@ procedure EntityUpdate_Type33_Explosion(var E: TEntity; AGameState: Integer;
 procedure EntityUpdate_Type32_Emitter(var E: TEntity; AGameState: Integer;
                                       World: TEntityWorld);
 
-{ A door used to move between rooms. Interaction advances to
-  the next or previous one. One table lookup indexed by the variant. It takes
-  no game state because it does not read any. }
+{ A door used to move to the next or previous room. }
 procedure EntityUpdate_Type25_Door(var E: TEntity);
 
-{ The Akuji statue is a save point that asks before saving.
-  See SAVE_POINT_SPRITES for why it is the save point, which is not visible
-  from this function at all. }
+{ The Akuji statue is a save point that opens a confirmation prompt. }
 procedure EntityUpdate_Type27_AkujiStatue(var E: TEntity; AGameState: Integer);
 
 { Per-frame entity-pool update. }
@@ -2170,31 +2139,17 @@ const
   HANDLER_JUMP_TABLE    = $00460924;
   HANDLER_NO_ARM_TARGET = $00460DE1;
 
-  { Type 68 gets an extra Entity_PlayerTouch, outside the slot range that
-    normally gets one, whenever its EF_STATE is 3 - so one sitting in a minor
-    slot is touch-tested twice in a frame.
-
-    It is a HAZARD, not a generosity. Type 68's own table column 3 is 0, so a
-    table-spawned one has EF_TOUCH_KIND 0 and the test does nothing; the only
-    type 68 that touches the player is the one type 57's egg hatches, and the
-    EGG sets its kind to 1 - Player_TakeDamage. The extra test doubles the
-    chance of it hitting you.
-
-    State 4 is unrelated: type 69 spawns a type 68 straight into it, leaving
-    the kind at 0, so that one is harmless. Two uses of one type. }
+  { Type 68 receives an extra touch pass in state 3. Table-spawned instances
+    have touch kind 0, while type 57's hatchling uses touch kind 1 and can
+    damage the player. Type 69 instead spawns a harmless state-4 instance. }
   TYPE_TOUCH_IN_STATE_3 = $44;   { 68 }
 
 type
-  { The touch pass. This is a variable rather than a direct call for one
-    reason: --selftest-entities swaps a counting stub in to check the slot
-    boundary and the type-68 special case in isolation. It is NOT a
-    placeholder any more - the initialization section points it at the real
-    PlayerTouch. }
+  { Swappable callbacks let entity self-tests observe the interaction passes
+    without changing gameplay behavior. }
   TTouchProc = procedure(var E, Player: TEntity; var P: TPlayerState;
                          var Inp: TInputState; World: TEntityWorld);
 
-  { The projectile pass, a variable for the same reason as the touch pass:
-    so a test can count calls without needing the real thing. }
   TEntityCallback = procedure(var E: TEntity; World: TEntityWorld);
 
 var
@@ -8049,14 +8004,9 @@ begin
 end;
 
 
-{ THE REGION AND THE PER-TYPE TABLES MUST AGREE. SPRITE_DATA is the memory the
-  four unchecked handlers read through; the arrays are what each table IS. Both
-  come from the same image, and if one were ever edited without the other the
-  overruns would quietly stop matching.
-
-  Checked at startup rather than in a self-test, because a mismatch makes all
-  four of those handlers wrong and nothing else would notice. NOT Assert - FPC
-  compiles assertions out without -Sa, which this project does not pass. }
+{ Verify that the contiguous sprite region and its named table views remain
+  synchronized. Several handlers may read across adjacent tables, so this is a
+  startup check rather than an optional assertion. }
 procedure CheckSpriteData;
 
   procedure Same(const Name: string; At: Integer; const Want: array of Integer);

@@ -123,9 +123,7 @@ begin
   if (Index < 0) or (Index >= SOUND_COUNT) then
     Exit('');
   RelativePath := SoundNames[Index];
-  { On Windows the stored separator is already correct, and the compiler
-    folds the comparison away and warns about unreachable code - so make the
-    platform split explicit rather than leaving a dead runtime branch. }
+  { Stored paths already use Windows separators. }
 {$IFNDEF WINDOWS}
   RelativePath := StringReplace(RelativePath, '\', PathDelim, [rfReplaceAll]);
 {$ENDIF}

@@ -126,8 +126,7 @@ function TMidiFile.GetEvent(Index: Integer): TMidiEvent;
 begin
   if (Index < 0) or (Index >= Length(FEvents)) then
   begin
-    { Assigned field by field rather than via ClearEvent: the compiler cannot
-      see that a managed function result is already initialised, and warns. }
+    { Initialize the managed function result directly. }
     Result.Tick := 0;
     Result.TimeUs := 0;
     Result.Msg := 0;
