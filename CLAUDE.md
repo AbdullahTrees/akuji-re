@@ -231,8 +231,9 @@ something contradicted it:
    leave the FINDING in the code with a one-line pointer. Not a summary of the
    journey - the conclusion.
 
-**Keep:** an address, a measured constant, why an apparent bug is deliberate,
-a hazard invisible at the call site, how to re-check a claim.
+**Keep:** a measured constant, why an apparent bug is deliberate, a hazard
+invisible at the call site, a contract another file depends on. Addresses are
+NOT on this list - see section 3a-3.
 
 **Deleting is the second choice, not the first.** A comment pass is not a
 comment CULL. Read each comment and ask *is this discernible from the code?*
@@ -241,7 +242,7 @@ comment CULL. Read each comment and ask *is this discernible from the code?*
   `DEADZONE_LEFT/RIGHT/TOP/BOTTOM` already name twenty lines below.
 - **No** - the comment is there because the code is not saying it. **Change the
   code.** Name the constant, rename the variable, extract the helper. Only when
-  that genuinely cannot carry the fact (an address, a measurement, a hazard) does
+  that genuinely cannot carry the fact (a measurement, a hazard, a contract) does
   it stay as prose. `Entities.pas` described the type table's 18 columns in 23
   lines because `Entity_Spawn` read them as `T.Raw[0]`, `T.Raw[3 + I]`; naming
   the columns deleted the table and improved the code in one move.
@@ -251,6 +252,74 @@ Deleting an undiscernible comment does not tidy the file, it loses the fact.
 `tools/audited.py` strips `{ }`, `(* *)` and `//` before fingerprinting, so pure
 prose edits cannot trip the freeze gate. Edits that change code CAN - check
 `notes/audited.md` first, and run `tools/check.sh` either way.
+
+## 3a-3. SOURCE COMMENTS EXPLAIN THE GAME, NOT THE RECOVERY
+
+**A comment in `src/` explains how the game works. It does not explain how the
+decompilation went, where a fact came from, or why a translation choice was
+made.** Someone reading `src/` is reading a game's source code. They are not
+reading a lab notebook, and the two have been mixed together throughout.
+
+So these do NOT belong in `src/`:
+
+* **Addresses.** `Player_Update @ 0x004585A8`, `p_LastFrameTime 0x0046D1E0`,
+  `see 0x00450F14`. The address of the routine this one was translated from is
+  a fact about the recovery.
+* **Disassembly.** Quoted instructions, register names, `MOV EAX,[0x0046cc14]`.
+* **Provenance and derivation.** "read off the trace, not from the code",
+  "which is the whole reason they could be identified", "transcribed from the
+  disassembly", "the original's own once-a-second sample".
+* **The journey.** "which has caught me out", "missing all three was a
+  softlock", "believed until X contradicted it", how many passes it took.
+* **Ghidra.** What it named something, what it got wrong, what was pushed into
+  it.
+
+The finding survives; the archaeology goes with it. Rewrite, do not just
+delete - section 3a-2 still governs, and `Deleting an undiscernible comment
+does not tidy the file, it loses the fact` is still true. The rewrite states
+the fact as a property of the game:
+
+| instead of | write |
+|---|---|
+| `Overlay_Update @ 0x004568D0 stops the music and starts playlist entry 4` | `The panel is dismissed only when the music stops, so its fanfare must be started or the looping stage BGM leaves it up forever.` |
+| `the fullscreen compare is case-SENSITIVE (@LStrCmp at 0x004656D8)` | `The [disp] fullscreen compare is case-sensitive.` |
+| `0x00464D30 counts the event delay down HERE, between the two blocks` | `The event delay is counted down between the two state dispatches; the arms are mutually exclusive, so no frame runs both.` |
+
+### The exception, and it needs asking about
+
+Some recovery facts ARE load-bearing for reading the source. Those stay, phrased
+as statements about the code rather than about the binary:
+
+* **Hazards where the obvious code is wrong.** `SoftwareVsync` must be the
+  shared global, not a form field, or the options toggle is inert. The frame
+  clock's `DWord` arithmetic is deliberate - the clock wraps every 49 days and
+  the subtraction wraps with it. `Assert` is compiled out without `-Sa`, which
+  this project does not pass, so startup layout checks must be `if ... raise`.
+* **Invariants no single call site shows.** The fade must not advance while
+  paused. Entity-to-entity collision uses the hitbox inset and tile collision
+  uses the box offset; swapping them is silent.
+* **Naming caveats.** `WALLKICK`, `AIRDASH` and `GLIDE` are named for what
+  `Player.pas` does with each flag, not for the game's own words. The indices
+  are certain; the labels are a reading.
+* **Contracts across files.** `TPlayerState`'s packed layout IS `data/save.dat`.
+  The `// +0xNNN` field annotations are each backed by a runtime assertion, and
+  `tools/layout_lock.py` checks that they are.
+* **`DIVERGENCE DIV-nnn` markers**, which `tools/divergences.py` gates.
+
+**Adding to that list needs the user asked first.** It is an exception, and an
+exception that anyone may widen on their own judgement is not one.
+
+### Where the addresses went
+
+`notes/implemented_map.tsv` maps every game-layer address to the routine in
+`src/` that implements it, and `tools/implemented.py` reads it. That mapping
+used to live in the source, as an address inside the comment block immediately
+above each declaration - which is why removing those comments took the gate
+from 149 to 14 while everything still built and every self-test still passed.
+It is a file now, so reformatting `src/` cannot reach it.
+
+**When you translate a new function, add its row there.** That is where the
+address goes; it does not go above the declaration.
 
 ## 3b. Working rule: write the code as you read the disassembly
 
@@ -337,3 +406,4 @@ short enough to be read:
 | `notes/status.md` | where the work stands and what is left |
 | `notes/divergences.md` | every knowing difference from the binary |
 | `notes/function_map.md` | detailed per-function annotations |
+| `notes/implemented_map.tsv` | which Pascal routine implements each game-layer address. **Add a row when you translate a function** - see 3a-3 |

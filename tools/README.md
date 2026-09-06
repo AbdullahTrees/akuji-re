@@ -18,7 +18,7 @@ Run before every commit. These are wired into it, and a red one blocks.
 |---|---|
 | `audited.py` | a frozen function whose body changed. Fingerprints with comments stripped, so prose stays free. `--bless` rewrites the lock, and **blessing IS the approval gesture** |
 | `divergences.py` | a ledger entry with no marker in `src/`, or a marker with no entry |
-| `implemented.py` | a game function with prose but no executable Pascal |
+| `implemented.py` | a game function listed in `notes/implemented_map.tsv` whose routine has no body |
 | `layout_lock.py` | a witnessed field offset that nothing asserts at runtime |
 | `shadow_globals.py` | one address claimed by two different variables |
 | `table_extents.py` | a recorded table whose length is not pinned from OUTSIDE it |
@@ -59,7 +59,7 @@ Reach for these while working, not on a schedule.
 |---|---|
 | `table_bounds.py` | where does *this* const array end? (`table_extents.py` is the gate version: are they *all* pinned?) |
 | `coverage.py` | is every game function at least *mentioned* in `src/`? |
-| `implemented.py` | …and does it have code, rather than a comment? |
+| `implemented.py` | …and does the routine the ledger names actually have a body? |
 | `delphi6_audit.py` | what would stop this compiling under Borland Delphi 6? |
 | `x87_sim.py` | what would the original's 80-bit FPU have produced? |
 

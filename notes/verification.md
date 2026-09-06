@@ -59,7 +59,7 @@ repeating the mistake:
 | `bindiff.py` | diffs the 2003 and 2020 builds. No instruction byte differs, so every oddity in either is the author's |
 | `mutate.sh` | section 14 — the mutation harness |
 | `coverage.py` | how much of the game layer is MENTIONED anywhere in `src/` |
-| `implemented.py` | how much of it actually EXECUTES - the number that counts. `--all` lists the untouched, `--described` the ones that are still only prose |
+| `implemented.py` | how much of it actually EXECUTES - the number that counts. Reads `notes/implemented_map.tsv`; `--all` lists every row, `--missing` the ones whose routine has no body |
 
 Raw disassembly without Ghidra:
 `objdump -D -b pei-i386 -M intel --start-address=0x... akuji.exe`

@@ -1,0 +1,174 @@
+# Which Pascal routine implements each game-layer function.
+#
+# THE ADDRESS AUTHORITY is notes/game_functions.txt; this file adds the third
+# column - the routine in src/ that carries the behaviour. tools/implemented.py
+# reads it and checks each target really has a body, so a function written up
+# but never coded still fails the gate.
+#
+# WHY IT IS A FILE AND NOT A COMMENT
+#
+# This mapping used to live in src/, as an address inside the comment block
+# immediately above each declaration. Two things were wrong with that. It put
+# decompilation bookkeeping in source comments, which are for explaining how
+# the game works; and the convention was invisible to the compiler, so a
+# reformatting pass silently took the count from 149 to 14 while everything
+# still built and every self-test still passed.
+#
+# Columns, tab-separated:
+#   address     VA in akuji.exe, as it appears in notes/game_functions.txt
+#   name        the Ghidra name at that address
+#   target      unit path under src/, then the routine, qualified for a method
+#
+# One address may name a routine another address also names when the original
+# is an X/Y pair or two entry points into one body; that is expected. Adding a
+# row means the address is claimed as implemented, so add one only when the
+# behaviour is actually there.
+0x00454790	Events_SpawnNearCamera	events/EventRunner.pas:TEventRunner.SpawnNearCamera
+0x00454EF4	Event_Begin	events/EventRunner.pas:TEventRunner.StartEvent
+0x0045509C	EventScript_AdvanceStep	events/EventRunner.pas:TEventRunner.AdvanceStep
+0x00455210	EventScript_Execute	events/EventRunner.pas:TEventRunner.Execute
+0x00456038	MessageBox_Update	screens/Dialogue.pas:TDialogueBox.Update
+0x00456698	PowerUp_Show	gameplay/PlayerState.pas:PowerUpGrant
+0x004568D0	Overlay_Update	screens/Dialogue.pas:TDialogueBox.Update
+0x00456B14	UnitInit_00484FA0	UnitInit.pas:UnitInitialize
+0x00456B4C	Entity_SolidCollideX	gameplay/Entities.pas:TEntityWorld.SolidCollideX
+0x00456E0C	Entity_SolidCollideY	gameplay/Entities.pas:TEntityWorld.SolidCollideY
+0x00457150	Entity_TileEdgeDistX	gameplay/Entities.pas:TileEdgeDistX
+0x00457228	Entity_TileEdgeDistY	gameplay/Entities.pas:TileEdgeDistY
+0x00457300	Entity_TileCollideX	gameplay/Entities.pas:EntityTileCollideX
+0x004574DC	Entity_TileCollideY	gameplay/Entities.pas:EntityTileCollideY
+0x004576B4	Entity_CheckKillTiles	gameplay/Entities.pas:EntityCheckKillTiles
+0x00457880	Entity_PlayerTouch	gameplay/EntityHandlers.pas:PlayerTouch
+0x00457AB4	Entity_TakeProjectileHits	gameplay/EntityHandlers.pas:TakeProjectileHits
+0x00457F98	Entity_BoxesOverlap	gameplay/Entities.pas:EntitiesOverlap
+0x004580BC	Entity_IsOffScreen	gameplay/Entities.pas:IsOffScreen
+0x00458138	FUN_00458138	gameplay/EntityHandlers.pas:PlayerTakeDamage
+0x00458274	Entity_TouchPickup	gameplay/EntityHandlers.pas:EntityTouchPickup
+0x00458404	FUN_00458404	gameplay/EntityHandlers.pas:EntityTouchLife
+0x00458490	Entity_TouchHeal	gameplay/EntityHandlers.pas:EntityTouchHeal
+0x004585A8	Player_Update	gameplay/Player.pas:PlayerUpdate
+0x004593B0	Player_UpdateGlide	gameplay/Player.pas:UpdateGlide
+0x00459624	Player_UpdateAirDash	gameplay/Player.pas:UpdateAirDash
+0x00459828	Player_UpdateKnockback	gameplay/Player.pas:UpdateKnockback
+0x00459A0C	EntityUpdate_Type2	gameplay/EntityHandlers.pas:EntityUpdate_Type02
+0x00459C1C	Camera_ShouldScrollX	gameplay/Camera.pas:ShouldScrollX
+0x00459CD8	Camera_ShouldScrollY	gameplay/Camera.pas:ShouldScrollY
+0x00459D9C	Camera_ApplyMoveX	gameplay/Camera.pas:ApplyMoveX
+0x00459E08	Camera_ApplyMoveY	gameplay/Camera.pas:ApplyMoveY
+0x00459E7C	UnitInit_00484FBC	UnitInit.pas:UnitInitialize
+0x00459EB4	EntityUpdate_Type03	gameplay/EntityHandlers.pas:EntityUpdate_Type03
+0x00459F1C	EntityUpdate_Type04	gameplay/EntityHandlers.pas:EntityUpdate_Type04
+0x00459F6C	EntityUpdate_Type05	gameplay/EntityHandlers.pas:EntityUpdate_Type05
+0x0045A020	EntityUpdate_Type06	gameplay/EntityHandlers.pas:EntityUpdate_Type06
+0x0045A08C	EntityUpdate_Type07	gameplay/EntityHandlers.pas:EntityUpdate_Type07
+0x0045A0E4	EntityUpdate_Type08	gameplay/EntityHandlers.pas:EntityUpdate_Type08
+0x0045A120	EntityUpdate_Type09	gameplay/EntityHandlers.pas:EntityUpdate_Type09
+0x0045A184	EntityUpdate_Type10	gameplay/EntityHandlers.pas:EntityUpdate_Type10
+0x0045A1C0	EntityUpdate_Type11	gameplay/EntityHandlers.pas:EntityUpdate_Type11
+0x0045A20C	EntityUpdate_Type12	gameplay/EntityHandlers.pas:EntityUpdate_Type12
+0x0045A24C	EntityUpdate_Type13	gameplay/EntityHandlers.pas:EntityUpdate_Type13
+0x0045A3E0	EntityUpdate_Type14	gameplay/EntityHandlers.pas:EntityUpdate_Type14_ManaStone
+0x0045A43C	EntityUpdate_Type24	gameplay/EntityHandlers.pas:EntityUpdate_Type24_PowerOrb
+0x0045A4F0	EntityUpdate_Type25	gameplay/EntityHandlers.pas:EntityUpdate_Type25_Door
+0x0045A50C	EntityUpdate_Type26	gameplay/EntityHandlers.pas:EntityUpdate_Type26
+0x0045A540	EntityUpdate_Type27	gameplay/EntityHandlers.pas:EntityUpdate_Type27_AkujiStatue
+0x0045A580	EntityUpdate_Type28	gameplay/EntityHandlers.pas:EntityUpdate_Type28
+0x0045A5D4	EntityUpdate_Type32_Emitter	gameplay/EntityHandlers.pas:EntityUpdate_Type32_Emitter
+0x0045A698	EntityUpdate_Type33_Explosion	gameplay/EntityHandlers.pas:EntityUpdate_Type33_Explosion
+0x0045A7BC	EntityUpdate_Type36_FallingItem	gameplay/EntityHandlers.pas:EntityUpdate_Type36_FallingItem
+0x0045A848	EntityUpdate_Type37	gameplay/EntityHandlers.pas:EntityUpdate_Type37_BossKey
+0x0045A944	EntityUpdate_Type16	gameplay/EntityHandlers.pas:EntityUpdate_Type16_InfoSign
+0x0045A95C	EntityUpdate_Type15	gameplay/EntityHandlers.pas:EntityUpdate_Type15_Switch
+0x0045A9D0	EntityUpdate_Type19	gameplay/EntityHandlers.pas:EntityUpdate_Type17
+0x0045A9D4	EntityUpdate_Type17	gameplay/EntityHandlers.pas:EntityUpdate_Type17
+0x0045AA10	EntityUpdate_Type21	gameplay/EntityHandlers.pas:EntityUpdate_Type21_WingedHorseBlock
+0x0045AA60	EntityUpdate_Type22	gameplay/EntityHandlers.pas:EntityUpdate_Type22_SpikeBall
+0x0045AA78	EntityUpdate_Type23_Torch	gameplay/EntityHandlers.pas:EntityUpdate_Type23_Candle
+0x0045AB64	EntityUpdate_Type29	gameplay/EntityHandlers.pas:EntityUpdate_Type29_Mon_MidoriMonster
+0x0045ABD8	EntityUpdate_Type30	gameplay/EntityHandlers.pas:EntityUpdate_Type30_Akuji
+0x0045AC94	EntityUpdate_Type31	gameplay/EntityHandlers.pas:EntityUpdate_Type31_Boss_MurasakiLizard
+0x0045AF2C	EntityUpdate_Type34	gameplay/EntityHandlers.pas:EntityUpdate_Type34
+0x0045AFA8	EntityUpdate_Type35	gameplay/EntityHandlers.pas:EntityUpdate_Type35
+0x0045B0CC	EntityUpdate_Type38	gameplay/EntityHandlers.pas:EntityUpdate_Type38_Mon_AkuNeko
+0x0045B260	EntityUpdate_Type39	gameplay/EntityHandlers.pas:EntityUpdate_Type39
+0x0045B3B4	UnitInit_00484FC4	UnitInit.pas:UnitInitialize
+0x0045B3EC	EntityUpdate_Type40	gameplay/EntityHandlers.pas:EntityUpdate_Type40_PoyoPoyo
+0x0045B62C	EntityUpdate_Type41	gameplay/EntityHandlers.pas:EntityUpdate_Type41_Mon_TondaCricket
+0x0045B7C4	EntityUpdate_Type42	gameplay/EntityHandlers.pas:EntityUpdate_Type42_Boss_TealBlobSlammer
+0x0045BBD8	EntityUpdate_Type43	gameplay/EntityHandlers.pas:EntityUpdate_Type43_GashiGashi
+0x0045BC00	EntityUpdate_Type44	gameplay/EntityHandlers.pas:EntityUpdate_Type44
+0x0045BC8C	UnitInit_00484FC8	UnitInit.pas:UnitInitialize
+0x0045BCC4	EntityUpdate_Type45	gameplay/EntityHandlers.pas:EntityUpdate_Type45_Block_NukeNuke
+0x0045BD9C	EntityUpdate_Type46	gameplay/EntityHandlers.pas:EntityUpdate_Type46_Mon_Bat
+0x0045BF58	EntityUpdate_Type47	gameplay/EntityHandlers.pas:EntityUpdate_Type47_Mon_PinkSquid
+0x0045C0F4	EntityUpdate_Type48	gameplay/EntityHandlers.pas:EntityUpdate_Type48
+0x0045C250	EntityUpdate_Type49	gameplay/EntityHandlers.pas:EntityUpdate_Type49_Mon_Water
+0x0045C430	EntityUpdate_Type50	gameplay/EntityHandlers.pas:EntityUpdate_Type50_Mon_Turtle
+0x0045C608	EntityUpdate_Type51	gameplay/EntityHandlers.pas:EntityUpdate_Type51_Mon_Ghost
+0x0045C678	EntityUpdate_Type52_Boss	gameplay/EntityHandlers.pas:EntityUpdate_Type52_Boss_FireLion
+0x0045CA28	EntityUpdate_Type53	gameplay/EntityHandlers.pas:EntityUpdate_Type53
+0x0045CAD8	EntityUpdate_Type54_Boss2	gameplay/EntityHandlers.pas:EntityUpdate_Type54_Boss_FloatingMagician
+0x0045CC98	EntityUpdate_Type55_Fireball	gameplay/EntityHandlers.pas:EntityUpdate_Type55
+0x0045CE78	EntityUpdate_Type56	gameplay/EntityHandlers.pas:EntityUpdate_Type56_Mon_AkaiKinoko
+0x0045D00C	EntityUpdate_Type57_ByVariant	gameplay/EntityHandlers.pas:EntityUpdate_Type57
+0x0045D598	EntityUpdate_Type58	gameplay/EntityHandlers.pas:EntityUpdate_Type58_Mon_NiseMana
+0x0045D670	EntityUpdate_Type59	gameplay/EntityHandlers.pas:EntityUpdate_Type59_Mon_RedEye
+0x0045D7D8	EntityUpdate_Type60_Walker	gameplay/EntityHandlers.pas:EntityUpdate_Type60_Mon_Golem
+0x0045DA28	EntityUpdate_Type61_Fleer	gameplay/EntityHandlers.pas:EntityUpdate_Type61_Mon_HenaHena
+0x0045DC84	EntityUpdate_Type62_Walker	gameplay/EntityHandlers.pas:EntityUpdate_Type62_Mon_PenguinHeishi
+0x0045DDF4	EntityUpdate_Type63	gameplay/EntityHandlers.pas:EntityUpdate_Type63_Mon_PenguinKnife
+0x0045E030	EntityUpdate_Type64	gameplay/EntityHandlers.pas:EntityUpdate_Type64_SpikePress
+0x0045E25C	EntityUpdate_Type65	gameplay/EntityHandlers.pas:EntityUpdate_Type65_Mon_DorDor
+0x0045E4EC	EntityUpdate_Type66_AnchorAndSatellite	gameplay/EntityHandlers.pas:EntityUpdate_Type66_GiantBall
+0x0045E714	EntityUpdate_Type67_EggLayer	gameplay/EntityHandlers.pas:EntityUpdate_Type67_Mon_TurtleBomb
+0x0045EA40	EntityUpdate_Type68	gameplay/EntityHandlers.pas:EntityUpdate_Type68
+0x0045EB1C	EntityUpdate_Type69_Pushable	gameplay/EntityHandlers.pas:EntityUpdate_Type69_GoroGoro
+0x0045EC4C	EntityUpdate_Type70	gameplay/EntityHandlers.pas:EntityUpdate_Type70_AngrySwitch
+0x0045ED50	UnitInit_00484FD4	UnitInit.pas:UnitInitialize
+0x0045ED88	EntityUpdate_Type71	gameplay/EntityHandlers.pas:EntityUpdate_Type71_BouncyCat
+0x0045EFC8	EntityUpdate_Type72	gameplay/EntityHandlers.pas:EntityUpdate_Type72
+0x0045F218	FUN_0045f218	gameplay/EntityHandlers.pas:EntityUpdate_Type73_Boss_MidoriLizard
+0x0045F498	EntityUpdate_Type74	gameplay/EntityHandlers.pas:EntityUpdate_Type74
+0x0045F668	EntityUpdate_Type75	gameplay/EntityHandlers.pas:EntityUpdate_Type75
+0x0045F744	FUN_0045f744	gameplay/EntityHandlers.pas:EntityUpdate_Type76_SpikePress_Lev
+0x0045F824	UnitInit_00484FD8	UnitInit.pas:UnitInitialize
+0x0045F85C	EntityUpdate_Type77	gameplay/EntityHandlers.pas:EntityUpdate_Type77_Boss_Hero
+0x0046023C	EntityUpdate_Type78	gameplay/EntityHandlers.pas:EntityUpdate_Type78
+0x004603B4	EntityUpdate_Type79	gameplay/EntityHandlers.pas:EntityUpdate_Type79
+0x004607E8	EntityUpdate_Type80	gameplay/EntityHandlers.pas:EntityUpdate_Type80_Fx_ArenaEmber
+0x00460884	UnitInit_00484FDC	UnitInit.pas:UnitInitialize
+0x004608BC	Entity_UpdateAll	gameplay/EntityHandlers.pas:EntityRunHandler
+0x004610C4	Entity_Spawn	gameplay/Entities.pas:TEntityPool.Spawn
+0x00461400	Entity_Destroy	gameplay/Entities.pas:TEntityWorld.DestroyEntity
+0x004615A8	Entity_UpdateDying	gameplay/EntityHandlers.pas:EntityUpdateDying
+0x00461738	Entity_SteerToPlayer	gameplay/Entities.pas:TEntityPool.Steer
+0x004617FC	Entity_MaybeDropItem	gameplay/Entities.pas:TEntityWorld.MaybeDropItem
+0x00461874	Entity_SpawnDebris	gameplay/Entities.pas:TEntityWorld.SpawnDebris
+0x00461A0C	UnitInit_00484FE0	UnitInit.pas:UnitInitialize
+0x00461A44	GameOver_Update	screens/Title.pas:TGameOverScreen.Update
+0x00461BA8	HUD_Draw	screens/GmMain.pas:TFrm_main.DrawHud
+0x00461EE4	PauseMenu_Update	screens/Title.pas:TPauseMenu.Update
+0x0046214C	Title_Init	screens/GmMain.pas:TFrm_main.TitleInit
+0x00462210	Stage_Begin	gameplay/GameSession.pas:TGameSession.BeginStage
+0x00462330	Title_MainMenu	screens/Title.pas:TTitleScreen.Update
+0x00462F40	Game_StartOrLoad	gameplay/PlayerState.pas:GameStartOrLoad
+0x00463154	Opening_Update	screens/Opening.pas:TOpeningScreen.Update
+0x00463624	Ending_Update	screens/Ending.pas:TEndingScreen.Update
+0x00464484	Ending_ShowPicture	screens/GmMain.pas:TFrm_main.EndingPicture
+0x004645B0	Terrain_Configure	gameplay/Stages.pas:TerrainConfigure
+0x00464D30	TFrm_main_AppIdle	screens/GmMain.pas:TFrm_main.AppIdle
+0x004653C8	GameState_Reset	gameplay/GameSession.pas:TGameSession.ResetState
+0x00465584	TFrm_main_DDDD1Init	screens/GmMain.pas:TFrm_main.DDDD1Init
+0x00465A1C	Load_Stage_Assets	screens/GmMain.pas:TFrm_main.LoadStage
+0x00465B50	Load_Event_Scripts	events/EventScripts.pas:TEventScript.Load
+0x00465E9C	Load_Surface_Textures	render/Surfaces.pas:TSurfaceSet.LoadSet
+0x004660B8	Load_Sprite_Sheets	render/Sprites.pas:TSpriteSet.LoadSet
+0x00466340	Load_Map	render/TileMaps.pas:TTileMap.LoadFromFile
+0x004665C8	TFrm_main_FormKeyDown	screens/GmMain.pas:TFrm_main.FormKeyDown
+0x00466644	TFrm_main_FormDestroy	screens/GmMain.pas:TFrm_main.FormDestroy
+0x00466888	Debug_DrawOverlay	screens/GmMain.pas:TFrm_main.DrawDebugOverlay
+0x004669F8	Load_StageTable	gameplay/Stages.pas:TStageTable.Load
+0x00466C78	Display_SetFullScreen	screens/GmMain.pas:TFrm_main.SetFullScreen
+0x00466DFC	Sounds_LoadAll	media/AudioMixer.pas:TAudioMixer.LoadAll
+0x00466E4C	Input_ConfirmPressed	gameplay/GameState.pas:ConfirmPressed
+0x0046716C	entry	akuji.lpr:program block
