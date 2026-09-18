@@ -2,6 +2,17 @@
 *.lock
 *.lock~
 
+# Ghidra scratch inside the project database. These are transient: Ghidra
+# deletes and recreates them as it saves, so a commit catches whatever happened
+# to be on disk. tmp*.ps is a FULL copy of the database - 12.9 MB of the 39 MB
+# a snapshot used to cost - and the one that was committed had already been
+# deleted by Ghidra before anyone pushed it.
+#
+# If a fresh clone ever fails to open the project, these are the first thing to
+# un-ignore; nothing else here depends on them.
+ghidra/**/tmp*.ps
+ghidra/**/*.grf
+
 # ignore the game folder
 English Translated Version 1.1 (D)/
 
