@@ -1,8 +1,9 @@
 # Akuji the Demon — Project Brief
 
-Reconstructing the source of a 1998 Japanese doujin game from `akuji.exe`. The
-original source was never released. The output is **the** source, rebuilt in
-Object Pascal — cross-platform because Free Pascal is, not via any porting layer.
+Reconstructing the source of a Japanese doujin game, released around 2001, from
+`akuji.exe`. The original source was never released. The output is **the**
+source, rebuilt in Object Pascal — cross-platform because Free Pascal is, not via
+any porting layer.
 
 Read sections 1–4 before touching anything.
 

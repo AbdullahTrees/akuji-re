@@ -1,8 +1,9 @@
 # Akuji the Demon — source reconstruction
 
 Rebuilding the source of **Akuji the Demon**, a Japanese doujin action-platformer
-for Windows written in Borland Delphi. The original source was never released.
-This repository reconstructs it from `akuji.exe`, in Object Pascal.
+for Windows, written in Borland Delphi and released around 2001. Its source was
+never published; this repository reconstructs it from `akuji.exe`, in Object
+Pascal.
 
 The output *is* the source: it compiles with Free Pascal and Lazarus, and it is
 cross-platform because Free Pascal is — not through a porting layer. There is no
