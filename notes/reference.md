@@ -12,7 +12,7 @@ The rules live in CLAUDE.md. The per-function audit lives in notes/audited.md.
 Ghidra cannot emit Pascal; there is no transpiler. Translation is manual, but:
 
 **The form design is recovered verbatim.** Delphi embeds it as a `TPF0` resource.
-Decoded to `notes/Frm_main.dfm` (archival) and `src/GmMain.lfm` (working). It gave
+Decoded to `notes/Frm_main.dfm` (archival) and `src/screens/GmMain.lfm` (working). It gave
 up real identifiers — use them:
 
 - unit `GmMain`, class `TFrm_main` (86 published props, 744-byte instance),

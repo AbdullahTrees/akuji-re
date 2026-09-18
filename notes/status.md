@@ -16,16 +16,16 @@ Every number here comes from a tool in `tools/`, not from memory.
 | entity handlers differentially verified against the binary | 296 cases, 0 disagree | `emudiff.py handler_live` |
 | the FULL differential suite | 1168 cases, 0 disagree, 4 divergences confirmed | `emudiff.py` |
 | game functions tracked, one row each | 149 | `audited.md` |
-| ... read-audited and FROZEN | 15 (7 MATCHES, 8 FIXED) | `audited.py` |
+| ... read-audited and FROZEN | 34 across all three tables (9 MATCHES, 3 FIXED in the game table) | `audited.py` |
 | ... EMUDIFF - entity handlers, machine-checked | 75 | `audited.py` |
-| ... UNVERIFIED - unproven, not suspect | 59 | `audited.py --list` |
+| ... UNVERIFIED - unproven, not suspect | 47 | `audited.py --list` |
 | const tables pinned to the image by VALUE | 187 | `--selftest-entities` |
 | table lengths corroborated from OUTSIDE the table | 171 / 180 | `table_extents.py` |
-| behavioural self-tests / assertions | 13 modes, 218 | `check.sh` |
-| stages in the gate, incl. a negative control | 13 | `check.sh` |
-| declared divergences | 12 (4 B, 4 C, 4 D) | `divergences.py` |
-| recorded mutations | 117 across 5 spec files | `mutate.sh` |
-| Delphi 6 hard blockers | 135 | `delphi6_audit.py` |
+| behavioural self-test modes | 14 | `check.sh` |
+| stages in the gate, incl. a negative control | 15 | `check.sh` |
+| declared divergences | 15 (7 B, 4 C, 4 D) | `divergences.py` |
+| recorded mutations | 136 across 5 spec files | `mutate.sh` |
+| Delphi 6 hard blockers | 207 | `delphi6_audit.py` |
 
 `tools/check.sh` runs all of it plus a negative control and exits non-zero on
 any failure. `--emudiff` is not in it - it drives Ghidra headless for minutes -
@@ -100,9 +100,9 @@ for one global declared twice, `audited.py` for the ledger.
 3. **Verify `runner.txt` and `startup.txt`** (62 mutations). They carry no
    `# selftest:` header and so run under the harness default, which is what
    made `menus.txt` report six real defects as SURVIVED.
-4. **Split out `akujitest.lpr`.** `akuji.lpr` is 9,521 lines, mostly tests
-   compiled into the shipped binary (DIV-007), and a prerequisite for a clean
-   Delphi 6 port.
+4. ~~**Split out the self-tests.**~~ Done. `akuji.lpr` is 32 lines; the
+   harness is twelve units under `src/selftests/`. They are still compiled
+   into the shipped binary (DIV-007).
 5. **The Delphi 6 port.** 135 mechanical blockers, plus the two things no regex
    sees: the component layer standing in for a DirectX suite, and the Lazarus
    `.lfm` where Delphi wants the `.dfm` we already hold decoded.

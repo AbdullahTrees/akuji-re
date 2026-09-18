@@ -27,13 +27,14 @@ Run before every commit. These are wired into it, and a red one blocks.
 | `check_function_map.py` | `function_map.md` drifting from `game_functions.txt` |
 | `x87_sim.py` | `ScaleByPercent` disagreeing with an exact rational model of the FPU |
 | `javac_check.sh` | a Ghidra script that no longer compiles |
+| `samebinary.py` | the build no longer emitting v1.0's machine code. It was a manual step until a `.text` move reached a commit unnoticed - a green gate was read as "the binary is unchanged", which it never checked |
 
 ## Proving the reconstruction against the original
 
 | tool | when |
 |---|---|
 | `emudiff.py` | **the strongest evidence available.** Runs the ORIGINAL's machine code under Ghidra emulation and requires the Pascal to agree. `handler_live` is the entity-handler sweep — 296 cases. Re-run after touching any `EMUDIFF` row |
-| `samebinary.py` | **the v1.0 constraint.** Did `.text` move? `--where` names the functions. See `notes/v1.0_handover.md` |
+| `samebinary.py` | **the v1.0 constraint**, and part of the gate. Did `.text` move? `--where` names the functions. A failure is never cleared with `--record` alone - that adopts whatever the build now does, regressions included. See `notes/v1.0_handover.md` |
 | `bindiff.py` | did any INSTRUCTION change between two builds of `akuji.exe` |
 | `mutate.sh` | break the game deliberately and check the tests notice. **Read CLAUDE.md §3c first — never leave a mutant binary on disk** |
 | `make_trace.py` | generate a Frida script to trace the ORIGINAL while it runs |
@@ -70,6 +71,12 @@ Reach for these while working, not on a schedule.
 | `zoo.py` | rebuild stage 1 as a zoo: one of every entity a sprite set can draw, each in a cage with a sign. `--install <dir> <set>` / `--restore <dir>` |
 | `apply_entity_names.py` | push `entity_names.csv` into the Pascal and print the Ghidra renames |
 | `entity_names.csv` | **the source of truth for entity names.** Edit this, then run the above |
+
+## Shared by the other tools
+
+| tool | what it is for |
+|---|---|
+| `source_tree.py` | locating source files without hard-coding which category folder they sit in. Imported by the tools above; not run directly. It is why moving a unit between `src/` folders does not break them |
 
 ## Baselines (data, not tools)
 
